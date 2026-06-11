@@ -1,0 +1,13 @@
+# Local Pi runtime state
+.atl/
+
+# Go
+*.exe
+*.test
+*.out
+vendor/
+.vscode/
+.idea/
+
+# Binary
+skillvault

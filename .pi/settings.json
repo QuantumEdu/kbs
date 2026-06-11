@@ -1,0 +1,30 @@
+{
+	"subagents": {
+		"agentOverrides": {
+			"context-builder": {
+				"model": "deepseek/deepseek-v4-flash"
+			},
+			"delegate": {
+				"model": "deepseek/deepseek-v4-flash"
+			},
+			"oracle": {
+				"model": "deepseek/deepseek-v4-flash"
+			},
+			"planner": {
+				"model": "deepseek/deepseek-v4-flash"
+			},
+			"researcher": {
+				"model": "deepseek/deepseek-v4-flash"
+			},
+			"reviewer": {
+				"model": "deepseek/deepseek-v4-flash"
+			},
+			"scout": {
+				"model": "deepseek/deepseek-v4-flash"
+			},
+			"worker": {
+				"model": "deepseek/deepseek-v4-flash"
+			}
+		}
+	}
+}
