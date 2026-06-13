@@ -5,7 +5,6 @@ import (
 	"strings"
 )
 
-// NotFoundError is returned when a resource is not found.
 type NotFoundError struct {
 	Resource string
 	ID       string
@@ -15,9 +14,6 @@ func (e *NotFoundError) Error() string {
 	return fmt.Sprintf("%s %q not found", e.Resource, e.ID)
 }
 
-// NormalizeTags applies tag normalization rules: trim whitespace, lowercase,
-// replace spaces with dashes, reject empty strings, and deduplicate.
-// Returns nil for nil input.
 func NormalizeTags(tags []string) []string {
 	if tags == nil {
 		return nil
@@ -38,16 +34,38 @@ func NormalizeTags(tags []string) []string {
 	return result
 }
 
-// ValidateEntryType checks if the string is a valid entry type.
 func ValidateEntryType(t string) error {
 	et := EntryType(t)
 	if !et.IsValid() {
-		return fmt.Errorf("invalid entry type: %q (expected one of: skill, agent, workflow, prompt, context, note)", t)
+		return fmt.Errorf("invalid entry type: %q (expected one of: prompt, skill, workflow_note, reference, user, feedback, project_state, session, decision, artifact_summary)", t)
 	}
 	return nil
 }
 
-// ValidateSearchQuery checks the search query fields for validity.
+func ValidateStatus(s string) error {
+	st := Status(s)
+	if !st.IsValid() {
+		return fmt.Errorf("invalid status: %q (expected one of: draft, active, archived, deprecated, canonical)", s)
+	}
+	return nil
+}
+
+func ValidateArtifactType(t string) error {
+	at := ArtifactType(t)
+	if !at.IsValid() {
+		return fmt.Errorf("invalid artifact type: %q (expected one of: markdown, json, txt, html, pdf_reference, ai_output, pdf_analysis, spec, report, session_output)", t)
+	}
+	return nil
+}
+
+func ValidateRelationType(t string) error {
+	rt := RelationType(t)
+	if !rt.IsValid() {
+		return fmt.Errorf("invalid relation type: %q (expected one of: references, supersedes, related_to, part_of, derived_from, implements)", t)
+	}
+	return nil
+}
+
 func ValidateSearchQuery(q SearchQuery) error {
 	if q.Type != nil {
 		if err := ValidateEntryType(*q.Type); err != nil {
@@ -60,42 +78,18 @@ func ValidateSearchQuery(q SearchQuery) error {
 	return nil
 }
 
-// ValidateSeriesScope validates that an entry can be added to a series
-// based on the scope rules:
-// - Global series accepts only global entries
-// - Project series accepts global entries or same-project entries
-// - Cross-project entries are rejected
 func ValidateSeriesScope(seriesProjectID, entryProjectID *string) error {
-	// No series project = global series
 	if seriesProjectID == nil {
-		// Global series can only contain global entries
 		if entryProjectID != nil {
 			return fmt.Errorf("global series cannot contain project entries")
 		}
 		return nil
 	}
-
-	// Project series
 	if entryProjectID == nil {
-		// Project series can contain global entries
 		return nil
 	}
-
-	// Both have projects — must be the same
 	if *seriesProjectID != *entryProjectID {
 		return fmt.Errorf("series belongs to project %q, cannot contain entry from project %q", *seriesProjectID, *entryProjectID)
-	}
-
-	return nil
-}
-
-// ValidateStepNumbers checks that the step numbers are sequential starting from 1 with no gaps.
-func ValidateStepNumbers(steps []int) error {
-	for i, step := range steps {
-		expected := i + 1
-		if step != expected {
-			return fmt.Errorf("step numbers must be sequential from 1: expected %d at position %d, got %d", expected, i, step)
-		}
 	}
 	return nil
 }

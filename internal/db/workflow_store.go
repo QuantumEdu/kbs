@@ -2,42 +2,89 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
-// UpsertWorkflowSteps replaces all workflow steps for an entry with the given steps.
-// Steps are stored with sequential step_num starting from the values provided.
-func (s *sqliteWorkflowStore) UpsertWorkflowSteps(ctx context.Context, entryID string, steps []domain.WorkflowStep) error {
+func (s *sqliteWorkflowStore) Save(ctx context.Context, w domain.Workflow, steps []domain.WorkflowStep) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, "DELETE FROM workflow_steps WHERE entry_id = ?", entryID); err != nil {
+	if w.Status == "" {
+		w.Status = domain.StatusActive
+	}
+	if w.Slug == "" {
+		w.Slug = w.Name
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO workflows (id, name, slug, description, status, updated_at)
+		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(id) DO UPDATE SET
+			name=excluded.name,
+			slug=excluded.slug,
+			description=excluded.description,
+			status=excluded.status,
+			updated_at=CURRENT_TIMESTAMP
+	`, w.ID, w.Name, w.Slug, w.Description, string(w.Status))
+	if err != nil {
+		return fmt.Errorf("save workflow: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM workflow_steps WHERE workflow_id = ?", w.ID); err != nil {
 		return fmt.Errorf("delete old steps: %w", err)
 	}
 
 	for _, step := range steps {
+		required := 0
+		if step.Required {
+			required = 1
+		}
 		_, err := tx.ExecContext(ctx,
-			"INSERT INTO workflow_steps (entry_id, step_num, role, content, label) VALUES (?, ?, ?, ?, ?)",
-			entryID, step.StepNum, string(step.Role), step.Content, step.Label,
-		)
+			`INSERT INTO workflow_steps (workflow_id, order_index, title, instruction, required, expected_output)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			w.ID, step.OrderIndex, step.Title, step.Instruction, required, step.ExpectedOutput)
 		if err != nil {
-			return fmt.Errorf("insert step %d: %w", step.StepNum, err)
+			return fmt.Errorf("insert step %d: %w", step.OrderIndex, err)
 		}
 	}
 
 	return tx.Commit()
 }
 
-// GetWorkflowSteps returns all steps for a workflow entry, ordered by step_num.
-func (s *sqliteWorkflowStore) GetWorkflowSteps(ctx context.Context, entryID string) ([]domain.WorkflowStep, error) {
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, entry_id, step_num, role, content, COALESCE(label,'') FROM workflow_steps WHERE entry_id = ? ORDER BY step_num",
-		entryID)
+func (s *sqliteWorkflowStore) Get(ctx context.Context, id string) (domain.Workflow, error) {
+	var w domain.Workflow
+	var description sql.NullString
+	var status string
+
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, name, slug, description, status
+		FROM workflows WHERE id = ? OR slug = ?
+	`, id, id).Scan(&w.ID, &w.Name, &w.Slug, &description, &status)
+	if err == sql.ErrNoRows {
+		return w, fmt.Errorf("workflow %q not found", id)
+	}
+	if err != nil {
+		return w, fmt.Errorf("get workflow: %w", err)
+	}
+
+	w.Status = domain.Status(status)
+	if description.Valid {
+		w.Description = description.String
+	}
+	return w, nil
+}
+
+func (s *sqliteWorkflowStore) GetSteps(ctx context.Context, workflowID string) ([]domain.WorkflowStep, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, workflow_id, order_index, title, instruction, required, COALESCE(expected_output,'')
+		FROM workflow_steps WHERE workflow_id = ? ORDER BY order_index
+	`, workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("get workflow steps: %w", err)
 	}
@@ -46,9 +93,14 @@ func (s *sqliteWorkflowStore) GetWorkflowSteps(ctx context.Context, entryID stri
 	var steps []domain.WorkflowStep
 	for rows.Next() {
 		var step domain.WorkflowStep
-		if err := rows.Scan(&step.ID, &step.EntryID, &step.StepNum, &step.Role, &step.Content, &step.Label); err != nil {
+		var stepID int64
+		var required int
+		if err := rows.Scan(&stepID, &step.WorkflowID, &step.OrderIndex,
+			&step.Title, &step.Instruction, &required, &step.ExpectedOutput); err != nil {
 			return nil, fmt.Errorf("scan step: %w", err)
 		}
+		step.ID = fmt.Sprintf("%d", stepID)
+		step.Required = required == 1
 		steps = append(steps, step)
 	}
 
@@ -58,4 +110,44 @@ func (s *sqliteWorkflowStore) GetWorkflowSteps(ctx context.Context, entryID stri
 	return steps, nil
 }
 
-var _ WorkflowStore = (*sqliteWorkflowStore)(nil)
+func (s *sqliteWorkflowStore) Render(ctx context.Context, id string) ([]domain.WorkflowStep, error) {
+	w, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetSteps(ctx, w.ID)
+}
+
+func (s *sqliteWorkflowStore) List(ctx context.Context, includeArchived bool) ([]domain.Workflow, error) {
+	query := "SELECT id, name, slug, COALESCE(description,''), status FROM workflows"
+	if !includeArchived {
+		query += " WHERE status != 'archived'"
+	}
+	query += " ORDER BY name"
+
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("list workflows: %w", err)
+	}
+	defer rows.Close()
+
+	var results []domain.Workflow
+	for rows.Next() {
+		var w domain.Workflow
+		var description sql.NullString
+		var status string
+		if err := rows.Scan(&w.ID, &w.Name, &w.Slug, &description, &status); err != nil {
+			return nil, fmt.Errorf("scan workflow: %w", err)
+		}
+		w.Status = domain.Status(status)
+		if description.Valid {
+			w.Description = description.String
+		}
+		results = append(results, w)
+	}
+
+	if results == nil {
+		results = []domain.Workflow{}
+	}
+	return results, nil
+}

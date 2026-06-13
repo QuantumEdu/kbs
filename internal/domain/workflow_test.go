@@ -2,64 +2,71 @@ package domain
 
 import "testing"
 
-func TestWorkflowRoleConstants(t *testing.T) {
-	tests := []struct {
-		name     string
-		constant WorkflowRole
-		expected string
-	}{
-		{"system", WorkflowRoleSystem, "system"},
-		{"user", WorkflowRoleUser, "user"},
-		{"assistant", WorkflowRoleAssistant, "assistant"},
+func TestWorkflowStruct(t *testing.T) {
+	w := Workflow{
+		ID:          "spec-plan-task",
+		Name:        "Spec Plan Task",
+		Slug:        "spec-plan-task",
+		Description: "Full SDD workflow",
+		Status:      StatusActive,
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if string(tt.constant) != tt.expected {
-				t.Errorf("WorkflowRole %s = %q, want %q", tt.name, string(tt.constant), tt.expected)
-			}
-		})
+
+	if w.ID != "spec-plan-task" {
+		t.Errorf("ID = %q, want %q", w.ID, "spec-plan-task")
+	}
+	if w.Name != "Spec Plan Task" {
+		t.Errorf("Name = %q, want %q", w.Name, "Spec Plan Task")
+	}
+	if w.Status != StatusActive {
+		t.Errorf("Status = %q, want %q", w.Status, StatusActive)
 	}
 }
 
 func TestWorkflowStepStruct(t *testing.T) {
 	ws := WorkflowStep{
-		ID:       1,
-		EntryID:  "my-workflow",
-		StepNum:  2,
-		Role:     WorkflowRoleUser,
-		Content:  "Review the PRD",
-		Label:    "Review Step",
+		ID:             "step-1",
+		WorkflowID:     "spec-plan-task",
+		OrderIndex:     1,
+		Title:          "Read Spec",
+		Instruction:    "Read the source spec document",
+		Required:       true,
+		ExpectedOutput: "Understanding of the spec",
 	}
 
-	if ws.ID != 1 {
-		t.Errorf("ID = %d, want 1", ws.ID)
+	if ws.ID != "step-1" {
+		t.Errorf("ID = %q, want %q", ws.ID, "step-1")
 	}
-	if ws.EntryID != "my-workflow" {
-		t.Errorf("EntryID = %q, want %q", ws.EntryID, "my-workflow")
+	if ws.WorkflowID != "spec-plan-task" {
+		t.Errorf("WorkflowID = %q, want %q", ws.WorkflowID, "spec-plan-task")
 	}
-	if ws.StepNum != 2 {
-		t.Errorf("StepNum = %d, want 2", ws.StepNum)
+	if ws.OrderIndex != 1 {
+		t.Errorf("OrderIndex = %d, want 1", ws.OrderIndex)
 	}
-	if ws.Role != WorkflowRoleUser {
-		t.Errorf("Role = %q, want %q", ws.Role, WorkflowRoleUser)
+	if ws.Title != "Read Spec" {
+		t.Errorf("Title = %q, want %q", ws.Title, "Read Spec")
 	}
-	if ws.Content != "Review the PRD" {
-		t.Errorf("Content = %q, want %q", ws.Content, "Review the PRD")
-	}
-	if ws.Label != "Review Step" {
-		t.Errorf("Label = %q, want %q", ws.Label, "Review Step")
+	if !ws.Required {
+		t.Error("Required should be true")
 	}
 }
 
-func TestWorkflowStepWithoutLabel(t *testing.T) {
+func TestWorkflowStepOptionalOutput(t *testing.T) {
 	ws := WorkflowStep{
-		EntryID: "my-workflow",
-		StepNum: 1,
-		Role:    WorkflowRoleSystem,
-		Content: "You are a helpful assistant",
+		ID:          "step-2",
+		WorkflowID:  "spec-plan-task",
+		OrderIndex:  2,
+		Title:       "Draft Plan",
+		Instruction: "Create implementation plan",
+		Required:    false,
 	}
-	// Label is optional — empty string is valid
-	if ws.Label != "" {
-		t.Errorf("Label should default to empty, got %q", ws.Label)
+
+	if ws.Title != "Draft Plan" {
+		t.Errorf("Title = %q, want %q", ws.Title, "Draft Plan")
+	}
+	if ws.Required {
+		t.Error("Required should be false")
+	}
+	if ws.ExpectedOutput != "" {
+		t.Errorf("ExpectedOutput should be empty, got %q", ws.ExpectedOutput)
 	}
 }

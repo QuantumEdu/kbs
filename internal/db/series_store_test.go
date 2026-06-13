@@ -23,7 +23,7 @@ func setupSeriesStore(t *testing.T) (EntryStore, SeriesStore, func()) {
 	return entryStore, seriesStore, cleanup
 }
 
-func TestUpsertSeriesCreate(t *testing.T) {
+func TestSaveSeriesCreate(t *testing.T) {
 	_, sstore, cleanup := setupSeriesStore(t)
 	defer cleanup()
 	ctx := context.Background()
@@ -31,17 +31,18 @@ func TestUpsertSeriesCreate(t *testing.T) {
 	series := domain.Series{
 		ID:          "sdd-cycle",
 		Name:        "SDD Cycle",
+		Slug:        "sdd-cycle",
 		Description: "Full SDD process",
-		Active:      true,
+		Status:      domain.StatusActive,
 	}
-	err := sstore.UpsertSeries(ctx, series)
+	err := sstore.Save(ctx, series)
 	if err != nil {
-		t.Fatalf("UpsertSeries failed: %v", err)
+		t.Fatalf("Save failed: %v", err)
 	}
 
-	result, err := sstore.GetSeries(ctx, "sdd-cycle", false)
+	result, err := sstore.Get(ctx, "sdd-cycle", false)
 	if err != nil {
-		t.Fatalf("GetSeries failed: %v", err)
+		t.Fatalf("Get failed: %v", err)
 	}
 	if result.Series.ID != "sdd-cycle" {
 		t.Errorf("ID = %q, want 'sdd-cycle'", result.Series.ID)
@@ -54,73 +55,38 @@ func TestUpsertSeriesCreate(t *testing.T) {
 	}
 }
 
-func TestSeriesWithProjectScope(t *testing.T) {
-	_, sstore, cleanup := setupSeriesStore(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	projID := "vitacare"
-	// Create project first for FK constraint
-	pstore := &sqliteProjectStore{db: sstore.(*sqliteSeriesStore).db}
-	if err := pstore.UpsertProject(ctx, domain.Project{ID: projID, Name: "VitaCare", Active: true}); err != nil {
-		t.Fatalf("UpsertProject failed: %v", err)
-	}
-
-	series := domain.Series{
-		ID:        "project-series",
-		Name:      "Project Series",
-		ProjectID: &projID,
-		Active:    true,
-	}
-	if err := sstore.UpsertSeries(ctx, series); err != nil {
-		t.Fatalf("UpsertSeries failed: %v", err)
-	}
-
-	result, err := sstore.GetSeries(ctx, "project-series", false)
-	if err != nil {
-		t.Fatalf("GetSeries failed: %v", err)
-	}
-	if result.Series.ProjectID == nil || *result.Series.ProjectID != "vitacare" {
-		t.Errorf("ProjectID = %v, want 'vitacare'", result.Series.ProjectID)
-	}
-}
-
 func TestReplaceSeriesEntriesRenumber(t *testing.T) {
 	estore, sstore, cleanup := setupSeriesStore(t)
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create entries first
 	for _, e := range []domain.Entry{
-		{ID: "e1", Name: "E1", Type: domain.EntryTypeSkill, Content: "C1", Active: true},
-		{ID: "e2", Name: "E2", Type: domain.EntryTypePrompt, Content: "C2", Active: true},
-		{ID: "e3", Name: "E3", Type: domain.EntryTypeContext, Content: "C3", Active: true},
+		{ID: "e1", Title: "E1", Slug: "e1", Type: domain.EntryTypeSkill, BodyOptional: "C1", Status: domain.StatusActive},
+		{ID: "e2", Title: "E2", Slug: "e2", Type: domain.EntryTypePrompt, BodyOptional: "C2", Status: domain.StatusActive},
+		{ID: "e3", Title: "E3", Slug: "e3", Type: domain.EntryTypeReference, BodyOptional: "C3", Status: domain.StatusActive},
 	} {
-		if err := estore.UpsertEntry(ctx, e, nil, nil); err != nil {
-			t.Fatalf("UpsertEntry %s failed: %v", e.ID, err)
+		if err := estore.Save(ctx, e, nil); err != nil {
+			t.Fatalf("Save %s failed: %v", e.ID, err)
 		}
 	}
 
-	// Create series
-	series := domain.Series{ID: "s1", Name: "S1", Active: true}
-	if err := sstore.UpsertSeries(ctx, series); err != nil {
-		t.Fatalf("UpsertSeries failed: %v", err)
+	series := domain.Series{ID: "s1", Name: "S1", Slug: "s1", Status: domain.StatusActive}
+	if err := sstore.Save(ctx, series); err != nil {
+		t.Fatalf("Save failed: %v", err)
 	}
 
-	// Replace entries
-	entries := []domain.SeriesEntryInput{
-		{EntryID: "e1", Label: "Step A"},
-		{EntryID: "e2", Label: "Step B"},
-		{EntryID: "e3", Label: "Step C"},
+	entries := []domain.SeriesEntry{
+		{EntryID: "e1"},
+		{EntryID: "e2"},
+		{EntryID: "e3"},
 	}
 	if err := sstore.ReplaceSeriesEntries(ctx, "s1", entries); err != nil {
 		t.Fatalf("ReplaceSeriesEntries failed: %v", err)
 	}
 
-	// Verify via GetSeries
-	result, err := sstore.GetSeries(ctx, "s1", false)
+	result, err := sstore.Get(ctx, "s1", false)
 	if err != nil {
-		t.Fatalf("GetSeries failed: %v", err)
+		t.Fatalf("Get failed: %v", err)
 	}
 	if len(result.Entries) != 3 {
 		t.Fatalf("expected 3 entries, got %d", len(result.Entries))
@@ -129,26 +95,24 @@ func TestReplaceSeriesEntriesRenumber(t *testing.T) {
 		t.Errorf("TotalSteps = %d, want 3", result.TotalSteps)
 	}
 
-	// Steps should be numbered 1,2,3
 	for i, entry := range result.Entries {
-		expectedStep := i + 1
-		if entry.StepNum != expectedStep {
-			t.Errorf("Entry %d StepNum = %d, want %d", i, entry.StepNum, expectedStep)
+		expectedOrder := i + 1
+		if entry.OrderIndex != expectedOrder {
+			t.Errorf("Entry %d OrderIndex = %d, want %d", i, entry.OrderIndex, expectedOrder)
 		}
 	}
 
-	// Replace with different count
-	newEntries := []domain.SeriesEntryInput{
-		{EntryID: "e3", Label: "Step Alpha"},
-		{EntryID: "e1", Label: "Step Beta"},
+	newEntries := []domain.SeriesEntry{
+		{EntryID: "e3"},
+		{EntryID: "e1"},
 	}
 	if err := sstore.ReplaceSeriesEntries(ctx, "s1", newEntries); err != nil {
 		t.Fatalf("second ReplaceSeriesEntries failed: %v", err)
 	}
 
-	result, err = sstore.GetSeries(ctx, "s1", false)
+	result, err = sstore.Get(ctx, "s1", false)
 	if err != nil {
-		t.Fatalf("GetSeries after replace failed: %v", err)
+		t.Fatalf("Get after replace failed: %v", err)
 	}
 	if len(result.Entries) != 2 {
 		t.Fatalf("expected 2 entries after replace, got %d", len(result.Entries))
@@ -157,8 +121,8 @@ func TestReplaceSeriesEntriesRenumber(t *testing.T) {
 		t.Errorf("TotalSteps = %d, want 2", result.TotalSteps)
 	}
 	for i, entry := range result.Entries {
-		if entry.StepNum != i+1 {
-			t.Errorf("Entry %d StepNum = %d, want %d", i, entry.StepNum, i+1)
+		if entry.OrderIndex != i+1 {
+			t.Errorf("Entry %d OrderIndex = %d, want %d", i, entry.OrderIndex, i+1)
 		}
 	}
 }
@@ -168,46 +132,73 @@ func TestListSeries(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	projID := "p1"
-	// Create project first
-	pstore := &sqliteProjectStore{db: sstore.(*sqliteSeriesStore).db}
-	if err := pstore.UpsertProject(ctx, domain.Project{ID: projID, Name: "P1", Active: true}); err != nil {
-		t.Fatalf("UpsertProject failed: %v", err)
-	}
 	for _, s := range []domain.Series{
-		{ID: "s1", Name: "S1", Active: true},
-		{ID: "s2", Name: "S2", ProjectID: &projID, Active: true},
-		{ID: "s3", Name: "S3", Active: false},
+		{ID: "s1", Name: "S1", Slug: "s1", Status: domain.StatusActive},
+		{ID: "s2", Name: "S2", Slug: "s2", Status: domain.StatusActive},
+		{ID: "s3", Name: "S3", Slug: "s3", Status: domain.StatusArchived},
 	} {
-		if err := sstore.UpsertSeries(ctx, s); err != nil {
-			t.Fatalf("UpsertSeries %s failed: %v", s.ID, err)
+		if err := sstore.Save(ctx, s); err != nil {
+			t.Fatalf("Save %s failed: %v", s.ID, err)
 		}
 	}
 
-	// List all active
-	results, err := sstore.ListSeries(ctx, domain.SeriesFilter{})
+	results, err := sstore.List(ctx, domain.SeriesFilter{})
 	if err != nil {
-		t.Fatalf("ListSeries failed: %v", err)
+		t.Fatalf("List failed: %v", err)
 	}
 	if len(results) != 2 {
 		t.Errorf("expected 2 active series, got %d", len(results))
 	}
 
-	// List with include_archived
-	results, err = sstore.ListSeries(ctx, domain.SeriesFilter{IncludeArchived: true})
+	results, err = sstore.List(ctx, domain.SeriesFilter{IncludeArchived: true})
 	if err != nil {
-		t.Fatalf("ListSeries with include_archived failed: %v", err)
+		t.Fatalf("List with include_archived failed: %v", err)
 	}
 	if len(results) != 3 {
 		t.Errorf("expected 3 series with include_archived, got %d", len(results))
 	}
+}
 
-	// List by project
-	results, err = sstore.ListSeries(ctx, domain.SeriesFilter{ProjectID: &projID})
-	if err != nil {
-		t.Fatalf("ListSeries by project failed: %v", err)
+func TestComposeSeries(t *testing.T) {
+	estore, sstore, cleanup := setupSeriesStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	for _, e := range []domain.Entry{
+		{ID: "e1", Title: "First", Slug: "first", Type: domain.EntryTypeSkill, BodyOptional: "C1", Status: domain.StatusActive},
+		{ID: "e2", Title: "Second", Slug: "second", Type: domain.EntryTypePrompt, BodyOptional: "C2", Status: domain.StatusActive},
+		{ID: "e3", Title: "Third", Slug: "third", Type: domain.EntryTypeReference, BodyOptional: "C3", Status: domain.StatusActive},
+	} {
+		if err := estore.Save(ctx, e, nil); err != nil {
+			t.Fatalf("Save %s failed: %v", e.ID, err)
+		}
 	}
-	if len(results) != 1 {
-		t.Errorf("expected 1 series for project p1, got %d", len(results))
+
+	series := domain.Series{ID: "s1", Name: "S1", Slug: "s1", Status: domain.StatusActive}
+	if err := sstore.Save(ctx, series); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	if err := sstore.ReplaceSeriesEntries(ctx, "s1", []domain.SeriesEntry{
+		{EntryID: "e1"}, {EntryID: "e2"}, {EntryID: "e3"},
+	}); err != nil {
+		t.Fatalf("ReplaceSeriesEntries failed: %v", err)
+	}
+
+	entries, err := sstore.Compose(ctx, "s1")
+	if err != nil {
+		t.Fatalf("Compose failed: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+	if entries[0].ID != "e1" {
+		t.Errorf("entries[0].ID = %q, want 'e1'", entries[0].ID)
+	}
+	if entries[1].ID != "e2" {
+		t.Errorf("entries[1].ID = %q, want 'e2'", entries[1].ID)
+	}
+	if entries[2].ID != "e3" {
+		t.Errorf("entries[2].ID = %q, want 'e3'", entries[2].ID)
 	}
 }

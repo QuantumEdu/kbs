@@ -3,64 +3,85 @@ package app
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/quantum-6/skillvault/internal/db"
 	"github.com/quantum-6/skillvault/internal/domain"
-	"github.com/quantum-6/skillvault/internal/vars"
 )
 
-// WorkflowService orchestrates workflow execution.
+type SaveWorkflowStep struct {
+	OrderIndex     int
+	Title          string
+	Instruction    string
+	Required       bool
+	ExpectedOutput string
+}
+
+type SaveWorkflowInput struct {
+	Name        string
+	Description string
+	Status      string
+	Steps       []SaveWorkflowStep
+}
+
 type WorkflowService struct {
-	entryStore    db.EntryStore
 	workflowStore db.WorkflowStore
 }
 
-// NewWorkflowService creates a new WorkflowService.
-func NewWorkflowService(entryStore db.EntryStore, workflowStore db.WorkflowStore) *WorkflowService {
-	return &WorkflowService{entryStore: entryStore, workflowStore: workflowStore}
+func NewWorkflowService(workflowStore db.WorkflowStore) *WorkflowService {
+	return &WorkflowService{workflowStore: workflowStore}
 }
 
-// RunWorkflow renders a workflow by resolving variables in each step.
-func (s *WorkflowService) RunWorkflow(ctx context.Context, entryID string, providedVars map[string]string) (domain.RenderedWorkflow, error) {
-	var result domain.RenderedWorkflow
-	result.EntryID = entryID
-
-	// Get the workflow entry
-	entry, err := s.entryStore.GetEntry(ctx, entryID, false)
-	if err != nil {
-		return result, fmt.Errorf("get workflow entry: %w", err)
+func (s *WorkflowService) SaveWorkflow(ctx context.Context, input SaveWorkflowInput) (*domain.Workflow, error) {
+	if input.Name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	status := domain.StatusActive
+	if input.Status != "" {
+		if err := domain.ValidateStatus(input.Status); err != nil {
+			return nil, fmt.Errorf("validate status: %w", err)
+		}
+		status = domain.Status(input.Status)
 	}
 
-	// Validate it's a workflow
-	if entry.Entry.Type != domain.EntryTypeWorkflow {
-		return result, fmt.Errorf("entry %q is not a workflow (type=%s)", entryID, entry.Entry.Type)
+	wf := domain.Workflow{
+		ID:          generateWorkflowID(),
+		Name:        input.Name,
+		Slug:        slugify(input.Name),
+		Description: input.Description,
+		Status:      status,
 	}
 
-	// Get workflow steps
-	steps, err := s.workflowStore.GetWorkflowSteps(ctx, entryID)
-	if err != nil {
-		return result, fmt.Errorf("get workflow steps: %w", err)
-	}
-
-	// Prepare globals
-	globals := vars.PrepareGlobals(entry.Entry.ProjectID)
-	globals["date"] = time.Now().UTC().Format("2006-01-02")
-
-	// Resolve variables in each step
-	for _, step := range steps {
-		content, missing := vars.Resolve(step.Content, providedVars, globals)
-		result.Steps = append(result.Steps, domain.RenderedStep{
-			Role:        step.Role,
-			Content:     content,
-			Label:       step.Label,
-			MissingVars: missing,
+	steps := make([]domain.WorkflowStep, 0, len(input.Steps))
+	for _, s := range input.Steps {
+		orderIdx := s.OrderIndex
+		if orderIdx == 0 {
+			orderIdx = len(steps) + 1
+		}
+		steps = append(steps, domain.WorkflowStep{
+			WorkflowID:     wf.ID,
+			OrderIndex:     orderIdx,
+			Title:          s.Title,
+			Instruction:    s.Instruction,
+			Required:       s.Required,
+			ExpectedOutput: s.ExpectedOutput,
 		})
 	}
 
-	if result.Steps == nil {
-		result.Steps = []domain.RenderedStep{}
+	if err := s.workflowStore.Save(ctx, wf, steps); err != nil {
+		return nil, fmt.Errorf("save workflow: %w", err)
 	}
 
-	return result, nil
+	return &wf, nil
+}
+
+func (s *WorkflowService) RenderWorkflow(ctx context.Context, id string) ([]domain.WorkflowStep, error) {
+	return s.workflowStore.Render(ctx, id)
+}
+
+func (s *WorkflowService) ListWorkflows(ctx context.Context, includeArchived bool) ([]domain.Workflow, error) {
+	return s.workflowStore.List(ctx, includeArchived)
+}
+
+func (s *WorkflowService) Get(ctx context.Context, id string) (domain.Workflow, error) {
+	return s.workflowStore.Get(ctx, id)
 }

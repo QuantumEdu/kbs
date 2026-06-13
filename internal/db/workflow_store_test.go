@@ -23,74 +23,151 @@ func setupWorkflowStore(t *testing.T) (EntryStore, WorkflowStore, func()) {
 	return entryStore, wfStore, cleanup
 }
 
-func TestWorkflowStepsUpsertAndGet(t *testing.T) {
+func TestSaveAndGetWorkflowWithSteps(t *testing.T) {
 	estore, wstore, cleanup := setupWorkflowStore(t)
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create workflow entry
-	entry := domain.Entry{ID: "wf1", Name: "WF1", Type: domain.EntryTypeWorkflow, Content: "test", Active: true}
-	if err := estore.UpsertEntry(ctx, entry, nil, nil); err != nil {
-		t.Fatalf("UpsertEntry failed: %v", err)
+	entry := domain.Entry{ID: "wf1", Title: "WF1", Slug: "wf1", Type: domain.EntryTypeWorkflowNote, BodyOptional: "test", Status: domain.StatusActive}
+	if err := estore.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("Save entry failed: %v", err)
 	}
 
-	// Upsert steps
+	w := domain.Workflow{
+		ID:          "wf1",
+		Name:        "Test Workflow",
+		Slug:        "test-workflow",
+		Description: "A test workflow",
+		Status:      domain.StatusActive,
+	}
 	steps := []domain.WorkflowStep{
-		{StepNum: 1, Role: domain.WorkflowRoleSystem, Content: "System prompt", Label: "Setup"},
-		{StepNum: 2, Role: domain.WorkflowRoleUser, Content: "User input", Label: "Input"},
-		{StepNum: 3, Role: domain.WorkflowRoleAssistant, Content: "Response", Label: "Output"},
-	}
-	if err := wstore.UpsertWorkflowSteps(ctx, "wf1", steps); err != nil {
-		t.Fatalf("UpsertWorkflowSteps failed: %v", err)
+		{ID: "step-1", WorkflowID: "wf1", OrderIndex: 1, Title: "Step 1", Instruction: "First step", Required: true},
+		{ID: "step-2", WorkflowID: "wf1", OrderIndex: 2, Title: "Step 2", Instruction: "Second step", Required: true},
+		{ID: "step-3", WorkflowID: "wf1", OrderIndex: 3, Title: "Step 3", Instruction: "Third step", Required: false},
 	}
 
-	// Get steps
-	got, err := wstore.GetWorkflowSteps(ctx, "wf1")
+	if err := wstore.Save(ctx, w, steps); err != nil {
+		t.Fatalf("Save workflow failed: %v", err)
+	}
+
+	got, err := wstore.Get(ctx, "wf1")
 	if err != nil {
-		t.Fatalf("GetWorkflowSteps failed: %v", err)
+		t.Fatalf("Get workflow failed: %v", err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("expected 3 steps, got %d", len(got))
+	if got.Name != "Test Workflow" {
+		t.Errorf("Name = %q, want 'Test Workflow'", got.Name)
 	}
-	if got[0].Role != domain.WorkflowRoleSystem {
-		t.Errorf("step 0 role = %q, want 'system'", got[0].Role)
+	if got.Status != domain.StatusActive {
+		t.Errorf("Status = %q, want 'active'", got.Status)
 	}
-	if got[1].Role != domain.WorkflowRoleUser {
-		t.Errorf("step 1 role = %q, want 'user'", got[1].Role)
+
+	gotSteps, err := wstore.GetSteps(ctx, "wf1")
+	if err != nil {
+		t.Fatalf("GetSteps failed: %v", err)
 	}
-	if got[2].Role != domain.WorkflowRoleAssistant {
-		t.Errorf("step 2 role = %q, want 'assistant'", got[2].Role)
+	if len(gotSteps) != 3 {
+		t.Fatalf("expected 3 steps, got %d", len(gotSteps))
+	}
+	if gotSteps[0].Instruction != "First step" {
+		t.Errorf("step 0 instruction = %q, want 'First step'", gotSteps[0].Instruction)
+	}
+	if gotSteps[1].Instruction != "Second step" {
+		t.Errorf("step 1 instruction = %q, want 'Second step'", gotSteps[1].Instruction)
+	}
+	if !gotSteps[0].Required {
+		t.Error("step 0 should be required")
+	}
+	if gotSteps[2].Required {
+		t.Error("step 2 should not be required")
 	}
 }
 
-func TestWorkflowStepsReplacePreservesOrder(t *testing.T) {
-	estore, wstore, cleanup := setupWorkflowStore(t)
+func TestRenderWorkflow(t *testing.T) {
+	_, wstore, cleanup := setupWorkflowStore(t)
 	defer cleanup()
 	ctx := context.Background()
 
-	entry := domain.Entry{ID: "wf1", Name: "WF1", Type: domain.EntryTypeWorkflow, Content: "test", Active: true}
-	estore.UpsertEntry(ctx, entry, nil, nil)
+	w := domain.Workflow{ID: "w1", Name: "W1", Slug: "w1", Status: domain.StatusActive}
+	steps := []domain.WorkflowStep{
+		{ID: "s1", WorkflowID: "w1", OrderIndex: 1, Title: "S1", Instruction: "Do this"},
+	}
+	if err := wstore.Save(ctx, w, steps); err != nil {
+		t.Fatalf("Save workflow failed: %v", err)
+	}
 
-	// First set of steps
-	wstore.UpsertWorkflowSteps(ctx, "wf1", []domain.WorkflowStep{
-		{StepNum: 1, Role: domain.WorkflowRoleSystem, Content: "Old"},
-	})
-	// Replace
-	wstore.UpsertWorkflowSteps(ctx, "wf1", []domain.WorkflowStep{
-		{StepNum: 1, Role: domain.WorkflowRoleUser, Content: "New"},
-	})
-
-	got, err := wstore.GetWorkflowSteps(ctx, "wf1")
+	rendered, err := wstore.Render(ctx, "w1")
 	if err != nil {
-		t.Fatalf("GetWorkflowSteps failed: %v", err)
+		t.Fatalf("Render failed: %v", err)
+	}
+	if len(rendered) != 1 {
+		t.Fatalf("expected 1 step, got %d", len(rendered))
+	}
+	if rendered[0].Instruction != "Do this" {
+		t.Errorf("Instruction = %q, want 'Do this'", rendered[0].Instruction)
+	}
+}
+
+func TestListWorkflows(t *testing.T) {
+	_, wstore, cleanup := setupWorkflowStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	for _, w := range []struct {
+		w domain.Workflow
+		s []domain.WorkflowStep
+	}{
+		{domain.Workflow{ID: "w1", Name: "W1", Slug: "w1", Status: domain.StatusActive}, nil},
+		{domain.Workflow{ID: "w2", Name: "W2", Slug: "w2", Status: domain.StatusActive}, nil},
+		{domain.Workflow{ID: "w3", Name: "W3", Slug: "w3", Status: domain.StatusArchived}, nil},
+	} {
+		if err := wstore.Save(ctx, w.w, w.s); err != nil {
+			t.Fatalf("Save workflow %s failed: %v", w.w.ID, err)
+		}
+	}
+
+	results, err := wstore.List(ctx, false)
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("expected 2 active workflows, got %d", len(results))
+	}
+
+	results, err = wstore.List(ctx, true)
+	if err != nil {
+		t.Fatalf("List with include_archived failed: %v", err)
+	}
+	if len(results) != 3 {
+		t.Errorf("expected 3 workflows with include_archived, got %d", len(results))
+	}
+}
+
+func TestSaveWorkflowReplacesSteps(t *testing.T) {
+	_, wstore, cleanup := setupWorkflowStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	w := domain.Workflow{ID: "w1", Name: "W1", Slug: "w1", Status: domain.StatusActive}
+	if err := wstore.Save(ctx, w, []domain.WorkflowStep{
+		{ID: "s1", WorkflowID: "w1", OrderIndex: 1, Title: "Old", Instruction: "Old step"},
+	}); err != nil {
+		t.Fatalf("first Save failed: %v", err)
+	}
+
+	if err := wstore.Save(ctx, w, []domain.WorkflowStep{
+		{ID: "s2", WorkflowID: "w1", OrderIndex: 1, Title: "New", Instruction: "New step"},
+	}); err != nil {
+		t.Fatalf("second Save failed: %v", err)
+	}
+
+	got, err := wstore.GetSteps(ctx, "w1")
+	if err != nil {
+		t.Fatalf("GetSteps failed: %v", err)
 	}
 	if len(got) != 1 {
 		t.Fatalf("expected 1 step, got %d", len(got))
 	}
-	if got[0].Content != "New" {
-		t.Errorf("Content = %q, want 'New'", got[0].Content)
-	}
-	if got[0].Role != domain.WorkflowRoleUser {
-		t.Errorf("Role = %q, want 'user'", got[0].Role)
+	if got[0].Instruction != "New step" {
+		t.Errorf("Instruction = %q, want 'New step'", got[0].Instruction)
 	}
 }

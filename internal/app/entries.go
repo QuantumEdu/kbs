@@ -2,50 +2,194 @@ package app
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/quantum-6/skillvault/internal/db"
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
-// EntryService orchestrates entry CRUD operations.
+type SaveEntryInput struct {
+	Title   string
+	Type    string
+	Summary string
+	Body    string
+	Project string
+	Tags    []string
+	Status  string
+}
+
+type GetEntryResult struct {
+	Entry    domain.EntryResult
+	Artifact *domain.Artifact
+}
+
 type EntryService struct {
-	store db.EntryStore
+	store         db.EntryStore
+	projectStore  db.ProjectStore
+	artifactStore db.ArtifactStore
 }
 
-// NewEntryService creates a new EntryService.
-func NewEntryService(store db.EntryStore) *EntryService {
-	return &EntryService{store: store}
+func NewEntryService(store db.EntryStore, projectStore db.ProjectStore, artifactStore db.ArtifactStore) *EntryService {
+	return &EntryService{
+		store:         store,
+		projectStore:  projectStore,
+		artifactStore: artifactStore,
+	}
 }
 
-// UpsertEntry normalizes tags, validates the entry, and delegates to the store.
-func (s *EntryService) UpsertEntry(ctx context.Context, entry domain.Entry, tags []string, steps []domain.WorkflowStep) error {
+func (s *EntryService) Save(ctx context.Context, entry domain.Entry, tags []string) error {
 	if err := domain.ValidateEntryType(string(entry.Type)); err != nil {
 		return fmt.Errorf("validate entry: %w", err)
 	}
 	tags = domain.NormalizeTags(tags)
-	return s.store.UpsertEntry(ctx, entry, tags, steps)
+	return s.store.Save(ctx, entry, tags)
 }
 
-// GetEntry retrieves an entry with optional archived inclusion.
-func (s *EntryService) GetEntry(ctx context.Context, id string, includeArchived bool) (domain.EntryResult, error) {
-	return s.store.GetEntry(ctx, id, includeArchived)
+func (s *EntryService) SaveEntry(ctx context.Context, input SaveEntryInput) (*GetEntryResult, error) {
+	if input.Title == "" {
+		return nil, fmt.Errorf("title is required")
+	}
+	if err := domain.ValidateEntryType(input.Type); err != nil {
+		return nil, fmt.Errorf("validate type: %w", err)
+	}
+	status := domain.StatusActive
+	if input.Status != "" {
+		if err := domain.ValidateStatus(input.Status); err != nil {
+			return nil, fmt.Errorf("validate status: %w", err)
+		}
+		status = domain.Status(input.Status)
+	}
+
+	var projectID *string
+	if input.Project != "" {
+		proj, err := s.projectStore.Get(ctx, input.Project)
+		if err != nil {
+			return nil, fmt.Errorf("project %q not found: %w", input.Project, err)
+		}
+		projectID = &proj.ID
+	}
+
+	tags := domain.NormalizeTags(input.Tags)
+
+	entry := domain.Entry{
+		ID:           generateID(),
+		Title:        input.Title,
+		Type:         domain.EntryType(input.Type),
+		Summary:      input.Summary,
+		BodyOptional: input.Body,
+		Status:       status,
+		ProjectID:    projectID,
+	}
+
+	if err := s.store.Save(ctx, entry, tags); err != nil {
+		return nil, fmt.Errorf("save entry: %w", err)
+	}
+
+	result, err := s.store.Get(ctx, entry.ID, true)
+	if err != nil {
+		return nil, fmt.Errorf("get saved entry: %w", err)
+	}
+
+	var artifact *domain.Artifact
+	if result.Entry.ArtifactID != nil {
+		a, err := s.artifactStore.Get(ctx, *result.Entry.ArtifactID)
+		if err == nil {
+			artifact = &a
+		}
+	}
+
+	return &GetEntryResult{Entry: result, Artifact: artifact}, nil
 }
 
-// SearchEntries performs FTS5 search via the search store.
-func (s *EntryService) SearchEntries(ctx context.Context, searchStore db.SearchStore, q domain.SearchQuery) ([]domain.EntrySearchResult, error) {
+func (s *EntryService) Get(ctx context.Context, id string, includeArchived bool) (domain.EntryResult, error) {
+	return s.store.Get(ctx, id, includeArchived)
+}
+
+func (s *EntryService) GetEntry(ctx context.Context, id string) (*GetEntryResult, error) {
+	result, err := s.store.Get(ctx, id, false)
+	if err != nil {
+		return nil, err
+	}
+
+	var artifact *domain.Artifact
+	if result.Entry.ArtifactID != nil {
+		a, err := s.artifactStore.Get(ctx, *result.Entry.ArtifactID)
+		if err == nil {
+			artifact = &a
+		}
+	}
+
+	return &GetEntryResult{Entry: result, Artifact: artifact}, nil
+}
+
+func (s *EntryService) Search(ctx context.Context, q domain.SearchQuery) ([]domain.EntrySearchResult, error) {
 	if err := domain.ValidateSearchQuery(q); err != nil {
 		return nil, fmt.Errorf("validate search: %w", err)
 	}
-	return searchStore.SearchEntries(ctx, q)
+	return s.store.Search(ctx, q)
 }
 
-// ListEntries returns entries matching the filter.
-func (s *EntryService) ListEntries(ctx context.Context, filter domain.EntryFilter) ([]domain.EntryListResult, error) {
-	return s.store.ListEntries(ctx, filter)
+func (s *EntryService) SearchEntries(ctx context.Context, query string, filters domain.SearchQuery) ([]domain.EntrySearchResult, error) {
+	q := filters
+	q.Query = query
+	if err := domain.ValidateSearchQuery(q); err != nil {
+		return nil, fmt.Errorf("validate search: %w", err)
+	}
+	return s.store.Search(ctx, q)
 }
 
-// ArchiveEntry soft-deletes an entry.
+func (s *EntryService) List(ctx context.Context, filter domain.EntryFilter) ([]domain.EntryListResult, error) {
+	return s.store.List(ctx, filter)
+}
+
+func (s *EntryService) Archive(ctx context.Context, id string) error {
+	return s.store.Archive(ctx, id)
+}
+
 func (s *EntryService) ArchiveEntry(ctx context.Context, id string) error {
-	return s.store.ArchiveEntry(ctx, id)
+	return s.store.Archive(ctx, id)
+}
+
+func slugify(title string) string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return "e-" + hex.EncodeToString(b)
+}
+
+func generateID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return "sv-" + hex.EncodeToString(b)
+}
+
+func generateArtifactID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return "art-" + hex.EncodeToString(b)
+}
+
+func generateWorkflowID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return "wf-" + hex.EncodeToString(b)
+}
+
+func generateSeriesID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return "ser-" + hex.EncodeToString(b)
+}
+
+func generateProjectID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return "proj-" + hex.EncodeToString(b)
+}
+
+func generateSessionID() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return "ses-" + hex.EncodeToString(b)
 }

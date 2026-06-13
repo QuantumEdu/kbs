@@ -8,35 +8,59 @@ import (
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
-// UpsertProject creates or updates a project.
-func (s *sqliteProjectStore) UpsertProject(ctx context.Context, p domain.Project) error {
-	active := 0
-	if p.Active {
-		active = 1
+func (s *sqliteProjectStore) Save(ctx context.Context, p domain.Project) error {
+	if p.Status == "" {
+		p.Status = domain.StatusActive
+	}
+	if p.Slug == "" {
+		p.Slug = p.Name
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO projects (id, name, description, active, updated_at)
-		VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+		INSERT INTO projects (id, name, slug, description, status, updated_at)
+		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name,
+			slug=excluded.slug,
 			description=excluded.description,
-			active=excluded.active,
+			status=excluded.status,
 			updated_at=CURRENT_TIMESTAMP
-	`, p.ID, p.Name, p.Description, active)
+	`, p.ID, p.Name, p.Slug, p.Description, string(p.Status))
 	if err != nil {
-		return fmt.Errorf("upsert project: %w", err)
+		return fmt.Errorf("save project: %w", err)
 	}
 	return nil
 }
 
-// ListProjects returns projects, optionally including archived ones.
-func (s *sqliteProjectStore) ListProjects(ctx context.Context, includeArchived bool) ([]domain.Project, error) {
-	query := "SELECT id, name, COALESCE(description,''), active FROM projects"
+func (s *sqliteProjectStore) Get(ctx context.Context, id string) (domain.Project, error) {
+	var p domain.Project
+	var status string
+	var desc sql.NullString
+
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, name, slug, description, status
+		FROM projects WHERE id = ? OR slug = ?
+	`, id, id).Scan(&p.ID, &p.Name, &p.Slug, &desc, &status)
+	if err == sql.ErrNoRows {
+		return p, fmt.Errorf("project %q not found", id)
+	}
+	if err != nil {
+		return p, fmt.Errorf("get project: %w", err)
+	}
+
+	p.Status = domain.Status(status)
+	if desc.Valid {
+		p.Description = desc.String
+	}
+	return p, nil
+}
+
+func (s *sqliteProjectStore) List(ctx context.Context, includeArchived bool) ([]domain.Project, error) {
+	query := "SELECT id, name, slug, COALESCE(description,''), status FROM projects"
 	var args []interface{}
 
 	if !includeArchived {
-		query += " WHERE active = 1"
+		query += " WHERE status != 'archived'"
 	}
 	query += " ORDER BY name"
 
@@ -49,11 +73,15 @@ func (s *sqliteProjectStore) ListProjects(ctx context.Context, includeArchived b
 	var results []domain.Project
 	for rows.Next() {
 		var p domain.Project
-		var active int
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &active); err != nil {
+		var status string
+		var desc sql.NullString
+		if err := rows.Scan(&p.ID, &p.Name, &p.Slug, &desc, &status); err != nil {
 			return nil, fmt.Errorf("scan project: %w", err)
 		}
-		p.Active = active == 1
+		p.Status = domain.Status(status)
+		if desc.Valid {
+			p.Description = desc.String
+		}
 		results = append(results, p)
 	}
 
@@ -63,8 +91,14 @@ func (s *sqliteProjectStore) ListProjects(ctx context.Context, includeArchived b
 	return results, nil
 }
 
-// Ensure sqliteProjectStore implements ProjectStore
-var _ ProjectStore = (*sqliteProjectStore)(nil)
-
-// unused import guard
-var _ = sql.NullString{}
+func (s *sqliteProjectStore) Archive(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, "UPDATE projects SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'archived'", id)
+	if err != nil {
+		return fmt.Errorf("archive project: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("project %q not found or already archived", id)
+	}
+	return nil
+}

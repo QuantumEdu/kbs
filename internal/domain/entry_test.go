@@ -8,12 +8,16 @@ func TestEntryTypeConstants(t *testing.T) {
 		constant EntryType
 		expected string
 	}{
-		{"skill", EntryTypeSkill, "skill"},
-		{"agent", EntryTypeAgent, "agent"},
-		{"workflow", EntryTypeWorkflow, "workflow"},
 		{"prompt", EntryTypePrompt, "prompt"},
-		{"context", EntryTypeContext, "context"},
-		{"note", EntryTypeNote, "note"},
+		{"skill", EntryTypeSkill, "skill"},
+		{"workflow_note", EntryTypeWorkflowNote, "workflow_note"},
+		{"reference", EntryTypeReference, "reference"},
+		{"user", EntryTypeUser, "user"},
+		{"feedback", EntryTypeFeedback, "feedback"},
+		{"project_state", EntryTypeProjectState, "project_state"},
+		{"session", EntryTypeSession, "session"},
+		{"decision", EntryTypeDecision, "decision"},
+		{"artifact_summary", EntryTypeArtifactSummary, "artifact_summary"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -26,46 +30,51 @@ func TestEntryTypeConstants(t *testing.T) {
 
 func TestEntryStruct(t *testing.T) {
 	e := Entry{
-		ID:          "prd-fastapi",
-		Name:        "FastAPI PRD",
-		Type:        EntryTypeSkill,
-		Content:     "Design FastAPI backend",
-		ProjectID:   nil,
-		Description: "PRD document",
-		Active:      true,
+		ID:           "prd-fastapi",
+		Title:        "FastAPI PRD",
+		Slug:         "fastapi-prd",
+		Type:         EntryTypeSkill,
+		Summary:      "PRD document",
+		BodyOptional: "Design FastAPI backend",
+		Status:       StatusActive,
+		ProjectID:    nil,
 	}
 
 	if e.ID != "prd-fastapi" {
 		t.Errorf("ID = %q, want %q", e.ID, "prd-fastapi")
 	}
-	if e.Name != "FastAPI PRD" {
-		t.Errorf("Name = %q, want %q", e.Name, "FastAPI PRD")
+	if e.Title != "FastAPI PRD" {
+		t.Errorf("Title = %q, want %q", e.Title, "FastAPI PRD")
 	}
 	if e.Type != EntryTypeSkill {
 		t.Errorf("Type = %q, want %q", e.Type, EntryTypeSkill)
 	}
-	if e.Content != "Design FastAPI backend" {
-		t.Errorf("Content = %q, want %q", e.Content, "Design FastAPI backend")
+	if e.BodyOptional != "Design FastAPI backend" {
+		t.Errorf("BodyOptional = %q, want %q", e.BodyOptional, "Design FastAPI backend")
 	}
 	if e.ProjectID != nil {
 		t.Errorf("ProjectID should be nil for global entry")
 	}
-	if !e.Active {
-		t.Errorf("Active should default to true")
+	if e.Status != StatusActive {
+		t.Errorf("Status = %q, want %q", e.Status, StatusActive)
 	}
 }
 
 func TestValidEntryTypes(t *testing.T) {
 	valid := map[EntryType]bool{
-		EntryTypeSkill:    true,
-		EntryTypeAgent:    true,
-		EntryTypeWorkflow: true,
-		EntryTypePrompt:   true,
-		EntryTypeContext:  true,
-		EntryTypeNote:     true,
+		EntryTypePrompt:         true,
+		EntryTypeSkill:          true,
+		EntryTypeWorkflowNote:   true,
+		EntryTypeReference:      true,
+		EntryTypeUser:           true,
+		EntryTypeFeedback:       true,
+		EntryTypeProjectState:   true,
+		EntryTypeSession:        true,
+		EntryTypeDecision:       true,
+		EntryTypeArtifactSummary: true,
 	}
-	if len(valid) != 6 {
-		t.Errorf("Expected 6 valid entry types, got %d", len(valid))
+	if len(valid) != 10 {
+		t.Errorf("Expected 10 valid entry types, got %d", len(valid))
 	}
 	for et := range valid {
 		if !et.IsValid() {
@@ -75,5 +84,47 @@ func TestValidEntryTypes(t *testing.T) {
 	invalid := EntryType("invalid")
 	if invalid.IsValid() {
 		t.Errorf("EntryType %q should be invalid but IsValid() returned true", invalid)
+	}
+}
+
+func TestStatusConstants(t *testing.T) {
+	tests := []struct {
+		name     string
+		constant Status
+		expected string
+	}{
+		{"draft", StatusDraft, "draft"},
+		{"active", StatusActive, "active"},
+		{"archived", StatusArchived, "archived"},
+		{"deprecated", StatusDeprecated, "deprecated"},
+		{"canonical", StatusCanonical, "canonical"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if string(tt.constant) != tt.expected {
+				t.Errorf("Status %s = %q, want %q", tt.name, string(tt.constant), tt.expected)
+			}
+		})
+	}
+}
+
+func TestValidStatuses(t *testing.T) {
+	valid := []Status{StatusDraft, StatusActive, StatusArchived, StatusDeprecated, StatusCanonical}
+	for _, s := range valid {
+		if !s.IsValid() {
+			t.Errorf("Status %q should be valid", s)
+		}
+	}
+	if Status("invalid").IsValid() {
+		t.Error("Status 'invalid' should not be valid")
+	}
+}
+
+func TestStatusTransitions(t *testing.T) {
+	all := []Status{StatusDraft, StatusActive, StatusArchived, StatusDeprecated, StatusCanonical}
+	for _, s := range all {
+		if !s.IsValid() {
+			t.Errorf("Status %q should be valid", s)
+		}
 	}
 }
