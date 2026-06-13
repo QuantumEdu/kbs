@@ -7,78 +7,97 @@ import (
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
-// EntryStore defines persistence operations for entries.
 type EntryStore interface {
-	UpsertEntry(ctx context.Context, entry domain.Entry, tags []string, steps []domain.WorkflowStep) error
-	GetEntry(ctx context.Context, id string, includeArchived bool) (domain.EntryResult, error)
-	ListEntries(ctx context.Context, filter domain.EntryFilter) ([]domain.EntryListResult, error)
-	ArchiveEntry(ctx context.Context, id string) error
+	Save(ctx context.Context, entry domain.Entry, tags []string) error
+	Get(ctx context.Context, id string, includeArchived bool) (domain.EntryResult, error)
+	Search(ctx context.Context, q domain.SearchQuery) ([]domain.EntrySearchResult, error)
+	Archive(ctx context.Context, id string) error
+	List(ctx context.Context, filter domain.EntryFilter) ([]domain.EntryListResult, error)
 }
 
-// ProjectStore defines persistence operations for projects.
-type ProjectStore interface {
-	UpsertProject(ctx context.Context, p domain.Project) error
-	ListProjects(ctx context.Context, includeArchived bool) ([]domain.Project, error)
+type ArtifactStore interface {
+	Save(ctx context.Context, a domain.Artifact) error
+	Get(ctx context.Context, id string) (domain.Artifact, error)
+	List(ctx context.Context, projectID *string) ([]domain.Artifact, error)
 }
 
-// SeriesStore defines persistence operations for series.
-type SeriesStore interface {
-	UpsertSeries(ctx context.Context, s domain.Series) error
-	GetSeries(ctx context.Context, id string, includeArchived bool) (domain.SeriesResult, error)
-	ListSeries(ctx context.Context, filter domain.SeriesFilter) ([]domain.SeriesListResult, error)
-	ReplaceSeriesEntries(ctx context.Context, seriesID string, entries []domain.SeriesEntryInput) error
-}
-
-// WorkflowStore defines persistence operations for workflow steps.
 type WorkflowStore interface {
-	UpsertWorkflowSteps(ctx context.Context, entryID string, steps []domain.WorkflowStep) error
-	GetWorkflowSteps(ctx context.Context, entryID string) ([]domain.WorkflowStep, error)
+	Save(ctx context.Context, w domain.Workflow, steps []domain.WorkflowStep) error
+	Get(ctx context.Context, id string) (domain.Workflow, error)
+	GetSteps(ctx context.Context, workflowID string) ([]domain.WorkflowStep, error)
+	Render(ctx context.Context, id string) ([]domain.WorkflowStep, error)
+	List(ctx context.Context, includeArchived bool) ([]domain.Workflow, error)
 }
 
-// SearchStore defines FTS5 search operations.
+type SeriesStore interface {
+	Save(ctx context.Context, s domain.Series) error
+	Get(ctx context.Context, id string, includeArchived bool) (domain.SeriesResult, error)
+	Compose(ctx context.Context, seriesID string) ([]domain.Entry, error)
+	List(ctx context.Context, filter domain.SeriesFilter) ([]domain.SeriesListResult, error)
+	ReplaceSeriesEntries(ctx context.Context, seriesID string, entries []domain.SeriesEntry) error
+}
+
+type TagStore interface {
+	Save(ctx context.Context, tag domain.Tag) error
+	List(ctx context.Context) ([]domain.Tag, error)
+	Search(ctx context.Context, query string) ([]domain.Tag, error)
+}
+
+type EntryLinkStore interface {
+	Save(ctx context.Context, link domain.EntryLink) error
+	GetLinks(ctx context.Context, entryID string) ([]domain.EntryLink, error)
+	GetLinksByType(ctx context.Context, entryID string, relationType string) ([]domain.EntryLink, error)
+}
+
+type ProjectStore interface {
+	Save(ctx context.Context, p domain.Project) error
+	Get(ctx context.Context, id string) (domain.Project, error)
+	List(ctx context.Context, includeArchived bool) ([]domain.Project, error)
+	Archive(ctx context.Context, id string) error
+}
+
 type SearchStore interface {
-	SearchEntries(ctx context.Context, q domain.SearchQuery) ([]domain.EntrySearchResult, error)
 	RebuildFTS(ctx context.Context) error
 }
 
-// ImportExportStore defines vault import/export operations.
 type ImportExportStore interface {
 	ExportAll(ctx context.Context) (domain.VaultExport, error)
 	ImportAll(ctx context.Context, data domain.VaultExport) error
 }
 
-// Store is the top-level data access layer composing all sub-stores.
-// App services should depend on individual interfaces, not Store directly.
 type Store struct {
 	Entries      EntryStore
-	Projects     ProjectStore
-	Series       SeriesStore
+	Artifacts    ArtifactStore
 	Workflows    WorkflowStore
+	Series       SeriesStore
+	Tags         TagStore
+	EntryLinks   EntryLinkStore
+	Projects     ProjectStore
 	Search       SearchStore
 	ImportExport ImportExportStore
 
 	db *sql.DB
 }
 
-// NewStore creates a new Store with all sub-store implementations.
 func NewStore(db *sql.DB) *Store {
 	return &Store{
 		Entries:      &sqliteEntryStore{db: db},
-		Projects:     &sqliteProjectStore{db: db},
-		Series:       &sqliteSeriesStore{db: db},
+		Artifacts:    &sqliteArtifactStore{db: db},
 		Workflows:    &sqliteWorkflowStore{db: db},
+		Series:       &sqliteSeriesStore{db: db},
+		Tags:         &sqliteTagStore{db: db},
+		EntryLinks:   &sqliteEntryLinkStore{db: db},
+		Projects:     &sqliteProjectStore{db: db},
 		Search:       &sqliteSearchStore{db: db},
 		ImportExport: &sqliteImportExportStore{db: db},
 		db:           db,
 	}
 }
 
-// DB returns the underlying database connection.
 func (s *Store) DB() *sql.DB {
 	return s.db
 }
 
-// Close closes the underlying database connection.
 func (s *Store) Close() error {
 	if s.db != nil {
 		return s.db.Close()
@@ -86,11 +105,14 @@ func (s *Store) Close() error {
 	return nil
 }
 
-// Store implementations — each lives in its own file.
-// struct definitions are here so NewStore can instantiate them.
 type sqliteEntryStore struct{ db *sql.DB }
-type sqliteProjectStore struct{ db *sql.DB }
-type sqliteSeriesStore struct{ db *sql.DB }
+type sqliteArtifactStore struct{ db *sql.DB }
 type sqliteWorkflowStore struct{ db *sql.DB }
+type sqliteSeriesStore struct{ db *sql.DB }
+type sqliteTagStore struct{ db *sql.DB }
+type sqliteEntryLinkStore struct{ db *sql.DB }
+type sqliteProjectStore struct{ db *sql.DB }
 type sqliteSearchStore struct{ db *sql.DB }
 type sqliteImportExportStore struct{ db *sql.DB }
+
+var _ = sql.NullString{}

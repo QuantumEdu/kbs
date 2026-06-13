@@ -7,7 +7,7 @@ import (
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
-func setupImportExportStore(t *testing.T) (EntryStore, ImportExportStore, func()) {
+func setupImportExportStore(t *testing.T) (EntryStore, WorkflowStore, SeriesStore, ProjectStore, ArtifactStore, EntryLinkStore, TagStore, ImportExportStore, func()) {
 	t.Helper()
 	db, err := OpenDB(":memory:")
 	if err != nil {
@@ -18,31 +18,52 @@ func setupImportExportStore(t *testing.T) (EntryStore, ImportExportStore, func()
 		t.Fatalf("RunMigrations failed: %v", err)
 	}
 	entryStore := &sqliteEntryStore{db: db}
+	workflowStore := &sqliteWorkflowStore{db: db}
+	seriesStore := &sqliteSeriesStore{db: db}
+	projectStore := &sqliteProjectStore{db: db}
+	artifactStore := &sqliteArtifactStore{db: db}
+	linkStore := &sqliteEntryLinkStore{db: db}
+	tagStore := &sqliteTagStore{db: db}
 	ieStore := &sqliteImportExportStore{db: db}
 	cleanup := func() { db.Close() }
-	return entryStore, ieStore, cleanup
+	return entryStore, workflowStore, seriesStore, projectStore, artifactStore, linkStore, tagStore, ieStore, cleanup
 }
 
 func TestExportRoundTrip(t *testing.T) {
-	estore, iestore, cleanup := setupImportExportStore(t)
+	estore, wfstore, sstore, pstore, astore, linkStore, tagStore, iestore, cleanup := setupImportExportStore(t)
 	defer cleanup()
 	ctx := context.Background()
 
-	// Create data
-	estore.UpsertEntry(ctx, domain.Entry{ID: "e1", Name: "Entry 1", Type: domain.EntryTypeSkill, Content: "Content 1", Active: true}, []string{"tag1"}, nil)
-	estore.UpsertEntry(ctx, domain.Entry{ID: "e2", Name: "Entry 2", Type: domain.EntryTypePrompt, Content: "Content 2", Active: false}, []string{"tag2"}, nil)
+	pstore.Save(ctx, domain.Project{ID: "proj-1", Name: "Test Project", Slug: "test-project", Description: "A test project", Status: domain.StatusActive})
+	pstore.Save(ctx, domain.Project{ID: "proj-2", Name: "Archived Project", Slug: "archived-proj", Description: "Archived", Status: domain.StatusArchived})
 
-	// Export
+	estore.Save(ctx, domain.Entry{ID: "e1", Title: "Entry 1", Slug: "entry-1", Type: domain.EntryTypeSkill, BodyOptional: "Content 1", Status: domain.StatusActive}, []string{"tag1"})
+	estore.Save(ctx, domain.Entry{ID: "e2", Title: "Entry 2", Slug: "entry-2", Type: domain.EntryTypePrompt, BodyOptional: "Content 2", Status: domain.StatusArchived}, []string{"tag2"})
+
+	astore.Save(ctx, domain.Artifact{ID: "art-1", Title: "Artifact 1", Slug: "artifact-1", Type: domain.ArtifactTypeMarkdown, FilePath: "/tmp/test.md", MimeType: "text/markdown", Summary: "Test artifact", ContentHash: "abc123", SizeBytes: 100})
+
+	wfstore.Save(ctx, domain.Workflow{ID: "wf-1", Name: "Test WF", Slug: "test-wf", Description: "A workflow", Status: domain.StatusActive}, []domain.WorkflowStep{
+		{Title: "Step 1", Instruction: "Do step 1", OrderIndex: 1, Required: true},
+		{Title: "Step 2", Instruction: "Do step 2", OrderIndex: 2, Required: false},
+	})
+
+	sstore.Save(ctx, domain.Series{ID: "ser-1", Name: "Test Series", Slug: "test-series", Status: domain.StatusActive})
+
+	tagStore.Save(ctx, domain.Tag{ID: "tag1", Name: "tag1", Slug: "tag1"})
+	tagStore.Save(ctx, domain.Tag{ID: "tag2", Name: "tag2", Slug: "tag2"})
+
+	linkStore.Save(ctx, domain.EntryLink{FromEntryID: "e1", ToEntryID: "e2", RelationType: domain.RelationReferences})
+
 	exported, err := iestore.ExportAll(ctx)
 	if err != nil {
 		t.Fatalf("ExportAll failed: %v", err)
 	}
 
-	if exported.SchemaVersion != 1 {
-		t.Errorf("SchemaVersion = %d, want 1", exported.SchemaVersion)
+	if exported.SchemaVersion != 2 {
+		t.Errorf("SchemaVersion = %d, want 2", exported.SchemaVersion)
 	}
-	if exported.AppVersion != "v1-alpha" {
-		t.Errorf("AppVersion = %q, want 'v1-alpha'", exported.AppVersion)
+	if exported.AppVersion != "v2-hermes" {
+		t.Errorf("AppVersion = %q, want 'v2-hermes'", exported.AppVersion)
 	}
 	if exported.ExportedAt == "" {
 		t.Error("ExportedAt should not be empty")
@@ -51,15 +72,34 @@ func TestExportRoundTrip(t *testing.T) {
 		t.Errorf("Source = %q, want 'skillvault'", exported.Source)
 	}
 
-	// Entries should be exported
+	if len(exported.Data.Projects) != 2 {
+		t.Errorf("expected 2 projects, got %d", len(exported.Data.Projects))
+	}
 	if len(exported.Data.Entries) != 2 {
-		t.Fatalf("expected 2 exported entries, got %d", len(exported.Data.Entries))
+		t.Errorf("expected 2 entries, got %d", len(exported.Data.Entries))
 	}
 	if len(exported.Data.EntryTags) != 2 {
-		t.Errorf("expected 2 exported tags, got %d", len(exported.Data.EntryTags))
+		t.Errorf("expected 2 entry_tags, got %d", len(exported.Data.EntryTags))
+	}
+	if len(exported.Data.Tags) != 2 {
+		t.Errorf("expected 2 tags, got %d", len(exported.Data.Tags))
+	}
+	if len(exported.Data.Artifacts) != 1 {
+		t.Errorf("expected 1 artifact, got %d", len(exported.Data.Artifacts))
+	}
+	if len(exported.Data.Workflows) != 1 {
+		t.Errorf("expected 1 workflow, got %d", len(exported.Data.Workflows))
+	}
+	if len(exported.Data.WorkflowSteps) != 2 {
+		t.Errorf("expected 2 workflow_steps, got %d", len(exported.Data.WorkflowSteps))
+	}
+	if len(exported.Data.Series) != 1 {
+		t.Errorf("expected 1 series, got %d", len(exported.Data.Series))
+	}
+	if len(exported.Data.EntryLinks) != 1 {
+		t.Errorf("expected 1 entry_link, got %d", len(exported.Data.EntryLinks))
 	}
 
-	// Import back into fresh DB
 	db2, err := OpenDB(":memory:")
 	if err != nil {
 		t.Fatalf("OpenDB2 failed: %v", err)
@@ -74,7 +114,6 @@ func TestExportRoundTrip(t *testing.T) {
 		t.Fatalf("ImportAll failed: %v", err)
 	}
 
-	// Verify re-export matches
 	reexported, err := ieStore2.ExportAll(ctx)
 	if err != nil {
 		t.Fatalf("Re-ExportAll failed: %v", err)
@@ -82,10 +121,16 @@ func TestExportRoundTrip(t *testing.T) {
 	if len(reexported.Data.Entries) != 2 {
 		t.Errorf("round-trip: expected 2 entries, got %d", len(reexported.Data.Entries))
 	}
+	if len(reexported.Data.Projects) != 2 {
+		t.Errorf("round-trip: expected 2 projects, got %d", len(reexported.Data.Projects))
+	}
+	if len(reexported.Data.EntryLinks) != 1 {
+		t.Errorf("round-trip: expected 1 entry_link, got %d", len(reexported.Data.EntryLinks))
+	}
 }
 
 func TestImportRejectsMissingVersion(t *testing.T) {
-	_, iestore, cleanup := setupImportExportStore(t)
+	_, _, _, _, _, _, _, iestore, cleanup := setupImportExportStore(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -96,12 +141,12 @@ func TestImportRejectsMissingVersion(t *testing.T) {
 }
 
 func TestImportRejectsHigherVersion(t *testing.T) {
-	_, iestore, cleanup := setupImportExportStore(t)
+	_, _, _, _, _, _, _, iestore, cleanup := setupImportExportStore(t)
 	defer cleanup()
 	ctx := context.Background()
 
 	err := iestore.ImportAll(ctx, domain.VaultExport{SchemaVersion: 99})
 	if err == nil {
-		t.Fatal("expected error for schema_version > 1")
+		t.Fatal("expected error for unsupported schema_version")
 	}
 }

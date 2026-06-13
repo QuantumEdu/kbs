@@ -1,34 +1,23 @@
 package domain
 
-// WorkflowRole defines the role of a step in a workflow.
-type WorkflowRole string
+import "time"
 
-const (
-	WorkflowRoleSystem    WorkflowRole = "system"
-	WorkflowRoleUser      WorkflowRole = "user"
-	WorkflowRoleAssistant WorkflowRole = "assistant"
-)
+type Workflow struct {
+	ID          string
+	Name        string
+	Slug        string
+	Description string
+	Status      Status
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
 
-// WorkflowStep is a single step in a workflow.
 type WorkflowStep struct {
-	ID       int
-	EntryID  string
-	StepNum  int
-	Role     WorkflowRole
-	Content  string
-	Label    string
-}
-
-// RenderedStep is a workflow step with variables resolved.
-type RenderedStep struct {
-	Role        WorkflowRole
-	Content     string
-	Label       string
-	MissingVars []string
-}
-
-// RenderedWorkflow is the result of running a workflow.
-type RenderedWorkflow struct {
-	EntryID string
-	Steps   []RenderedStep
+	ID             string
+	WorkflowID     string
+	OrderIndex     int
+	Title          string
+	Instruction    string
+	Required       bool
+	ExpectedOutput string
 }

@@ -1,132 +1,383 @@
-# SkillVault v1-alpha
+# SkillVault Qu@ntum
 
-Knowledge Operating System — local, portable, structured knowledge library.
+**Local-first knowledge operating system for developers and AI agents.**
 
-**Status**: v1-alpha (pre-release). Usable by CLI and MCP agents.
+Store, search, and retrieve prompts, skills, workflows, decisions, project memory, session summaries, and long AI outputs — all from one portable Go binary.
 
-## Quickstart
+```
+   _____ _ _    _  __     __          _          _
+  / ____| (_)  | | \ \   / /__ _ __ | |__   ___| |
+ | (___ | | |  | |  \ \ / / _ \ '_ \| '_ \ / _ \ |
+  \___ \| | |  | |   \ V /  __/ | | | |_) |  __/ |
+  ____) |_|_|  | |    \_/ \___|_| |_|_.__/ \___|_|
+ |_____/       |_|
+```
+
+**Codename:** Qu@ntum  
+**Status:** v2 — Production-ready alpha  
+**Binary size:** ~10 MB  
+**Dependencies:** Zero frameworks. Only `modernc.org/sqlite`.  
+**Language:** Go 1.26+
+
+---
+
+## Pain Problem
+
+Working with AI coding agents creates repeated friction:
+
+**Prompts and skills** scatter across chats, files, tools, and GitHub repos.  
+**Agents get overloaded** if every skill is installed globally.  
+**Long AI outputs** (PDF analyses, specs, reports) are valuable but pollute context if saved into prompts.  
+**Project decisions** are forgotten across sessions.  
+**Workflows miss steps** when there's no reusable checklist.  
+**Context** is either too little or too much — never the right amount.
+
+SkillVault solves this by becoming a **local source of truth** for everything your agents need, with retrieval designed for both humans and AI.
+
+---
+
+## Innovation: The Qu@ntum Context Layer
+
+Most vaults just store things. SkillVault Qu@ntum **delivers the right context** when agents need it.
+
+- **7 context modes** — profile, project, workflow, skill, planning, session_recall, full_brief
+- **Priority-based compilation** — user feedback > project state > decisions > workflows > sessions > artifact summaries > references
+- **Token-aware truncation** — respects `max_chars`, drops lowest-priority sections first
+- **Output**: clean, structured text ready for agent injection:
+
+```
+# CONTEXT PACK
+
+## Scope
+Project: MyApp
+Mode: planning
+
+## User Preferences
+- Prefer practical architecture
+- Use TDD for core domain behavior
+
+## Active Decisions
+- SQLite for local storage
+- No cloud sync in v1
+
+## Suggested Next Action
+Generate implementation plan from spec.
+```
+
+---
+
+## Installation
 
 ```bash
-# Build
+# Prerequisites: Go 1.26+
+git clone https://github.com/QuantumEdu/kbs
+cd kbs
+
+# Build (single binary, no CGO)
 go build -o ~/tools/skillvault ./cmd/skillvault
 
 # Initialize the vault
 skillvault init
 
-# Create a project
-echo '{"id":"vitacare","name":"VitaCare","active":true}' > /tmp/proj.json
-skillvault project upsert /tmp/proj.json
-
-# Add an entry
-echo '{"id":"prd-fastapi","name":"FastAPI PRD","type":"skill","content":"Design FastAPI backend"}' > /tmp/entry.json
-skillvault entry upsert /tmp/entry.json
-
-# Search
-skillvault search "fastapi"
+# Verify
+skillvault version
 ```
+
+That's it. One binary. No daemon, no database server, no frameworks.
+
+---
+
+## Quickstart
+
+```bash
+# Create a project
+skillvault add-project --name "MyApp" --description "My application"
+
+# Save a reusable skill
+skillvault add-entry \
+  --title "Clean Architecture Review" \
+  --type skill \
+  --summary "Checklist for reviewing clean architecture compliance" \
+  --project myapp \
+  --tags "architecture,review"
+
+# Search your vault
+skillvault search "architecture"
+
+# Save a long AI output as an artifact (stored on disk, indexed in DB)
+skillvault save-artifact \
+  --title "PDF Analysis - Security Audit" \
+  --type pdf_analysis \
+  --content "$(cat /tmp/long-analysis.md)" \
+  --project myapp \
+  --tags "security,audit"
+
+# Get compact context for your agent
+skillvault get-context --mode planning --project myapp --max-chars 5000
+
+# Wrap up a session with decisions
+skillvault session-wrap \
+  --project myapp \
+  --summary "Reviewed auth middleware" \
+  --decisions "Use JWT,not sessions" \
+  --pending "Add refresh token rotation"
+```
+
+---
 
 ## Architecture
 
+### Core Principle
+
 ```
-cmd/skillvault (main.go)
-  ├── internal/cli     (adapter: stdlib flag+os.Args)
-  ├── internal/mcp     (adapter: stdio JSON-RPC 2.0)
-  └── internal/api     (adapter: v1-final scaffold)
-        ↓
-  internal/app         (use cases)
-        ↓
-  internal/domain      (types, validators)
-  internal/vars        (variable detection + injection)
-        ↓
-  internal/db          (SQLite + FTS5)
+DB decides. Disk remembers. Qu@ntum delivers.
 ```
 
-## Database
+- **DB decides**: what exists, what type, status, relations, how to find it (SQLite + FTS5).
+- **Disk remembers**: long artifacts, AI outputs, specs, reports stored as files in `objects/YYYY/MM/`.
+- **Qu@ntum delivers**: compact, filtered, priority-sorted context for agents.
 
-- Default path: `~/.skillvault/vault.db`
-- Engine: SQLite via `modernc.org/sqlite` (pure Go, no CGO)
-- FTS5 full-text search with `porter unicode61` tokenizer
-- Soft delete only (`active=0`), no hard delete
+### Package Map
 
-## Commands (17 alpha commands)
+```
+cmd/skillvault/
+├── internal/cli/         # 14 flat CLI commands (stdlib, no Cobra)
+├── internal/mcp/         # 10 MCP tools over stdio JSON-RPC 2.0
+├── internal/api/         # HTTP scaffold (future)
+├── internal/app/         # Use cases: save, search, context, session, etc.
+├── internal/domain/      # Pure entities + validators
+├── internal/db/          # SQLite + FTS5 (7 stores + migrations)
+├── internal/files/       # Artifact filesystem (objects/YYYY/MM/)
+├── internal/context/     # Qu@ntum context compiler (7 modes)
+├── internal/security/    # Secret scanner (4 regex patterns)
+├── internal/vars/        # Variable detection + injection
+└── internal/export/      # Import/Export with conflict resolution
+```
 
-| Command | Description |
-|---------|-------------|
-| `skillvault init` | Initialize vault database |
-| `skillvault get <id>` | Get entry by ID |
-| `skillvault search <query>` | FTS5 search with filters |
-| `skillvault list` | List entries |
-| `skillvault entry upsert <file>` | Create/update entry |
-| `skillvault entry archive <id>` | Archive (soft-delete) entry |
-| `skillvault project upsert <file>` | Create/update project |
-| `skillvault project list` | List projects |
-| `skillvault series get <id>` | Get series with entries |
-| `skillvault series list` | List series |
-| `skillvault series upsert <file>` | Create/update series |
-| `skillvault series replace <id> <file>` | Replace series entries |
-| `skillvault workflow run <id>` | Run workflow (render vars) |
-| `skillvault export <file>` | Export vault to JSON |
-| `skillvault import <file>` | Import vault from JSON |
-| `skillvault mcp` | Start MCP server (stdio JSON-RPC) |
-| `skillvault version` | Print version |
+### Storage Layout
 
-## MCP Tools (11 alpha tools)
+```
+~/.skillvault/
+├── vault.db              # SQLite + FTS5 (metadata, search, relations)
+├── objects/              # Long artifact files
+│   └── YYYY/MM/
+│       └── <slug>.<ext>  # Content-addressed by SHA256
+├── exports/              # JSON exports
+└── cache/                # Temporary cache
+```
 
-- `get_entry`, `search_entries`, `list_entries`
-- `upsert_entry`, `archive_entry`
-- `get_series`, `list_series`, `upsert_series`, `replace_series_entries`
-- `get_context`, `run_workflow`
+**Rule**: Content goes to DB when small and frequently retrieved. Content goes to filesystem when long, or a final document, or an AI output worth preserving.
+
+---
+
+## CLI Commands (14)
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `init` | Create vault directories + DB | `skillvault init` |
+| `add-entry` | Save a reusable entry | `skillvault add-entry --title "..." --type skill --summary "..."` |
+| `search` | FTS5 search with filters | `skillvault search "auth" --type skill --project myapp` |
+| `get` | Get entry by ID or slug | `skillvault get clean-architecture-review` |
+| `save-artifact` | Save a long file-backed artifact | `skillvault save-artifact --title "..." --type pdf_analysis --file report.md` |
+| `get-context` | Compile Qu@ntum context pack | `skillvault get-context --mode planning --project myapp` |
+| `add-project` | Create a project | `skillvault add-project --name "MyApp" --description "..."` |
+| `list-projects` | List all projects | `skillvault list-projects` |
+| `archive` | Archive an entry | `skillvault archive clean-architecture-review` |
+| `add-workflow` | Create a workflow (JSON file) | `skillvault add-workflow workflow.json` |
+| `render-workflow` | Render workflow as checklist | `skillvault render-workflow spec-plan-task` |
+| `session-wrap` | Save session with decisions | `skillvault session-wrap --project myapp --summary "..." --decisions "d1,d2"` |
+| `export` | Export vault to JSON | `skillvault export vault.json` |
+| `import` | Import vault from JSON | `skillvault import vault.json` |
+
+---
+
+## MCP Tools (10)
+
+For AI agents (Claude Code, OpenCode, etc.):
+
+| Tool | Description |
+|------|-------------|
+| `save_entry` | Save a prompt, skill, decision, feedback, session — anything reusable |
+| `search_entries` | FTS5 search with filters by type, project, tags, status |
+| `get_entry` | Retrieve entry by ID with artifact reference |
+| `save_artifact` | Save long AI output as file-backed artifact with metadata |
+| `get_context` | Compile agent-ready context pack (7 modes) |
+| `compose_series` | Get ordered entries in a series |
+| `render_workflow` | Get workflow steps as ordered checklist |
+| `session_wrap` | Create session entry with decisions, pending items, learnings |
+| `archive_entry` | Set entry status to archived |
+| `list_projects` | List all projects with status |
 
 ### MCP Setup (Claude Code / OpenCode)
 
-Add to your MCP config:
+Add to your MCP configuration:
 
 ```json
 {
   "mcpServers": {
     "skillvault": {
-      "command": "~/tools/skillvault",
+      "command": "/path/to/skillvault",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-## Alpha vs Final
+Create a symlink for agent-only access:
 
-**v1-alpha** includes:
-- SQLite + FTS5 backend
-- Entry, Project, Series, Workflow CRUD
-- Variable detection + injection
-- CLI (17 commands)
-- MCP server (11 tools)
-- Import/export (JSON)
+```bash
+ln -sf ~/tools/skillvault ~/tools/mcp
+# Now agents can call "mcp" directly
+```
 
-**v1-final** will add:
-- HTTP API (`net/http`)
-- `project_refs`, `archive_series`, `archive_project`
-- `copy_entry`, `copy_series`
-- `add_entry_to_series`, `remove_entry_from_series`
-- Stats, setup commands
-- 22 MCP tools total
+---
+
+## Entity Model
+
+### Entry Types (10)
+
+| Type | Purpose |
+|------|---------|
+| `prompt` | Reusable prompt template |
+| `skill` | Structured skill/pattern |
+| `workflow_note` | Note about a workflow |
+| `reference` | Reference document |
+| `user` | User preference |
+| `feedback` | User feedback/decision |
+| `project_state` | Project snapshot |
+| `session` | Session summary |
+| `decision` | Architectual decision |
+| `artifact_summary` | Summary of a stored artifact |
+
+### Status Model
+
+| Status | Meaning |
+|--------|---------|
+| `draft` | Not ready for agent use |
+| `active` | Available for normal retrieval |
+| `archived` | Searchable but excluded from context packs |
+| `deprecated` | Kept for history, not recommended |
+| `canonical` | Preferred version |
+
+### Relations (EntryLink)
+
+Entries can be explicitly related:
+
+```
+references  → links to supporting content
+supersedes  → newer version replaces older
+related_to  → loosely connected
+part_of     → compositional relationship
+derived_from→ source → derived relationship
+implements  → implements a spec/decision
+```
+
+---
+
+## Security
+
+SkillVault detects and blocks secrets before they enter the vault:
+
+| Pattern | Example |
+|---------|---------|
+| OpenAI keys | `sk-...` (20+ chars) |
+| Private keys | `-----BEGIN PRIVATE KEY-----` |
+| GitHub tokens | `ghp_...` |
+| Slack tokens | `xoxb-...`, `xoxa-...` |
+
+On detection: content is **rejected** or **redacted** with a warning. No secrets stored.
+
+---
+
+## User Flows
+
+### 1. Save a PDF analysis from an AI agent
+
+```
+User → "Guarda este análisis en SkillVault como artefacto del proyecto Forense Digital"
+Agent → calls save_artifact(title, type=pdf_analysis, content, project)
+SkillVault → stores file in objects/2026/06/forense-analisis.md
+           → creates artifact metadata + entry in DB
+           → indexes summary + tags in FTS5
+```
+
+### 2. Agent retrieves planning context
+
+```
+Agent → calls get_context(project="MyApp", mode="planning", max_chars=8000)
+SkillVault → compiles: user preferences + project state + decisions + workflows
+           → truncates lowest-priority sections to fit 8000 chars
+           → returns structured text for agent injection
+```
+
+### 3. Session wrap for project continuity
+
+```
+User → "Cierra sesión, guarda lo que decidimos"
+Agent → calls session_wrap(project, summary, decisions[...], pending[...], learnings[...])
+SkillVault → creates session entry + optional artifact
+           → links to project
+           → available for next get_context call
+```
+
+---
+
+## Comparison
+
+| Feature | File system | GitHub Gists | Obsidian | SkillVault |
+|---------|-------------|-------------|----------|------------|
+| Agent-facing MCP | ❌ | ❌ | ❌ | ✅ |
+| FTS5 search | ❌ | ❌ | ❌ | ✅ |
+| Context compilation | ❌ | ❌ | ❌ | ✅ (Qu@ntum) |
+| Hybrid DB+disk | ❌ | ❌ | ❌ | ✅ |
+| Secret detection | ❌ | ❌ | ❌ | ✅ |
+| Workflow checklists | ❌ | ❌ | ❌ | ✅ |
+| Single 10MB binary | ❌ | ❌ | ❌ | ✅ |
+| Zero cloud dependency | ✅ | ❌ | ❌ | ✅ |
+| Portable (any OS) | ✅ | ❌ | ❌ | ✅ |
+| Entry relations | ❌ | ❌ | ❌ | ✅ |
+
+---
 
 ## Testing
 
 ```bash
-# Run all tests
+# Run all 400+ tests
 go test ./...
 
 # With coverage
 go test -cover ./...
 
-# Integration tests use in-memory SQLite (:memory:)
+# Integration tests use in-memory SQLite (no filesystem needed)
 ```
+
+Test pyramid:
+- **Unit tests**: domain validation, security patterns, variable detection
+- **Integration tests**: SQLite stores, artifact filesystem, MCP tools
+- **Acceptance tests**: full end-to-end flows (AC1-AC10)
+
+---
 
 ## Dependencies
 
-- Go 1.26+
-- `modernc.org/sqlite` (pure Go SQLite driver)
-- No frameworks, no ORM, no Cobra, no Fiber
+- **Go 1.26+** — standard library for CLI, HTTP, JSON, file I/O, crypto, embed
+- **`modernc.org/sqlite`** — pure Go SQLite driver (no CGO)
+
+**Zero frameworks.** No Cobra, no Fiber, no ORM, no Gin, no Echo.
+
+---
+
+## Project Status
+
+| Phase | Status |
+|-------|--------|
+| v1-alpha (SQLite vault) | ✅ Archived |
+| v2 Qu@ntum (Hybrid + Context) | ✅ Active |
+| Cloud sync | 🔲 Future |
+| TUI | 🔲 Future |
+| Vector search | 🔲 Future |
+
+---
 
 ## License
 

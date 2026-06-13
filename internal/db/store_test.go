@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/quantum-6/skillvault/internal/domain"
+	_ "modernc.org/sqlite"
 )
 
 func TestOpenDBConnection(t *testing.T) {
@@ -37,14 +37,23 @@ func TestNewStoreCreation(t *testing.T) {
 	if s.Entries == nil {
 		t.Error("Entries store is nil")
 	}
-	if s.Projects == nil {
-		t.Error("Projects store is nil")
+	if s.Artifacts == nil {
+		t.Error("Artifacts store is nil")
+	}
+	if s.Workflows == nil {
+		t.Error("Workflows store is nil")
 	}
 	if s.Series == nil {
 		t.Error("Series store is nil")
 	}
-	if s.Workflows == nil {
-		t.Error("Workflows store is nil")
+	if s.Tags == nil {
+		t.Error("Tags store is nil")
+	}
+	if s.EntryLinks == nil {
+		t.Error("EntryLinks store is nil")
+	}
+	if s.Projects == nil {
+		t.Error("Projects store is nil")
 	}
 	if s.Search == nil {
 		t.Error("Search store is nil")
@@ -58,11 +67,15 @@ func TestNewStoreCreation(t *testing.T) {
 }
 
 func TestStoreInterfacesCompile(t *testing.T) {
-	var _ EntryStore = (*entryStoreImpl)(nil)
-	var _ ProjectStore = (*projectStoreImpl)(nil)
-	var _ SeriesStore = (*seriesStoreImpl)(nil)
-	var _ WorkflowStore = (*workflowStoreImpl)(nil)
-	var _ SearchStore = (*searchStoreImpl)(nil)
+	var _ EntryStore = (*sqliteEntryStore)(nil)
+	var _ ProjectStore = (*sqliteProjectStore)(nil)
+	var _ SeriesStore = (*sqliteSeriesStore)(nil)
+	var _ WorkflowStore = (*sqliteWorkflowStore)(nil)
+	var _ ArtifactStore = (*sqliteArtifactStore)(nil)
+	var _ TagStore = (*sqliteTagStore)(nil)
+	var _ EntryLinkStore = (*sqliteEntryLinkStore)(nil)
+	var _ SearchStore = (*sqliteSearchStore)(nil)
+	var _ ImportExportStore = (*sqliteImportExportStore)(nil)
 
 	s := &Store{}
 	if s == nil {
@@ -70,47 +83,6 @@ func TestStoreInterfacesCompile(t *testing.T) {
 	}
 }
 
-type entryStoreImpl struct{}
-type projectStoreImpl struct{}
-type seriesStoreImpl struct{}
-type workflowStoreImpl struct{}
-type searchStoreImpl struct{}
+type mockSearchStore struct{}
 
-func (e *entryStoreImpl) UpsertEntry(ctx context.Context, entry domain.Entry, tags []string, steps []domain.WorkflowStep) error {
-	return nil
-}
-func (e *entryStoreImpl) GetEntry(ctx context.Context, id string, includeArchived bool) (domain.EntryResult, error) {
-	return domain.EntryResult{}, nil
-}
-func (e *entryStoreImpl) ListEntries(ctx context.Context, filter domain.EntryFilter) ([]domain.EntryListResult, error) {
-	return nil, nil
-}
-func (e *entryStoreImpl) ArchiveEntry(ctx context.Context, id string) error { return nil }
-
-func (p *projectStoreImpl) UpsertProject(ctx context.Context, proj domain.Project) error { return nil }
-func (p *projectStoreImpl) ListProjects(ctx context.Context, includeArchived bool) ([]domain.Project, error) {
-	return nil, nil
-}
-
-func (s *seriesStoreImpl) UpsertSeries(ctx context.Context, series domain.Series) error { return nil }
-func (s *seriesStoreImpl) GetSeries(ctx context.Context, id string, includeArchived bool) (domain.SeriesResult, error) {
-	return domain.SeriesResult{}, nil
-}
-func (s *seriesStoreImpl) ListSeries(ctx context.Context, filter domain.SeriesFilter) ([]domain.SeriesListResult, error) {
-	return nil, nil
-}
-func (s *seriesStoreImpl) ReplaceSeriesEntries(ctx context.Context, seriesID string, entries []domain.SeriesEntryInput) error {
-	return nil
-}
-
-func (w *workflowStoreImpl) UpsertWorkflowSteps(ctx context.Context, entryID string, steps []domain.WorkflowStep) error {
-	return nil
-}
-func (w *workflowStoreImpl) GetWorkflowSteps(ctx context.Context, entryID string) ([]domain.WorkflowStep, error) {
-	return nil, nil
-}
-
-func (s *searchStoreImpl) SearchEntries(ctx context.Context, q domain.SearchQuery) ([]domain.EntrySearchResult, error) {
-	return nil, nil
-}
-func (s *searchStoreImpl) RebuildFTS(ctx context.Context) error { return nil }
+func (m *mockSearchStore) RebuildFTS(ctx context.Context) error { return nil }

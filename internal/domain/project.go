@@ -1,9 +1,13 @@
 package domain
 
-// Project is a logical container for vault entries and series.
+import "time"
+
 type Project struct {
 	ID          string
 	Name        string
+	Slug        string
 	Description string
-	Active      bool
+	Status      Status
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }

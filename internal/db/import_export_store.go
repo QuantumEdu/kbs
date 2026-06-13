@@ -10,11 +10,10 @@ import (
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
-// ExportAll exports the entire vault as a JSON-serializable structure.
 func (s *sqliteImportExportStore) ExportAll(ctx context.Context) (domain.VaultExport, error) {
 	export := domain.VaultExport{
-		SchemaVersion: 1,
-		AppVersion:    "v1-alpha",
+		SchemaVersion: 2,
+		AppVersion:    "v2-hermes",
 		ExportedAt:    time.Now().UTC().Format(time.RFC3339),
 		Source:        "skillvault",
 	}
@@ -22,39 +21,54 @@ func (s *sqliteImportExportStore) ExportAll(ctx context.Context) (domain.VaultEx
 	var err error
 	export.Data.Projects, err = s.exportProjects(ctx)
 	if err != nil {
-		return export, err
+		return export, fmt.Errorf("export projects: %w", err)
 	}
 	export.Data.Entries, err = s.exportEntries(ctx)
 	if err != nil {
-		return export, err
+		return export, fmt.Errorf("export entries: %w", err)
 	}
 	export.Data.EntryTags, err = s.exportEntryTags(ctx)
 	if err != nil {
-		return export, err
+		return export, fmt.Errorf("export entry_tags: %w", err)
+	}
+	export.Data.Tags, err = s.exportTags(ctx)
+	if err != nil {
+		return export, fmt.Errorf("export tags: %w", err)
 	}
 	export.Data.Series, err = s.exportSeries(ctx)
 	if err != nil {
-		return export, err
+		return export, fmt.Errorf("export series: %w", err)
 	}
 	export.Data.SeriesEntries, err = s.exportSeriesEntries(ctx)
 	if err != nil {
-		return export, err
+		return export, fmt.Errorf("export series_entries: %w", err)
+	}
+	export.Data.Workflows, err = s.exportWorkflows(ctx)
+	if err != nil {
+		return export, fmt.Errorf("export workflows: %w", err)
 	}
 	export.Data.WorkflowSteps, err = s.exportWorkflowSteps(ctx)
 	if err != nil {
-		return export, err
+		return export, fmt.Errorf("export workflow_steps: %w", err)
+	}
+	export.Data.EntryLinks, err = s.exportEntryLinks(ctx)
+	if err != nil {
+		return export, fmt.Errorf("export entry_links: %w", err)
+	}
+	export.Data.Artifacts, err = s.exportArtifacts(ctx)
+	if err != nil {
+		return export, fmt.Errorf("export artifacts: %w", err)
 	}
 
 	return export, nil
 }
 
-// ImportAll imports a vault export into the database in a single transaction.
 func (s *sqliteImportExportStore) ImportAll(ctx context.Context, data domain.VaultExport) error {
 	if data.SchemaVersion == 0 {
 		return fmt.Errorf("import rejected: missing schema_version")
 	}
-	if data.SchemaVersion > 1 {
-		return fmt.Errorf("import rejected: schema_version %d exceeds supported version 1", data.SchemaVersion)
+	if data.SchemaVersion > 2 {
+		return fmt.Errorf("import rejected: schema_version %d is newer than supported (max 2)", data.SchemaVersion)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -63,110 +77,186 @@ func (s *sqliteImportExportStore) ImportAll(ctx context.Context, data domain.Vau
 	}
 	defer tx.Rollback()
 
-	// Upsert projects
-	for _, p := range data.Data.Projects {
-		active := 0
-		if p.Active {
-			active = 1
+	for _, t := range data.Data.Tags {
+		if t.Slug == "" {
+			t.Slug = t.Name
 		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO projects (id, name, description, active, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-			 ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description,
-			 active=excluded.active, updated_at=CURRENT_TIMESTAMP`,
-			p.ID, p.Name, p.Description, active)
+			`INSERT INTO tags (id, name, slug) VALUES (?, ?, ?)
+			 ON CONFLICT(id) DO UPDATE SET name=excluded.name, slug=excluded.slug`,
+			t.ID, t.Name, t.Slug)
+		if err != nil {
+			return fmt.Errorf("import tag %s: %w", t.ID, err)
+		}
+	}
+
+	for _, p := range data.Data.Projects {
+		if p.Status == "" {
+			p.Status = domain.StatusActive
+		}
+		if p.Slug == "" {
+			p.Slug = p.Name
+		}
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO projects (id, name, slug, description, status, updated_at)
+			 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			 ON CONFLICT(id) DO UPDATE SET
+			 name=excluded.name, slug=excluded.slug,
+			 description=excluded.description, status=excluded.status,
+			 updated_at=CURRENT_TIMESTAMP`,
+			p.ID, p.Name, p.Slug, p.Description, string(p.Status))
 		if err != nil {
 			return fmt.Errorf("import project %s: %w", p.ID, err)
 		}
 	}
 
-	// Upsert entries
-	for _, e := range data.Data.Entries {
-		active := 0
-		if e.Active {
-			active = 1
+	for _, wf := range data.Data.Workflows {
+		if wf.Status == "" {
+			wf.Status = domain.StatusActive
 		}
-		projectID := interface{}(nil)
-		if e.ProjectID != nil {
-			projectID = *e.ProjectID
+		if wf.Slug == "" {
+			wf.Slug = wf.Name
 		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO entries (id, name, type, project_id, description, content, vars, tags_denorm, active, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-			 ON CONFLICT(id) DO UPDATE SET name=excluded.name, type=excluded.type,
-			 project_id=excluded.project_id, description=excluded.description,
-			 content=excluded.content, vars=excluded.vars, tags_denorm=excluded.tags_denorm,
-			 active=excluded.active, updated_at=CURRENT_TIMESTAMP`,
-			e.ID, e.Name, string(e.Type), projectID, e.Description, e.Content, e.Vars, "", active)
+			`INSERT INTO workflows (id, name, slug, description, status, updated_at)
+			 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			 ON CONFLICT(id) DO UPDATE SET
+			 name=excluded.name, slug=excluded.slug,
+			 description=excluded.description, status=excluded.status,
+			 updated_at=CURRENT_TIMESTAMP`,
+			wf.ID, wf.Name, wf.Slug, wf.Description, string(wf.Status))
 		if err != nil {
-			return fmt.Errorf("import entry %s: %w", e.ID, err)
+			return fmt.Errorf("import workflow %s: %w", wf.ID, err)
 		}
 	}
 
-	// Upsert entry_tags
-	for _, et := range data.Data.EntryTags {
-		_, err := tx.ExecContext(ctx,
-			"INSERT OR REPLACE INTO entry_tags (entry_id, tag) VALUES (?, ?)",
-			et.EntryID, et.Tag)
-		if err != nil {
-			return fmt.Errorf("import tag %s/%s: %w", et.EntryID, et.Tag, err)
-		}
-	}
-
-	// Upsert series
 	for _, s := range data.Data.Series {
-		active := 0
-		if s.Active {
-			active = 1
+		if s.Status == "" {
+			s.Status = domain.StatusActive
 		}
-		projectID := interface{}(nil)
-		if s.ProjectID != nil {
-			projectID = *s.ProjectID
+		if s.Slug == "" {
+			s.Slug = s.Name
 		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO series (id, name, project_id, description, vars, active, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-			 ON CONFLICT(id) DO UPDATE SET name=excluded.name, project_id=excluded.project_id,
-			 description=excluded.description, vars=excluded.vars,
-			 active=excluded.active, updated_at=CURRENT_TIMESTAMP`,
-			s.ID, s.Name, projectID, s.Description, s.Vars, active)
+			`INSERT INTO series (id, name, slug, description, status, updated_at)
+			 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			 ON CONFLICT(id) DO UPDATE SET
+			 name=excluded.name, slug=excluded.slug,
+			 description=excluded.description, status=excluded.status,
+			 updated_at=CURRENT_TIMESTAMP`,
+			s.ID, s.Name, s.Slug, s.Description, string(s.Status))
 		if err != nil {
 			return fmt.Errorf("import series %s: %w", s.ID, err)
 		}
 	}
 
-	// Upsert series_entries
-	for _, se := range data.Data.SeriesEntries {
-		required := 0
-		if se.Required {
-			required = 1
+	for _, e := range data.Data.Entries {
+		if e.Status == "" {
+			e.Status = domain.StatusActive
 		}
-		active := 0
-		if se.Active {
-			active = 1
+		if e.Slug == "" {
+			e.Slug = e.Title
+		}
+		projectID := interface{}(nil)
+		if e.ProjectID != nil {
+			projectID = *e.ProjectID
+		}
+		artifactID := interface{}(nil)
+		if e.ArtifactID != nil {
+			artifactID = *e.ArtifactID
 		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT OR REPLACE INTO series_entries (series_id, entry_id, step_num, label, required, notes, active)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			se.SeriesID, se.EntryID, se.StepNum, se.Label, required, se.Notes, active)
+			`INSERT INTO entries (id, name, title, slug, type, content, summary, body_optional, status, project_id, artifact_id, tags_denorm, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', CURRENT_TIMESTAMP)
+			 ON CONFLICT(id) DO UPDATE SET
+			 name=excluded.name, title=excluded.title, slug=excluded.slug,
+			 type=excluded.type, content=excluded.content,
+			 summary=excluded.summary, body_optional=excluded.body_optional,
+			 status=excluded.status, project_id=excluded.project_id,
+			 artifact_id=excluded.artifact_id, updated_at=CURRENT_TIMESTAMP`,
+			e.ID, e.Title, e.Title, e.Slug, string(e.Type), e.BodyOptional, e.Summary, e.BodyOptional, string(e.Status), projectID, artifactID)
+		if err != nil {
+			return fmt.Errorf("import entry %s: %w", e.ID, err)
+		}
+	}
+
+	for _, a := range data.Data.Artifacts {
+		projectID := interface{}(nil)
+		if a.ProjectID != nil {
+			projectID = *a.ProjectID
+		}
+		sourceEntryID := interface{}(nil)
+		if a.SourceEntryID != nil {
+			sourceEntryID = *a.SourceEntryID
+		}
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO artifacts (id, title, slug, type, file_path, mime_type, summary, content_hash, size_bytes, project_id, source_entry_id, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+			 ON CONFLICT(id) DO UPDATE SET
+			 title=excluded.title, slug=excluded.slug,
+			 type=excluded.type, file_path=excluded.file_path,
+			 mime_type=excluded.mime_type, summary=excluded.summary,
+			 content_hash=excluded.content_hash, size_bytes=excluded.size_bytes,
+			 project_id=excluded.project_id, source_entry_id=excluded.source_entry_id,
+			 updated_at=CURRENT_TIMESTAMP`,
+			a.ID, a.Title, a.Slug, string(a.Type), a.FilePath, a.MimeType, a.Summary, a.ContentHash, a.SizeBytes, projectID, sourceEntryID)
+		if err != nil {
+			return fmt.Errorf("import artifact %s: %w", a.ID, err)
+		}
+	}
+
+	for _, et := range data.Data.EntryTags {
+		_, err := tx.ExecContext(ctx,
+			"INSERT OR REPLACE INTO entry_tags (entry_id, tag) VALUES (?, ?)",
+			et.EntryID, et.TagID)
+		if err != nil {
+			return fmt.Errorf("import entry_tag %s/%s: %w", et.EntryID, et.TagID, err)
+		}
+	}
+
+	for _, se := range data.Data.SeriesEntries {
+		_, err := tx.ExecContext(ctx,
+			`INSERT OR REPLACE INTO series_entries (series_id, entry_id, order_index)
+			 VALUES (?, ?, ?)`,
+			se.SeriesID, se.EntryID, se.OrderIndex)
 		if err != nil {
 			return fmt.Errorf("import series_entry %s/%s: %w", se.SeriesID, se.EntryID, err)
 		}
 	}
 
-	// Upsert workflow_steps
 	for _, ws := range data.Data.WorkflowSteps {
+		required := 0
+		if ws.Required {
+			required = 1
+		}
+		id := interface{}(nil)
+		if ws.ID != "" {
+			id = ws.ID
+		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO workflow_steps (id, entry_id, step_num, role, content, label)
-			 VALUES (?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(id) DO UPDATE SET entry_id=excluded.entry_id, step_num=excluded.step_num,
-			 role=excluded.role, content=excluded.content, label=excluded.label`,
-			ws.ID, ws.EntryID, ws.StepNum, string(ws.Role), ws.Content, ws.Label)
+			`INSERT INTO workflow_steps (id, workflow_id, order_index, title, instruction, required, expected_output)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(id) DO UPDATE SET
+			 workflow_id=excluded.workflow_id, order_index=excluded.order_index,
+			 title=excluded.title, instruction=excluded.instruction,
+			 required=excluded.required, expected_output=excluded.expected_output`,
+			id, ws.WorkflowID, ws.OrderIndex, ws.Title, ws.Instruction, required, ws.ExpectedOutput)
 		if err != nil {
-			return fmt.Errorf("import workflow_step %d: %w", ws.ID, err)
+			return fmt.Errorf("import workflow_step: %w", err)
 		}
 	}
 
-	// Rebuild FTS5
+	for _, el := range data.Data.EntryLinks {
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO entry_links (from_entry_id, to_entry_id, relation_type)
+			 VALUES (?, ?, ?)
+			 ON CONFLICT(from_entry_id, to_entry_id, relation_type) DO NOTHING`,
+			el.FromEntryID, el.ToEntryID, string(el.RelationType))
+		if err != nil {
+			return fmt.Errorf("import entry_link %s/%s: %w", el.FromEntryID, el.ToEntryID, err)
+		}
+	}
+
 	if _, err := tx.ExecContext(ctx, "INSERT INTO entries_fts(entries_fts) VALUES('rebuild')"); err != nil {
 		return fmt.Errorf("rebuild fts after import: %w", err)
 	}
@@ -174,9 +264,8 @@ func (s *sqliteImportExportStore) ImportAll(ctx context.Context, data domain.Vau
 	return tx.Commit()
 }
 
-// Helper export methods
 func (s *sqliteImportExportStore) exportProjects(ctx context.Context) ([]domain.Project, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT id, name, COALESCE(description,''), active FROM projects ORDER BY id")
+	rows, err := s.db.QueryContext(ctx, "SELECT id, name, COALESCE(slug,''), COALESCE(description,''), COALESCE(status,'active') FROM projects ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +274,7 @@ func (s *sqliteImportExportStore) exportProjects(ctx context.Context) ([]domain.
 }
 
 func (s *sqliteImportExportStore) exportEntries(ctx context.Context) ([]domain.Entry, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, type, project_id, COALESCE(description,''), content, COALESCE(vars,''), active FROM entries ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, COALESCE(title,''), COALESCE(slug,''), type, project_id, COALESCE(summary,''), COALESCE(body_optional,''), COALESCE(status,'active'), artifact_id FROM entries ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -193,17 +282,22 @@ func (s *sqliteImportExportStore) exportEntries(ctx context.Context) ([]domain.E
 	var results []domain.Entry
 	for rows.Next() {
 		var e domain.Entry
-		var projID sql.NullString
-		var desc, vars string
-		var active int
-		if err := rows.Scan(&e.ID, &e.Name, &e.Type, &projID, &desc, &e.Content, &vars, &active); err != nil {
+		var projID, artID, summary, body, status sql.NullString
+		if err := rows.Scan(&e.ID, &e.Title, &e.Slug, &e.Type, &projID, &summary, &body, &status, &artID); err != nil {
 			return nil, err
 		}
-		e.Active = active == 1
-		e.Description = desc
-		e.Vars = vars
+		e.Status = domain.Status(status.String)
 		if projID.Valid {
 			e.ProjectID = &projID.String
+		}
+		if artID.Valid {
+			e.ArtifactID = &artID.String
+		}
+		if summary.Valid {
+			e.Summary = summary.String
+		}
+		if body.Valid {
+			e.BodyOptional = body.String
 		}
 		results = append(results, e)
 	}
@@ -219,7 +313,7 @@ func (s *sqliteImportExportStore) exportEntryTags(ctx context.Context) ([]domain
 	var results []domain.EntryTag
 	for rows.Next() {
 		var et domain.EntryTag
-		if err := rows.Scan(&et.EntryID, &et.Tag); err != nil {
+		if err := rows.Scan(&et.EntryID, &et.TagID); err != nil {
 			return nil, err
 		}
 		results = append(results, et)
@@ -227,8 +321,25 @@ func (s *sqliteImportExportStore) exportEntryTags(ctx context.Context) ([]domain
 	return results, nil
 }
 
+func (s *sqliteImportExportStore) exportTags(ctx context.Context) ([]domain.Tag, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT id, name, slug FROM tags ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []domain.Tag
+	for rows.Next() {
+		var t domain.Tag
+		if err := rows.Scan(&t.ID, &t.Name, &t.Slug); err != nil {
+			return nil, err
+		}
+		results = append(results, t)
+	}
+	return results, nil
+}
+
 func (s *sqliteImportExportStore) exportSeries(ctx context.Context) ([]domain.Series, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, project_id, COALESCE(description,''), COALESCE(vars,''), active FROM series ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(slug,''), COALESCE(description,''), COALESCE(status,'active') FROM series ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -236,25 +347,18 @@ func (s *sqliteImportExportStore) exportSeries(ctx context.Context) ([]domain.Se
 	var results []domain.Series
 	for rows.Next() {
 		var se domain.Series
-		var projID sql.NullString
-		var desc, vars string
-		var active int
-		if err := rows.Scan(&se.ID, &se.Name, &projID, &desc, &vars, &active); err != nil {
+		var status string
+		if err := rows.Scan(&se.ID, &se.Name, &se.Slug, &se.Description, &status); err != nil {
 			return nil, err
 		}
-		se.Active = active == 1
-		se.Description = desc
-		se.Vars = vars
-		if projID.Valid {
-			se.ProjectID = &projID.String
-		}
+		se.Status = domain.Status(status)
 		results = append(results, se)
 	}
 	return results, nil
 }
 
 func (s *sqliteImportExportStore) exportSeriesEntries(ctx context.Context) ([]domain.SeriesEntry, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT series_id, entry_id, step_num, COALESCE(label,''), required, COALESCE(notes,''), active FROM series_entries ORDER BY series_id, step_num`)
+	rows, err := s.db.QueryContext(ctx, `SELECT series_id, entry_id, COALESCE(order_index,0) FROM series_entries ORDER BY series_id, order_index`)
 	if err != nil {
 		return nil, err
 	}
@@ -262,19 +366,39 @@ func (s *sqliteImportExportStore) exportSeriesEntries(ctx context.Context) ([]do
 	var results []domain.SeriesEntry
 	for rows.Next() {
 		var se domain.SeriesEntry
-		var req, active int
-		if err := rows.Scan(&se.SeriesID, &se.EntryID, &se.StepNum, &se.Label, &req, &se.Notes, &active); err != nil {
+		if err := rows.Scan(&se.SeriesID, &se.EntryID, &se.OrderIndex); err != nil {
 			return nil, err
 		}
-		se.Required = req == 1
-		se.Active = active == 1
 		results = append(results, se)
 	}
 	return results, nil
 }
 
+func (s *sqliteImportExportStore) exportWorkflows(ctx context.Context) ([]domain.Workflow, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, COALESCE(slug,''), COALESCE(description,''), COALESCE(status,'active') FROM workflows ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []domain.Workflow
+	for rows.Next() {
+		var w domain.Workflow
+		var status string
+		var desc sql.NullString
+		if err := rows.Scan(&w.ID, &w.Name, &w.Slug, &desc, &status); err != nil {
+			return nil, err
+		}
+		w.Status = domain.Status(status)
+		if desc.Valid {
+			w.Description = desc.String
+		}
+		results = append(results, w)
+	}
+	return results, nil
+}
+
 func (s *sqliteImportExportStore) exportWorkflowSteps(ctx context.Context) ([]domain.WorkflowStep, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, entry_id, step_num, role, content, COALESCE(label,'') FROM workflow_steps ORDER BY entry_id, step_num`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, workflow_id, order_index, COALESCE(title,''), COALESCE(instruction,''), required, COALESCE(expected_output,'') FROM workflow_steps ORDER BY workflow_id, order_index`)
 	if err != nil {
 		return nil, err
 	}
@@ -282,10 +406,60 @@ func (s *sqliteImportExportStore) exportWorkflowSteps(ctx context.Context) ([]do
 	var results []domain.WorkflowStep
 	for rows.Next() {
 		var ws domain.WorkflowStep
-		if err := rows.Scan(&ws.ID, &ws.EntryID, &ws.StepNum, &ws.Role, &ws.Content, &ws.Label); err != nil {
+		var stepID int64
+		var required int
+		if err := rows.Scan(&stepID, &ws.WorkflowID, &ws.OrderIndex, &ws.Title, &ws.Instruction, &required, &ws.ExpectedOutput); err != nil {
 			return nil, err
 		}
+		ws.ID = fmt.Sprintf("%d", stepID)
+		ws.Required = required == 1
 		results = append(results, ws)
+	}
+	return results, nil
+}
+
+func (s *sqliteImportExportStore) exportEntryLinks(ctx context.Context) ([]domain.EntryLink, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT from_entry_id, to_entry_id, relation_type FROM entry_links ORDER BY from_entry_id, to_entry_id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []domain.EntryLink
+	for rows.Next() {
+		var el domain.EntryLink
+		var rt string
+		if err := rows.Scan(&el.FromEntryID, &el.ToEntryID, &rt); err != nil {
+			return nil, err
+		}
+		el.RelationType = domain.RelationType(rt)
+		results = append(results, el)
+	}
+	return results, nil
+}
+
+func (s *sqliteImportExportStore) exportArtifacts(ctx context.Context) ([]domain.Artifact, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, title, COALESCE(slug,''), type, COALESCE(file_path,''), COALESCE(mime_type,''), COALESCE(summary,''), COALESCE(content_hash,''), COALESCE(size_bytes,0), project_id, source_entry_id FROM artifacts ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []domain.Artifact
+	for rows.Next() {
+		var a domain.Artifact
+		var projID, srcID, summary sql.NullString
+		if err := rows.Scan(&a.ID, &a.Title, &a.Slug, &a.Type, &a.FilePath, &a.MimeType, &summary, &a.ContentHash, &a.SizeBytes, &projID, &srcID); err != nil {
+			return nil, err
+		}
+		if projID.Valid {
+			a.ProjectID = &projID.String
+		}
+		if srcID.Valid {
+			a.SourceEntryID = &srcID.String
+		}
+		if summary.Valid {
+			a.Summary = summary.String
+		}
+		results = append(results, a)
 	}
 	return results, nil
 }
@@ -294,17 +468,15 @@ func scanProjects(rows *sql.Rows) ([]domain.Project, error) {
 	var results []domain.Project
 	for rows.Next() {
 		var p domain.Project
-		var active int
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &active); err != nil {
+		var status string
+		if err := rows.Scan(&p.ID, &p.Name, &p.Slug, &p.Description, &status); err != nil {
 			return nil, err
 		}
-		p.Active = active == 1
+		p.Status = domain.Status(status)
 		results = append(results, p)
 	}
 	return results, nil
 }
 
 var _ ImportExportStore = (*sqliteImportExportStore)(nil)
-
-// unused guard
 var _ = json.Marshal

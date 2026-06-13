@@ -9,46 +9,57 @@ import (
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
-// UpsertEntry creates or updates an entry along with its tags and workflow steps.
-// All operations run in a single transaction.
-func (s *sqliteEntryStore) UpsertEntry(ctx context.Context, entry domain.Entry, tags []string, steps []domain.WorkflowStep) error {
+func (s *sqliteEntryStore) Save(ctx context.Context, entry domain.Entry, tags []string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	active := 0
-	if entry.Active {
-		active = 1
-	}
 	projectID := interface{}(nil)
 	if entry.ProjectID != nil {
 		projectID = *entry.ProjectID
 	}
+	artifactID := interface{}(nil)
+	if entry.ArtifactID != nil {
+		artifactID = *entry.ArtifactID
+	}
+	if entry.Status == "" {
+		entry.Status = domain.StatusActive
+	}
+	if entry.Slug == "" {
+		entry.Slug = entry.Title
+	}
 
-	// Build denormalized tags string for FTS5
 	tagsDenorm := strings.Join(tags, " ")
 
+	for _, tag := range tags {
+		_, _ = tx.ExecContext(ctx,
+			"INSERT OR IGNORE INTO tags (id, name, slug) VALUES (?, ?, ?)",
+			tag, tag, tag)
+	}
+
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO entries (id, name, type, project_id, description, content, vars, tags_denorm, active, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		INSERT INTO entries (id, name, title, slug, type, content, summary, body_optional, status, project_id, artifact_id, tags_denorm, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name,
+			title=excluded.title,
+			slug=excluded.slug,
 			type=excluded.type,
-			project_id=excluded.project_id,
-			description=excluded.description,
 			content=excluded.content,
-			vars=excluded.vars,
+			summary=excluded.summary,
+			body_optional=excluded.body_optional,
+			status=excluded.status,
+			project_id=excluded.project_id,
+			artifact_id=excluded.artifact_id,
 			tags_denorm=excluded.tags_denorm,
-			active=excluded.active,
 			updated_at=CURRENT_TIMESTAMP
-	`, entry.ID, entry.Name, string(entry.Type), projectID, entry.Description, entry.Content, entry.Vars, tagsDenorm, active)
+	`, entry.ID, entry.Title, entry.Title, entry.Slug, string(entry.Type), entry.BodyOptional, entry.Summary, entry.BodyOptional, string(entry.Status), projectID, artifactID, tagsDenorm)
 	if err != nil {
 		return fmt.Errorf("upsert entry: %w", err)
 	}
 
-	// Replace tags: delete old, insert new
 	if _, err := tx.ExecContext(ctx, "DELETE FROM entry_tags WHERE entry_id = ?", entry.ID); err != nil {
 		return fmt.Errorf("delete old tags: %w", err)
 	}
@@ -58,41 +69,26 @@ func (s *sqliteEntryStore) UpsertEntry(ctx context.Context, entry domain.Entry, 
 		}
 	}
 
-	// Replace workflow steps if provided
-	if _, err := tx.ExecContext(ctx, "DELETE FROM workflow_steps WHERE entry_id = ?", entry.ID); err != nil {
-		return fmt.Errorf("delete old steps: %w", err)
-	}
-	for _, step := range steps {
-		if _, err := tx.ExecContext(ctx,
-			"INSERT INTO workflow_steps (entry_id, step_num, role, content, label) VALUES (?, ?, ?, ?, ?)",
-			entry.ID, step.StepNum, string(step.Role), step.Content, step.Label,
-		); err != nil {
-			return fmt.Errorf("insert step %d: %w", step.StepNum, err)
-		}
-	}
-
-	// Sync FTS5
-	if err := s.syncFTS(ctx, tx, entry.ID, entry.Name, entry.Description, entry.Content, tagsDenorm); err != nil {
+	if err := s.syncFTS(ctx, tx, entry.ID, entry.Title, entry.Summary, entry.BodyOptional, tagsDenorm); err != nil {
 		return fmt.Errorf("sync FTS5: %w", err)
 	}
 
 	return tx.Commit()
 }
 
-// GetEntry retrieves an entry by ID, optionally including archived entries.
-// Returns an error if the entry is archived and includeArchived is false.
-func (s *sqliteEntryStore) GetEntry(ctx context.Context, id string, includeArchived bool) (domain.EntryResult, error) {
+func (s *sqliteEntryStore) Get(ctx context.Context, id string, includeArchived bool) (domain.EntryResult, error) {
 	var result domain.EntryResult
 	var projectID sql.NullString
-	var description sql.NullString
-	var vars sql.NullString
-	var active int
+	var artifactID sql.NullString
+	var summary sql.NullString
+	var bodyOptional sql.NullString
+	var status string
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, type, project_id, description, content, vars, active
+		SELECT id, title, slug, type, project_id, summary, body_optional, status, artifact_id
 		FROM entries WHERE id = ?
-	`, id).Scan(&result.Entry.ID, &result.Entry.Name, &result.Entry.Type, &projectID,
-		&description, &result.Entry.Content, &vars, &active)
+	`, id).Scan(&result.Entry.ID, &result.Entry.Title, &result.Entry.Slug, &result.Entry.Type,
+		&projectID, &summary, &bodyOptional, &status, &artifactID)
 	if err == sql.ErrNoRows {
 		return result, fmt.Errorf("entry %q not found", id)
 	}
@@ -100,23 +96,24 @@ func (s *sqliteEntryStore) GetEntry(ctx context.Context, id string, includeArchi
 		return result, fmt.Errorf("get entry: %w", err)
 	}
 
-	result.Entry.Active = active == 1
+	result.Entry.Status = domain.Status(status)
 	if projectID.Valid {
 		result.Entry.ProjectID = &projectID.String
 	}
-	if description.Valid {
-		result.Entry.Description = description.String
+	if artifactID.Valid {
+		result.Entry.ArtifactID = &artifactID.String
 	}
-	if vars.Valid {
-		result.Entry.Vars = vars.String
+	if summary.Valid {
+		result.Entry.Summary = summary.String
+	}
+	if bodyOptional.Valid {
+		result.Entry.BodyOptional = bodyOptional.String
 	}
 
-	// Archived check
-	if !result.Entry.Active && !includeArchived {
+	if !includeArchived && result.Entry.Status == domain.StatusArchived {
 		return result, fmt.Errorf("archived: entry %q exists but is archived. Retry with include_archived=true.", id)
 	}
 
-	// Load tags
 	tagRows, err := s.db.QueryContext(ctx, "SELECT tag FROM entry_tags WHERE entry_id = ? ORDER BY tag", id)
 	if err != nil {
 		return result, fmt.Errorf("get tags: %w", err)
@@ -127,34 +124,127 @@ func (s *sqliteEntryStore) GetEntry(ctx context.Context, id string, includeArchi
 		if err := tagRows.Scan(&tag); err != nil {
 			return result, fmt.Errorf("scan tag: %w", err)
 		}
-		result.Tags = append(result.Tags, tag)
-	}
-
-	// Load workflow steps
-	stepRows, err := s.db.QueryContext(ctx,
-		"SELECT id, entry_id, step_num, role, content, COALESCE(label,'') FROM workflow_steps WHERE entry_id = ? ORDER BY step_num", id)
-	if err != nil {
-		return result, fmt.Errorf("get steps: %w", err)
-	}
-	defer stepRows.Close()
-	for stepRows.Next() {
-		var step domain.WorkflowStep
-		if err := stepRows.Scan(&step.ID, &step.EntryID, &step.StepNum, &step.Role, &step.Content, &step.Label); err != nil {
-			return result, fmt.Errorf("scan step: %w", err)
-		}
-		result.Steps = append(result.Steps, step)
+		result.Tags = append(result.Tags, domain.Tag{ID: tag, Name: tag, Slug: tag})
 	}
 
 	return result, nil
 }
 
-// ListEntries returns entries matching the filter criteria.
-func (s *sqliteEntryStore) ListEntries(ctx context.Context, filter domain.EntryFilter) ([]domain.EntryListResult, error) {
-	query := "SELECT e.id, e.name, e.type, e.project_id, e.description, e.content, e.vars, e.active FROM entries e WHERE 1=1"
+func (s *sqliteEntryStore) Search(ctx context.Context, q domain.SearchQuery) ([]domain.EntrySearchResult, error) {
+	var conditions []string
+	var args []interface{}
+
+	if q.Query != "" {
+		conditions = append(conditions, "e_fts.entries_fts MATCH ?")
+		args = append(args, q.Query)
+	}
+
+	query := `SELECT e.id, e.title, e.slug, e.type, e.project_id, e.summary, e.body_optional, e.status, e.artifact_id
+		FROM entries_fts e_fts
+		JOIN entries e ON e.id = e_fts.id`
+
+	if len(conditions) > 0 || !q.IncludeArchived || q.ProjectID != nil || q.Type != nil {
+		if len(conditions) > 0 {
+			query += " WHERE " + conditions[0]
+		} else {
+			query += " WHERE 1=1"
+		}
+		for _, c := range conditions[1:] {
+			query += " AND " + c
+		}
+
+		if !q.IncludeArchived {
+			query += " AND e.status != 'archived'"
+		}
+		if q.ProjectID != nil {
+			query += " AND e.project_id = ?"
+			args = append(args, *q.ProjectID)
+		}
+		if q.Type != nil {
+			query += " AND e.type = ?"
+			args = append(args, *q.Type)
+		}
+	}
+
+	query += " ORDER BY rank"
+	if q.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", q.Limit)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search entries: %w", err)
+	}
+	defer rows.Close()
+
+	var results []domain.EntrySearchResult
+	for rows.Next() {
+		var r domain.EntrySearchResult
+		var projectID sql.NullString
+		var artifactID sql.NullString
+		var summary sql.NullString
+		var bodyOptional sql.NullString
+		var status string
+		if err := rows.Scan(&r.Entry.ID, &r.Entry.Title, &r.Entry.Slug, &r.Entry.Type, &projectID,
+			&summary, &bodyOptional, &status, &artifactID); err != nil {
+			return nil, fmt.Errorf("scan search result: %w", err)
+		}
+		r.Entry.Status = domain.Status(status)
+		if projectID.Valid {
+			r.Entry.ProjectID = &projectID.String
+		}
+		if artifactID.Valid {
+			r.Entry.ArtifactID = &artifactID.String
+		}
+		if summary.Valid {
+			r.Entry.Summary = summary.String
+		}
+		if bodyOptional.Valid {
+			r.Entry.BodyOptional = bodyOptional.String
+		}
+
+		tagRows, err := s.db.QueryContext(ctx, "SELECT tag FROM entry_tags WHERE entry_id = ? ORDER BY tag", r.Entry.ID)
+		if err == nil {
+			for tagRows.Next() {
+				var tag string
+				if err := tagRows.Scan(&tag); err != nil {
+					break
+				}
+				r.Tags = append(r.Tags, domain.Tag{ID: tag, Name: tag, Slug: tag})
+			}
+			tagRows.Close()
+		}
+		if r.Tags == nil {
+			r.Tags = []domain.Tag{}
+		}
+
+		results = append(results, r)
+	}
+
+	if results == nil {
+		results = []domain.EntrySearchResult{}
+	}
+	return results, nil
+}
+
+func (s *sqliteEntryStore) Archive(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, "UPDATE entries SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("archive entry: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("entry %q not found", id)
+	}
+	return nil
+}
+
+func (s *sqliteEntryStore) List(ctx context.Context, filter domain.EntryFilter) ([]domain.EntryListResult, error) {
+	query := "SELECT e.id, e.title, e.slug, e.type, e.project_id, e.summary, e.body_optional, e.status, e.artifact_id FROM entries e WHERE 1=1"
 	var args []interface{}
 
 	if !filter.IncludeArchived {
-		query += " AND e.active = 1"
+		query += " AND e.status != 'archived'"
 	}
 	if filter.ProjectID != nil {
 		query += " AND e.project_id = ?"
@@ -164,7 +254,7 @@ func (s *sqliteEntryStore) ListEntries(ctx context.Context, filter domain.EntryF
 		query += " AND e.type = ?"
 		args = append(args, *filter.Type)
 	}
-	query += " ORDER BY e.name"
+	query += " ORDER BY e.title"
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -173,37 +263,40 @@ func (s *sqliteEntryStore) ListEntries(ctx context.Context, filter domain.EntryF
 	defer rows.Close()
 
 	type row struct {
-		entry   domain.EntryListResult
-		projID  sql.NullString
-		desc    sql.NullString
-		vars    sql.NullString
-		active  int
+		entry        domain.EntryListResult
+		projID       sql.NullString
+		artifactID   sql.NullString
+		summary      sql.NullString
+		bodyOptional sql.NullString
+		status       string
 	}
 	var rowsData []row
 	var entryIDs []string
 
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.entry.Entry.ID, &r.entry.Entry.Name, &r.entry.Entry.Type, &r.projID,
-			&r.desc, &r.entry.Entry.Content, &r.vars, &r.active); err != nil {
+		if err := rows.Scan(&r.entry.Entry.ID, &r.entry.Entry.Title, &r.entry.Entry.Slug, &r.entry.Entry.Type,
+			&r.projID, &r.summary, &r.bodyOptional, &r.status, &r.artifactID); err != nil {
 			return nil, fmt.Errorf("scan entry: %w", err)
 		}
-		r.entry.Entry.Active = r.active == 1
+		r.entry.Entry.Status = domain.Status(r.status)
 		if r.projID.Valid {
 			r.entry.Entry.ProjectID = &r.projID.String
 		}
-		if r.desc.Valid {
-			r.entry.Entry.Description = r.desc.String
+		if r.artifactID.Valid {
+			r.entry.Entry.ArtifactID = &r.artifactID.String
 		}
-		if r.vars.Valid {
-			r.entry.Entry.Vars = r.vars.String
+		if r.summary.Valid {
+			r.entry.Entry.Summary = r.summary.String
+		}
+		if r.bodyOptional.Valid {
+			r.entry.Entry.BodyOptional = r.bodyOptional.String
 		}
 		rowsData = append(rowsData, r)
 		entryIDs = append(entryIDs, r.entry.Entry.ID)
 	}
 	rows.Close()
 
-	// Load tags separately to avoid nested query issues
 	tagMap := make(map[string][]string)
 	if len(entryIDs) > 0 {
 		tagRows, err := s.db.QueryContext(ctx, "SELECT entry_id, tag FROM entry_tags WHERE entry_id IN ("+placeholders(len(entryIDs))+") ORDER BY entry_id, tag",
@@ -224,9 +317,12 @@ func (s *sqliteEntryStore) ListEntries(ctx context.Context, filter domain.EntryF
 
 	results := make([]domain.EntryListResult, 0, len(rowsData))
 	for _, r := range rowsData {
-		r.entry.Tags = tagMap[r.entry.Entry.ID]
+		tagNames := tagMap[r.entry.Entry.ID]
+		for _, tn := range tagNames {
+			r.entry.Tags = append(r.entry.Tags, domain.Tag{ID: tn, Name: tn, Slug: tn})
+		}
 		if r.entry.Tags == nil {
-			r.entry.Tags = []string{}
+			r.entry.Tags = []domain.Tag{}
 		}
 		results = append(results, r.entry)
 	}
@@ -253,29 +349,13 @@ func strSliceToInterface(s []string) []interface{} {
 	return result
 }
 
-// ArchiveEntry soft-deletes an entry by setting active=0.
-func (s *sqliteEntryStore) ArchiveEntry(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, "UPDATE entries SET active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?", id)
-	if err != nil {
-		return fmt.Errorf("archive entry: %w", err)
-	}
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
-		return fmt.Errorf("entry %q not found", id)
-	}
-	return nil
-}
-
-// syncFTS keeps the FTS5 index in sync with the entries table.
-func (s *sqliteEntryStore) syncFTS(ctx context.Context, tx *sql.Tx, id, name, description, content, tagsDenorm string) error {
-	// Delete existing FTS entry
+func (s *sqliteEntryStore) syncFTS(ctx context.Context, tx *sql.Tx, id, title, summary, body, tagsDenorm string) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM entries_fts WHERE id = ?", id); err != nil {
 		return fmt.Errorf("delete from fts: %w", err)
 	}
-	// Insert into FTS
 	if _, err := tx.ExecContext(ctx,
-		"INSERT INTO entries_fts (id, name, description, content, tags_denorm) VALUES (?, ?, ?, ?, ?)",
-		id, name, description, content, tagsDenorm,
+		"INSERT INTO entries_fts (id, title, summary, body_optional, tags_denorm) VALUES (?, ?, ?, ?, ?)",
+		id, title, summary, body, tagsDenorm,
 	); err != nil {
 		return fmt.Errorf("insert into fts: %w", err)
 	}

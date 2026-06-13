@@ -8,47 +8,40 @@ import (
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
-// UpsertSeries creates or updates a series header.
-func (s *sqliteSeriesStore) UpsertSeries(ctx context.Context, series domain.Series) error {
-	active := 0
-	if series.Active {
-		active = 1
+func (s *sqliteSeriesStore) Save(ctx context.Context, series domain.Series) error {
+	if series.Status == "" {
+		series.Status = domain.StatusActive
 	}
-	projectID := interface{}(nil)
-	if series.ProjectID != nil {
-		projectID = *series.ProjectID
+	if series.Slug == "" {
+		series.Slug = series.Name
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO series (id, name, project_id, description, vars, active, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		INSERT INTO series (id, name, slug, description, status, updated_at)
+		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name,
-			project_id=excluded.project_id,
+			slug=excluded.slug,
 			description=excluded.description,
-			vars=excluded.vars,
-			active=excluded.active,
+			status=excluded.status,
 			updated_at=CURRENT_TIMESTAMP
-	`, series.ID, series.Name, projectID, series.Description, series.Vars, active)
+	`, series.ID, series.Name, series.Slug, series.Description, string(series.Status))
 	if err != nil {
-		return fmt.Errorf("upsert series: %w", err)
+		return fmt.Errorf("save series: %w", err)
 	}
 	return nil
 }
 
-// GetSeries retrieves a series with its entries and calculated step metadata.
-func (s *sqliteSeriesStore) GetSeries(ctx context.Context, id string, includeArchived bool) (domain.SeriesResult, error) {
+func (s *sqliteSeriesStore) Get(ctx context.Context, id string, includeArchived bool) (domain.SeriesResult, error) {
 	var result domain.SeriesResult
-	var projectID sql.NullString
 	var description sql.NullString
-	var vars sql.NullString
-	var active int
+	var status string
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, project_id, description, vars, active
-		FROM series WHERE id = ?
-	`, id).Scan(&result.Series.ID, &result.Series.Name, &projectID,
-		&description, &vars, &active)
+		SELECT id, name, slug, description, status
+		FROM series WHERE id = ? OR slug = ?
+	`, id, id).Scan(&result.Series.ID, &result.Series.Name, &result.Series.Slug,
+		&description, &status)
 	if err == sql.ErrNoRows {
 		return result, fmt.Errorf("series %q not found", id)
 	}
@@ -56,24 +49,18 @@ func (s *sqliteSeriesStore) GetSeries(ctx context.Context, id string, includeArc
 		return result, fmt.Errorf("get series: %w", err)
 	}
 
-	result.Series.Active = active == 1
-	if projectID.Valid {
-		result.Series.ProjectID = &projectID.String
-	}
+	result.Series.Status = domain.Status(status)
 	if description.Valid {
 		result.Series.Description = description.String
 	}
-	if vars.Valid {
-		result.Series.Vars = vars.String
-	}
 
-	// Load entries
-	query := `SELECT se.series_id, se.entry_id, se.step_num, COALESCE(se.label,''), se.required, COALESCE(se.notes,''), se.active
+	query := `SELECT se.series_id, se.entry_id, se.order_index
 		FROM series_entries se WHERE se.series_id = ?`
+
 	if !includeArchived {
-		query += " AND se.active = 1"
+		query += " AND se.order_index > 0"
 	}
-	query += " ORDER BY se.step_num"
+	query += " ORDER BY se.order_index"
 
 	rows, err := s.db.QueryContext(ctx, query, id)
 	if err != nil {
@@ -83,14 +70,9 @@ func (s *sqliteSeriesStore) GetSeries(ctx context.Context, id string, includeArc
 
 	for rows.Next() {
 		var entry domain.SeriesEntry
-		var req int
-		var entryActive int
-		if err := rows.Scan(&entry.SeriesID, &entry.EntryID, &entry.StepNum,
-			&entry.Label, &req, &entry.Notes, &entryActive); err != nil {
+		if err := rows.Scan(&entry.SeriesID, &entry.EntryID, &entry.OrderIndex); err != nil {
 			return result, fmt.Errorf("scan series entry: %w", err)
 		}
-		entry.Required = req == 1
-		entry.Active = entryActive == 1
 		result.Entries = append(result.Entries, entry)
 	}
 
@@ -102,17 +84,54 @@ func (s *sqliteSeriesStore) GetSeries(ctx context.Context, id string, includeArc
 	return result, nil
 }
 
-// ListSeries returns series matching the filter.
-func (s *sqliteSeriesStore) ListSeries(ctx context.Context, filter domain.SeriesFilter) ([]domain.SeriesListResult, error) {
-	query := "SELECT s.id, s.name, s.project_id, s.description, s.vars, s.active FROM series s WHERE 1=1"
+func (s *sqliteSeriesStore) Compose(ctx context.Context, seriesID string) ([]domain.Entry, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT e.id, e.title, e.slug, e.type, e.summary, e.body_optional, e.status, e.project_id, e.artifact_id
+		FROM series_entries se
+		JOIN entries e ON e.id = se.entry_id
+		WHERE se.series_id = ?
+		ORDER BY se.order_index
+	`, seriesID)
+	if err != nil {
+		return nil, fmt.Errorf("compose series: %w", err)
+	}
+	defer rows.Close()
+
+	var results []domain.Entry
+	for rows.Next() {
+		var e domain.Entry
+		var projID, artID, summary, body, status sql.NullString
+		if err := rows.Scan(&e.ID, &e.Title, &e.Slug, &e.Type, &summary, &body, &status, &projID, &artID); err != nil {
+			return nil, fmt.Errorf("scan entry: %w", err)
+		}
+		e.Status = domain.Status(status.String)
+		if projID.Valid {
+			e.ProjectID = &projID.String
+		}
+		if artID.Valid {
+			e.ArtifactID = &artID.String
+		}
+		if summary.Valid {
+			e.Summary = summary.String
+		}
+		if body.Valid {
+			e.BodyOptional = body.String
+		}
+		results = append(results, e)
+	}
+
+	if results == nil {
+		results = []domain.Entry{}
+	}
+	return results, nil
+}
+
+func (s *sqliteSeriesStore) List(ctx context.Context, filter domain.SeriesFilter) ([]domain.SeriesListResult, error) {
+	query := "SELECT s.id, s.name, s.slug, COALESCE(s.description,''), s.status FROM series s WHERE 1=1"
 	var args []interface{}
 
 	if !filter.IncludeArchived {
-		query += " AND s.active = 1"
-	}
-	if filter.ProjectID != nil {
-		query += " AND s.project_id = ?"
-		args = append(args, *filter.ProjectID)
+		query += " AND s.status != 'archived'"
 	}
 	query += " ORDER BY s.name"
 
@@ -125,28 +144,19 @@ func (s *sqliteSeriesStore) ListSeries(ctx context.Context, filter domain.Series
 	var results []domain.SeriesListResult
 	for rows.Next() {
 		var r domain.SeriesListResult
-		var projectID sql.NullString
 		var description sql.NullString
-		var vars sql.NullString
-		var active int
-		if err := rows.Scan(&r.Series.ID, &r.Series.Name, &projectID,
-			&description, &vars, &active); err != nil {
+		var status string
+		if err := rows.Scan(&r.Series.ID, &r.Series.Name, &r.Series.Slug,
+			&description, &status); err != nil {
 			return nil, fmt.Errorf("scan series: %w", err)
 		}
-		r.Series.Active = active == 1
-		if projectID.Valid {
-			r.Series.ProjectID = &projectID.String
-		}
+		r.Series.Status = domain.Status(status)
 		if description.Valid {
 			r.Series.Description = description.String
 		}
-		if vars.Valid {
-			r.Series.Vars = vars.String
-		}
 
-		// Count active steps
 		err = s.db.QueryRowContext(ctx,
-			"SELECT COUNT(*) FROM series_entries WHERE series_id = ? AND active = 1", r.Series.ID).Scan(&r.TotalSteps)
+			"SELECT COUNT(*) FROM series_entries WHERE series_id = ?", r.Series.ID).Scan(&r.TotalSteps)
 		if err != nil {
 			r.TotalSteps = 0
 		}
@@ -160,37 +170,30 @@ func (s *sqliteSeriesStore) ListSeries(ctx context.Context, filter domain.Series
 	return results, nil
 }
 
-// ReplaceSeriesEntries transactionally replaces all entries in a series.
-func (s *sqliteSeriesStore) ReplaceSeriesEntries(ctx context.Context, seriesID string, entries []domain.SeriesEntryInput) error {
+func (s *sqliteSeriesStore) ReplaceSeriesEntries(ctx context.Context, seriesID string, entries []domain.SeriesEntry) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	// Delete existing entries
 	if _, err := tx.ExecContext(ctx, "DELETE FROM series_entries WHERE series_id = ?", seriesID); err != nil {
 		return fmt.Errorf("delete old entries: %w", err)
 	}
 
-	// Insert new entries renumbered 1..N
 	for i, e := range entries {
-		stepNum := i + 1
-		required := 1
-		if !e.Required {
-			required = 0
+		orderIndex := i + 1
+		if e.OrderIndex > 0 {
+			orderIndex = e.OrderIndex
 		}
 		_, err := tx.ExecContext(ctx,
-			"INSERT INTO series_entries (series_id, entry_id, step_num, label, required, notes, active) VALUES (?, ?, ?, ?, ?, ?, 1)",
-			seriesID, e.EntryID, stepNum, e.Label, required, e.Notes,
+			"INSERT INTO series_entries (series_id, entry_id, step_num, order_index) VALUES (?, ?, ?, ?)",
+			seriesID, e.EntryID, orderIndex, orderIndex,
 		)
 		if err != nil {
-			return fmt.Errorf("insert entry %d (%s): %w", stepNum, e.EntryID, err)
+			return fmt.Errorf("insert entry %d (%s): %w", orderIndex, e.EntryID, err)
 		}
 	}
 
 	return tx.Commit()
 }
-
-// Ensure sqliteSeriesStore implements SeriesStore
-var _ SeriesStore = (*sqliteSeriesStore)(nil)

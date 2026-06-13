@@ -74,8 +74,8 @@ func TestMigrationIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to count migrations: %v", err)
 	}
-	if count != 1 {
-		t.Errorf("expected 1 migration record, got %d", count)
+	if count != 2 {
+		t.Errorf("expected 2 migration records (v1 + v2), got %d", count)
 	}
 }
 
@@ -115,7 +115,8 @@ func TestAllIndexesCreated(t *testing.T) {
 	indexes := []string{
 		"idx_entries_type",
 		"idx_entries_project_id",
-		"idx_entries_active",
+		"idx_entries_status",
+		"idx_entries_slug",
 		"idx_series_project_id",
 		"idx_series_active",
 		"idx_series_entries_series_step",

@@ -1,6 +1,5 @@
 package domain
 
-// SearchQuery is used for FTS5 search operations.
 type SearchQuery struct {
 	Query           string
 	ProjectID       *string
@@ -11,7 +10,6 @@ type SearchQuery struct {
 	Limit           int
 }
 
-// VaultExport is the top-level export structure.
 type VaultExport struct {
 	SchemaVersion int       `json:"schema_version"`
 	AppVersion    string    `json:"app_version"`
@@ -20,12 +18,15 @@ type VaultExport struct {
 	Data          VaultData `json:"data"`
 }
 
-// VaultData contains all vault records for import/export.
 type VaultData struct {
 	Projects      []Project      `json:"projects"`
 	Entries       []Entry        `json:"entries"`
 	EntryTags     []EntryTag     `json:"entry_tags"`
+	Tags          []Tag          `json:"tags"`
 	Series        []Series       `json:"series"`
 	SeriesEntries []SeriesEntry  `json:"series_entries"`
+	Workflows     []Workflow     `json:"workflows"`
 	WorkflowSteps []WorkflowStep `json:"workflow_steps"`
+	Artifacts     []Artifact     `json:"artifacts"`
+	EntryLinks    []EntryLink    `json:"entry_links"`
 }

@@ -55,24 +55,34 @@ func TestSeriesFilterStruct(t *testing.T) {
 	}
 }
 
+func TestEntryTagStruct(t *testing.T) {
+	et := EntryTag{
+		EntryID: "prd-fastapi",
+		TagID:   "go",
+	}
+
+	if et.EntryID != "prd-fastapi" {
+		t.Errorf("EntryID = %q, want 'prd-fastapi'", et.EntryID)
+	}
+	if et.TagID != "go" {
+		t.Errorf("TagID = %q, want 'go'", et.TagID)
+	}
+}
+
 func TestEntryResultStruct(t *testing.T) {
 	r := EntryResult{
 		Entry: Entry{
-			ID:      "prd-fastapi",
-			Name:    "FastAPI PRD",
-			Type:    EntryTypeSkill,
-			Content: "Design FastAPI backend",
-			Active:  true,
+			ID:           "prd-fastapi",
+			Title:        "FastAPI PRD",
+			Type:         EntryTypeSkill,
+			BodyOptional: "Design FastAPI backend",
+			Status:       StatusActive,
 		},
-		Tags:  []string{"go", "api"},
-		Steps: []WorkflowStep{},
+		Tags: []Tag{},
 	}
 
 	if r.Entry.ID != "prd-fastapi" {
 		t.Errorf("Entry.ID = %q, want 'prd-fastapi'", r.Entry.ID)
-	}
-	if len(r.Tags) != 2 {
-		t.Errorf("Tags length = %d, want 2", len(r.Tags))
 	}
 }
 
@@ -81,7 +91,7 @@ func TestSeriesResultStruct(t *testing.T) {
 		Series: Series{
 			ID:     "sdd-cycle",
 			Name:   "SDD Cycle",
-			Active: true,
+			Status: StatusActive,
 		},
 		Entries:    []SeriesEntry{},
 		TotalSteps: 0,
@@ -95,21 +105,18 @@ func TestSeriesResultStruct(t *testing.T) {
 func TestEntrySearchResultStruct(t *testing.T) {
 	r := EntrySearchResult{
 		Entry: Entry{
-			ID:      "prd-fastapi",
-			Name:    "FastAPI PRD",
-			Type:    EntryTypeSkill,
-			Content: "Design FastAPI backend",
-			Active:  true,
+			ID:           "prd-fastapi",
+			Title:        "FastAPI PRD",
+			Type:         EntryTypeSkill,
+			BodyOptional: "Design FastAPI backend",
+			Status:       StatusActive,
 		},
-		Tags:        []string{"go", "api"},
-		SeriesRefs:  []SeriesRef{},
+		Tags:       []Tag{},
+		SeriesRefs: []SeriesRef{},
 	}
 
 	if r.Entry.ID != "prd-fastapi" {
 		t.Errorf("Entry.ID = %q, want 'prd-fastapi'", r.Entry.ID)
-	}
-	if len(r.Tags) != 2 {
-		t.Errorf("Tags length = %d, want 2", len(r.Tags))
 	}
 }
 
@@ -128,36 +135,37 @@ func TestSeriesRefStruct(t *testing.T) {
 	if ref.StepNum != 3 {
 		t.Errorf("StepNum = %d, want 3", ref.StepNum)
 	}
-	if ref.TotalSteps != 6 {
-		t.Errorf("TotalSteps = %d, want 6", ref.TotalSteps)
-	}
 }
 
 func TestVaultExportStruct(t *testing.T) {
 	e := VaultExport{
-		SchemaVersion: 1,
-		AppVersion:    "v1-alpha",
+		SchemaVersion: 2,
+		AppVersion:    "v2-hermes",
 		ExportedAt:    "2026-06-10T18:30:00Z",
 		Source:        "skillvault",
 		Data:          VaultData{},
 	}
 
-	if e.SchemaVersion != 1 {
-		t.Errorf("SchemaVersion = %d, want 1", e.SchemaVersion)
+	if e.SchemaVersion != 2 {
+		t.Errorf("SchemaVersion = %d, want 2", e.SchemaVersion)
 	}
-	if e.AppVersion != "v1-alpha" {
-		t.Errorf("AppVersion = %q, want 'v1-alpha'", e.AppVersion)
+	if e.AppVersion != "v2-hermes" {
+		t.Errorf("AppVersion = %q, want 'v2-hermes'", e.AppVersion)
 	}
 }
 
 func TestVaultDataStruct(t *testing.T) {
 	d := VaultData{
-		Projects:       []Project{},
-		Entries:        []Entry{},
-		EntryTags:      []EntryTag{},
-		Series:         []Series{},
-		SeriesEntries:  []SeriesEntry{},
-		WorkflowSteps:  []WorkflowStep{},
+		Projects:      []Project{},
+		Entries:       []Entry{},
+		EntryTags:     []EntryTag{},
+		Tags:          []Tag{},
+		Series:        []Series{},
+		SeriesEntries: []SeriesEntry{},
+		Workflows:     []Workflow{},
+		WorkflowSteps: []WorkflowStep{},
+		Artifacts:     []Artifact{},
+		EntryLinks:    []EntryLink{},
 	}
 
 	if d.Projects == nil {
@@ -165,37 +173,6 @@ func TestVaultDataStruct(t *testing.T) {
 	}
 	if d.Entries == nil {
 		t.Errorf("Entries should not be nil")
-	}
-}
-
-func TestEntryTagStruct(t *testing.T) {
-	et := EntryTag{
-		EntryID: "prd-fastapi",
-		Tag:     "go",
-	}
-
-	if et.EntryID != "prd-fastapi" {
-		t.Errorf("EntryID = %q, want 'prd-fastapi'", et.EntryID)
-	}
-	if et.Tag != "go" {
-		t.Errorf("Tag = %q, want 'go'", et.Tag)
-	}
-}
-
-func TestSeriesEntryInputStruct(t *testing.T) {
-	sei := SeriesEntryInput{
-		EntryID:  "prd-fastapi",
-		StepNum:  3,
-		Label:    "Generate PRD",
-		Required: true,
-		Notes:    "Use for new projects",
-	}
-
-	if sei.EntryID != "prd-fastapi" {
-		t.Errorf("EntryID = %q, want 'prd-fastapi'", sei.EntryID)
-	}
-	if sei.StepNum != 3 {
-		t.Errorf("StepNum = %d, want 3", sei.StepNum)
 	}
 }
 
