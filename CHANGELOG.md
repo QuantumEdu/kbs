@@ -1,6 +1,42 @@
 # Changelog
 
-All notable changes to SkillVault are documented here.
+All notable changes to SkillVault Qu@ntum are documented here.
+
+## v2.0.0 — Release
+
+**2026-06-20**
+
+### Added
+
+- **HTTP REST API** (13 endpoints) en `internal/api/` — `skillvault http` sirve en `127.0.0.1:7438`
+  - `GET/POST /entries`, `GET/DELETE /entries/{id}`, `GET /entries?q=`
+  - `POST /artifacts`, `POST /context`, `POST /projects`, `GET /projects`
+  - `POST /sessions/wrap`, `POST /workflows`, `GET /workflows/{id}`
+  - `POST /export`, `POST /import`
+- **CI workflow** (GitHub Actions): test en ubuntu + macOS, cross-build a linux/darwin/windows
+- **Documentación completa**:
+  - `docs/quickstart.md` — instalación en 5 minutos
+  - `docs/commands.md` — referencia CLI (14 comandos con flags)
+  - `docs/mcp.md` — setup MCP para Claude/OpenCode (10 herramientas)
+  - `docs/tutorial.md` — workflow real paso a paso
+  - `docs/architecture.md` — Clean Architecture, flujos, decisiones de diseño
+
+### Changed
+
+- Branding: "Hermes" → "Qu@ntum" en README y naming interno
+- `.gitignore` anclado a root (`/skillvault`) para no excluir `cmd/skillvault/` ni `openspec/specs/skillvault/`
+
+### Fixed
+
+- Test tokens partidos con concatenación para evitar GitHub push protection
+- OpenSpec `spec.md` movido a `specs/spec.md` para cumplir con el formato del dispatcher
+
+### Release
+
+- Tag `v2.0.0` creado con binarios para linux amd64, darwin amd64/arm64, windows amd64
+- SDD cycle completo: proposal → spec → design → tasks → apply → verify → archive
+
+---
 
 ## Sprint 4 — `skillvault graph` CLI + Wikilinks flag
 
@@ -82,7 +118,7 @@ All notable changes to SkillVault are documented here.
 
 ---
 
-## Sprint 1 — entry_refs + handoff + Hermes Migration
+## Sprint 1 — entry_refs + handoff + Qu@ntum Migration
 
 **2026-06-20**
 
@@ -116,9 +152,9 @@ All notable changes to SkillVault are documented here.
 - `skillvault entry ref list [--source] [--target] [--type]`
 - `skillvault entry ref remove <source> <target> <ref_type>`
 
-### Migration: Hermes v2 Schema (`002_entry_refs_and_handoff.sql`)
+### Migration: Qu@ntum v2 Schema (`002_entry_refs_and_handoff.sql`)
 
-Builds on 001_init (v1 schema) to create the full Hermes schema:
+Builds on 001_init (v1 schema) to create the full Qu@ntum schema:
 
 | Table | Changes |
 |---|---|

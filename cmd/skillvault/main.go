@@ -20,7 +20,7 @@ import (
 	"github.com/quantum-6/skillvault/internal/security"
 )
 
-const version = "v2-hermes"
+const version = "v2-quantum"
 
 type vaultServices struct {
 	store          *db.Store

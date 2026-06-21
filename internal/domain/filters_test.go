@@ -140,7 +140,7 @@ func TestSeriesRefStruct(t *testing.T) {
 func TestVaultExportStruct(t *testing.T) {
 	e := VaultExport{
 		SchemaVersion: 2,
-		AppVersion:    "v2-hermes",
+		AppVersion:    "v2-quantum",
 		ExportedAt:    "2026-06-10T18:30:00Z",
 		Source:        "skillvault",
 		Data:          VaultData{},
@@ -149,8 +149,8 @@ func TestVaultExportStruct(t *testing.T) {
 	if e.SchemaVersion != 2 {
 		t.Errorf("SchemaVersion = %d, want 2", e.SchemaVersion)
 	}
-	if e.AppVersion != "v2-hermes" {
-		t.Errorf("AppVersion = %q, want 'v2-hermes'", e.AppVersion)
+	if e.AppVersion != "v2-quantum" {
+		t.Errorf("AppVersion = %q, want 'v2-quantum'", e.AppVersion)
 	}
 }
 

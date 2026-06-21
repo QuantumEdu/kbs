@@ -206,7 +206,7 @@ func TestAC4_ContextGenerationPlanningMode(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	proj, _ := projectSvc.SaveProject(ctx, SaveProjectInput{Name: "skillvault", Description: "SkillVault v2 Hermes"})
+	proj, _ := projectSvc.SaveProject(ctx, SaveProjectInput{Name: "skillvault", Description: "SkillVault v2 Qu@ntum"})
 
 	entrySvc.Save(ctx, domain.Entry{
 		ID: "fb-prefs", Title: "Prefer Go for backend", Slug: "prefer-go",
