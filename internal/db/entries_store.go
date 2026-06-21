@@ -87,8 +87,8 @@ func (s *sqliteEntryStore) Get(ctx context.Context, id string, includeArchived b
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, title, slug, type, project_id, summary, body_optional, status, artifact_id, COALESCE(external_ref,'')
-		FROM entries WHERE id = ?
-	`, id).Scan(&result.Entry.ID, &result.Entry.Title, &result.Entry.Slug, &result.Entry.Type,
+		FROM entries WHERE (id = ? OR slug = ?)
+	`, id, id).Scan(&result.Entry.ID, &result.Entry.Title, &result.Entry.Slug, &result.Entry.Type,
 		&projectID, &summary, &bodyOptional, &status, &artifactID, &result.Entry.ExternalRef)
 	if err == sql.ErrNoRows {
 		return result, fmt.Errorf("entry %q not found", id)

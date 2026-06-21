@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/quantum-6/skillvault/internal/db"
 	"github.com/quantum-6/skillvault/internal/domain"
@@ -125,13 +126,13 @@ func (s *VaultImportService) resolveSlugConflicts(ctx context.Context, data *dom
 	}
 	slugMap := make(map[string]string)
 	for _, e := range existingEntries {
-		slugMap[e.Entry.Slug] = e.Entry.ID
+		slugMap[strings.ToLower(e.Entry.Slug)] = e.Entry.ID
 	}
 	for i, e := range data.Data.Entries {
 		if e.Slug == "" {
 			continue
 		}
-		if existingID, exists := slugMap[e.Slug]; exists && existingID != e.ID {
+		if existingID, exists := slugMap[strings.ToLower(e.Slug)]; exists && existingID != e.ID {
 			data.Data.Entries[i].Slug = resolveConflictSlug(e.Slug)
 		}
 	}
@@ -142,13 +143,13 @@ func (s *VaultImportService) resolveSlugConflicts(ctx context.Context, data *dom
 	}
 	projSlugMap := make(map[string]string)
 	for _, p := range existingProjects {
-		projSlugMap[p.Slug] = p.ID
+		projSlugMap[strings.ToLower(p.Slug)] = p.ID
 	}
 	for i, p := range data.Data.Projects {
 		if p.Slug == "" {
 			continue
 		}
-		if existingID, exists := projSlugMap[p.Slug]; exists && existingID != p.ID {
+		if existingID, exists := projSlugMap[strings.ToLower(p.Slug)]; exists && existingID != p.ID {
 			data.Data.Projects[i].Slug = resolveConflictSlug(p.Slug)
 		}
 	}

@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
+	"unicode"
 
 	"github.com/quantum-6/skillvault/internal/db"
 	"github.com/quantum-6/skillvault/internal/domain"
@@ -73,8 +75,27 @@ func (s *EntryService) SaveEntry(ctx context.Context, input SaveEntryInput) (*Ge
 
 	tags := domain.NormalizeTags(input.Tags)
 
+	slug := slugify(input.Title)
+	if slug == "" {
+		slug = "untitled"
+	}
+	finalID := slug
+	counter := 2
+	for {
+		_, err := s.store.Get(ctx, finalID, true)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				break
+			}
+			return nil, fmt.Errorf("check slug collision: %w", err)
+		}
+		finalID = fmt.Sprintf("%s-%d", slug, counter)
+		counter++
+	}
+
 	entry := domain.Entry{
-		ID:           generateID(),
+		ID:           finalID,
+		Slug:         slug,
 		Title:        input.Title,
 		Type:         domain.EntryType(input.Type),
 		Summary:      input.Summary,
@@ -153,15 +174,19 @@ func (s *EntryService) ArchiveEntry(ctx context.Context, id string) error {
 }
 
 func slugify(title string) string {
-	b := make([]byte, 4)
-	rand.Read(b)
-	return "e-" + hex.EncodeToString(b)
-}
-
-func generateID() string {
-	b := make([]byte, 8)
-	rand.Read(b)
-	return "sv-" + hex.EncodeToString(b)
+	s := strings.ToLower(title)
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == ' ' {
+			return r
+		}
+		return -1
+	}, s)
+	s = strings.Join(strings.Fields(s), "-")
+	// Collapse consecutive dashes
+	for strings.Contains(s, "--") {
+		s = strings.ReplaceAll(s, "--", "-")
+	}
+	return strings.Trim(s, "-")
 }
 
 func generateArtifactID() string {
