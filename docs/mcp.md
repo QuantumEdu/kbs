@@ -103,7 +103,7 @@ Búsqueda full-text con filtros.
 
 ### `get_entry`
 
-Obtiene una entrada por ID.
+Obtiene una entrada por ID o slug.
 
 **Parámetros:**
 - `id` (string, requerido) — ID o slug de la entrada
