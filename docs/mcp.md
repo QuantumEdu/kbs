@@ -1,4 +1,4 @@
-# MCP Server — 10 herramientas para agentes AI
+# MCP Server — 13 herramientas para agentes AI
 
 SkillVault funciona como servidor MCP (Model Context Protocol) sobre stdio JSON-RPC 2.0. Esto permite que agentes como Claude Code, OpenCode, o cualquier cliente MCP lean y escriban directamente en tu vault.
 
@@ -198,6 +198,66 @@ Archiva una entrada (cambia status a `archived`).
 Lista todos los proyectos con su estado.
 
 **Parámetros:** ninguno.
+
+---
+
+### `save_entry_ref`
+
+Crea o actualiza una arista (relación) entre dos entradas.
+
+**Parámetros:**
+- `source_id` (string, requerido) — ID de la entrada origen
+- `target_id` (string, requerido) — ID de la entrada destino
+- `ref_type` (string, requerido) — Tipo: `references`, `supersedes`, `related_to`, `part_of`, `derived_from`, `implements`, `uses`, `extends`, `handoff_of`, `generated_from`, `depends_on`
+- `label` (string, opcional) — Etiqueta descriptiva
+
+**Ejemplo:**
+```json
+{
+  "method": "save_entry_ref",
+  "params": {
+    "source_id": "clean-architecture-rules",
+    "target_id": "hexagonal-architecture-guide",
+    "ref_type": "related_to",
+    "label": "Ambos son patrones arquitectónicos"
+  }
+}
+```
+
+**Nota:** Las relaciones `depends_on`, `part_of` y `supersedes` tienen detección de ciclos — no se permite crear una arista que genere un ciclo.
+
+---
+
+### `list_entry_refs`
+
+Lista aristas del grafo con filtros opcionales.
+
+**Parámetros:**
+- `source_id` (string, opcional) — Filtrar por origen
+- `target_id` (string, opcional) — Filtrar por destino
+- `ref_type` (string, opcional) — Filtrar por tipo de relación
+
+---
+
+### `get_entry_graph`
+
+Traversa el grafo desde una entrada raíz y devuelve nodos y aristas conectados.
+
+**Parámetros:**
+- `entry_id` (string, requerido) — ID de la entrada raíz
+- `depth` (int, opcional) — Profundidad máxima (default: 3, max: 10)
+- `direction` (string, opcional) — `outgoing`, `incoming` o `both` (default: both)
+
+**Respuesta:**
+```json
+{
+  "root_entry": "clean-architecture-rules",
+  "nodes": [{"id": "...", "title": "...", "type": "..."}],
+  "edges": [{"source_id": "...", "target_id": "...", "ref_type": "..."}],
+  "node_count": 5,
+  "edge_count": 4
+}
+```
 
 ---
 

@@ -1,4 +1,4 @@
-# CLI Reference — 14 comandos
+# CLI Reference — 18 comandos
 
 Todas las entradas usan **slugs** como identificadores. Un slug es el título en kebab-case: `"Clean Architecture Review"` → `clean-architecture-review`.
 
@@ -243,7 +243,72 @@ Parámetros separados por coma. Opcionalmente puede linkear un artefacto.
 
 ---
 
-## `export`
+## `graph`
+
+Visualiza el grafo de relaciones entre entradas.
+
+```bash
+skillvault graph --entry clean-architecture-review --depth 3 --format mermaid
+skillvault graph --entry clean-architecture-review --format json
+skillvault graph --entry clean-architecture-review --format dot
+```
+
+| Flag | Requerido | Descripción |
+|------|-----------|-------------|
+| `--entry` | ✅ | ID de la entrada raíz |
+| `--depth` | ❌ | Profundidad de traversión (default: 3, max: 10) |
+| `--format` | ❌ | `mermaid`, `json` o `dot` (default: mermaid) |
+| `--direction` | ❌ | `outgoing`, `incoming` o `both` (default: both) |
+
+El formato `mermaid` genera `graph TD` que se renderiza nativamente en GitHub.
+
+---
+
+## `entry ref`
+
+Gestiona aristas del grafo entre entradas (entry_links).
+
+```bash
+# Añadir relación
+skillvault entry ref add <source> <target> <type> --label "opcional"
+
+# Listar relaciones
+skillvault entry ref list [--source <id>] [--target <id>] [--type <rel>]
+
+# Eliminar relación
+skillvault entry ref remove <source> <target> <type>
+```
+
+Tipos de relación: `references`, `supersedes`, `related_to`, `part_of`, `derived_from`, `implements`, `uses`, `extends`, `handoff_of`, `generated_from`, `depends_on`.
+
+Las relaciones `depends_on`, `part_of` y `supersedes` tienen detección de ciclos.
+
+---
+
+## `memory index` / `memory reindex` / `memory list-external`
+
+Indexa archivos pi-memory (.md) como shadow entries en el vault.
+
+```bash
+# Indexar un directorio de memoria
+skillvault memory index --path ~/memory --project myapp [--wikilinks]
+
+# Reindexar (alias)
+skillvault memory reindex --path ~/memory --project myapp
+
+# Listar entradas externas indexadas
+skillvault memory list-external --project myapp
+```
+
+| Flag | Requerido | Descripción |
+|------|-----------|-------------|
+| `--path` | ✅ | Directorio con archivos .md |
+| `--project` | ✅ | Proyecto destino |
+| `--wikilinks` | ❌ | Parsea `[[wikilinks]]` y crea entry_refs |
+
+Soporta frontmatter YAML (description, tags, created, updated). Archivos eliminados del directorio se archivan automáticamente (orphan cleanup).
+
+---
 
 Exporta todo el vault a un archivo JSON.
 
@@ -264,3 +329,16 @@ skillvault import backup.json
 ```
 
 Resuelve conflictos de slug automáticamente (agrega sufijo numérico a duplicados).
+
+---
+
+## `http`
+
+Inicia el servidor HTTP REST API.
+
+```bash
+skillvault http
+# Sirve en http://127.0.0.1:7438
+```
+
+Endpoints disponibles: health, entries CRUD, artifacts, context, projects, sessions, workflows, export/import. Ver [`docs/quickstart.md`](quickstart.md) o [`docs/architecture.md`](architecture.md) para detalles.
