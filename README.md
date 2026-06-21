@@ -15,9 +15,21 @@ Store, search, and retrieve prompts, skills, workflows, decisions, project memor
 
 **Codename:** Qu@ntum  
 **Status:** v2 — Production-ready alpha  
-**Binary size:** ~10 MB  
+**Binary size:** ~7 MB  
 **Dependencies:** Zero frameworks. Only `modernc.org/sqlite`.  
 **Language:** Go 1.26+
+
+---
+
+## Docs
+
+| Guide | Description |
+|-------|-------------|
+| [`docs/quickstart.md`](docs/quickstart.md) | Install, init, and first 6 steps in 5 minutes |
+| [`docs/commands.md`](docs/commands.md) | Full CLI reference — all 14 commands with flags |
+| [`docs/mcp.md`](docs/mcp.md) | MCP server setup for Claude Code / OpenCode |
+| [`docs/tutorial.md`](docs/tutorial.md) | Real-world workflow: project → skills → context → session |
+| [`docs/architecture.md`](docs/architecture.md) | Clean Architecture deep-dive, data flows, design decisions |
 
 ---
 
