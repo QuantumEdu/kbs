@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
 	_ "modernc.org/sqlite"
 
+	"github.com/quantum-6/skillvault/internal/api"
 	"github.com/quantum-6/skillvault/internal/app"
 	"github.com/quantum-6/skillvault/internal/cli"
 	"github.com/quantum-6/skillvault/internal/db"
@@ -60,6 +62,15 @@ func main() {
 		runInit()
 	case "mcp":
 		runMCP()
+	case "http":
+		svc := openVault()
+		srv := api.NewServer("127.0.0.1", 7438,
+			svc.entrySvc, svc.artifactSvc, svc.contextSvc,
+			svc.projectSvc, svc.sessionSvc, svc.workflowSvc,
+			svc.exportSvc, svc.importSvc,
+		)
+		fmt.Fprintf(os.Stderr, "HTTP API server starting on 127.0.0.1:7438\n")
+		log.Fatal(srv.Start())
 	default:
 		runCLI(cmd)
 	}

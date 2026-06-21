@@ -15,7 +15,7 @@ func ParseCommand(args []string) (string, error) {
 
 	sub := args[1]
 	switch sub {
-	case "init", "version", "mcp", "list-projects", "export":
+	case "init", "version", "mcp", "http", "list-projects", "export":
 		return sub, nil
 	case "add-entry", "search", "save-artifact", "get-context", "add-project", "session-wrap":
 		return sub, nil

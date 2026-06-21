@@ -1,54 +1,538 @@
 package api
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
-	"time"
+
+	_ "modernc.org/sqlite"
+
+	"github.com/quantum-6/skillvault/internal/app"
+	"github.com/quantum-6/skillvault/internal/db"
 )
 
-func TestServerReturns501(t *testing.T) {
-	s := NewServer("127.0.0.1", 0)
-
-	// Start in background
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- s.Start()
-	}()
-
-	// Give it a moment to start, then try to connect
-	time.Sleep(50 * time.Millisecond)
-
-	// Since we used port 0, we can't easily test. Let's test the handler directly.
-	// For the scaffold, just verify the server struct works.
-	if s == nil {
-		t.Fatal("server is nil")
+func setupTestServer(t *testing.T) (*Server, func()) {
+	t.Helper()
+	sqlDB, err := db.OpenDB(":memory:")
+	if err != nil {
+		t.Fatalf("OpenDB failed: %v", err)
 	}
+	if err := db.RunMigrations(sqlDB); err != nil {
+		sqlDB.Close()
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+	store := db.NewStore(sqlDB)
 
-	// Stop the server
-	s.Stop()
+	entrySvc := app.NewEntryService(store.Entries, store.Projects, store.Artifacts)
+	artifactSvc := app.NewArtifactService(store.Artifacts, store.Entries, store.Projects)
+	workflowSvc := app.NewWorkflowService(store.Workflows)
+	projectSvc := app.NewProjectService(store.Projects)
+	contextSvc := app.NewContextService(store.Entries, store.Projects, store.Series, store.Workflows, store.Artifacts, entrySvc)
+	sessionSvc := app.NewSessionService(entrySvc, artifactSvc, projectSvc, store.Entries, store.Artifacts, store.Projects)
+	exportSvc := app.NewVaultExportService(store.ImportExport, store.Artifacts, store.Entries, store.Projects, store.Workflows)
+	importSvc := app.NewVaultImportService(store.ImportExport, store.Entries, store.Projects, store.Artifacts)
+
+	server := NewServer("127.0.0.1", 7438, entrySvc, artifactSvc, contextSvc, projectSvc, sessionSvc, workflowSvc, exportSvc, importSvc)
+
+	cleanup := func() { sqlDB.Close() }
+	return server, cleanup
 }
 
-func TestHandlerDirectly(t *testing.T) {
-	s := NewServer("127.0.0.1", 7438)
-	rec := &testResponseWriter{header: make(http.Header)}
-	req, _ := http.NewRequest("GET", "/health", nil)
+func buildTestMux(srv *Server) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", srv.handleHealth)
+	mux.HandleFunc("/entries", srv.handleEntries)
+	mux.HandleFunc("/entries/", srv.handleEntryByID)
+	mux.HandleFunc("/artifacts", srv.handleArtifacts)
+	mux.HandleFunc("/context", srv.handleContext)
+	mux.HandleFunc("/projects", srv.handleProjects)
+	mux.HandleFunc("/sessions/wrap", srv.handleSessionWrap)
+	mux.HandleFunc("/workflows", srv.handleWorkflows)
+	mux.HandleFunc("/workflows/", srv.handleWorkflowByID)
+	mux.HandleFunc("/export", srv.handleExport)
+	mux.HandleFunc("/import", srv.handleImport)
+	return mux
+}
 
-	s.handleAll(rec, req)
-
-	if rec.status != http.StatusNotImplemented {
-		t.Errorf("status = %d, want %d", rec.status, http.StatusNotImplemented)
+func doReq(mux *http.ServeMux, method, path string, body any) *httptest.ResponseRecorder {
+	var reqBody io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		reqBody = bytes.NewReader(b)
 	}
-	if rec.body != `{"error":"not implemented","message":"HTTP API will be available in v1-final"}` {
-		t.Errorf("body = %q", rec.body)
+	req := httptest.NewRequest(method, path, reqBody)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestHealthEndpoint(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	rec := doReq(mux, "GET", "/health", nil)
+	if rec.Code != 200 {
+		t.Errorf("health status = %d, want 200", rec.Code)
+	}
+	var healthResp map[string]string
+	json.NewDecoder(rec.Body).Decode(&healthResp)
+	if healthResp["status"] != "ok" {
+		t.Errorf("health status = %q, want 'ok'", healthResp["status"])
 	}
 }
 
-type testResponseWriter struct {
-	header http.Header
-	status int
-	body   string
+func TestPostEntriesValid(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	// Create a project first
+	doReq(mux, "POST", "/projects", map[string]string{
+		"name":        "testproj",
+		"description": "Test project",
+	})
+
+	rec := doReq(mux, "POST", "/entries", map[string]any{
+		"title":   "Test Entry",
+		"type":    "skill",
+		"summary": "A test entry",
+		"body":    "Entry body",
+		"project": "testproj",
+		"tags":    []string{"go", "api"},
+		"status":  "active",
+	})
+	if rec.Code != 201 {
+		t.Fatalf("POST /entries status = %d, want 201. Body: %s", rec.Code, rec.Body.String())
+	}
+	var result map[string]any
+	json.NewDecoder(rec.Body).Decode(&result)
+	entryMap, ok := result["Entry"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected Entry in response, got %v", result)
+	}
+	inner, ok := entryMap["Entry"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected Entry.Entry in response, got %v", entryMap)
+	}
+	if inner["Title"] != "Test Entry" {
+		t.Errorf("Title = %v, want 'Test Entry'", inner["Title"])
+	}
+	if inner["ID"] == nil || inner["ID"] == "" {
+		t.Error("expected non-empty ID")
+	}
 }
 
-func (w *testResponseWriter) Header() http.Header         { return w.header }
-func (w *testResponseWriter) WriteHeader(statusCode int)  { w.status = statusCode }
-func (w *testResponseWriter) Write(b []byte) (int, error) { w.body += string(b); return len(b), nil }
+func TestPostEntriesMissingTitle(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	rec := doReq(mux, "POST", "/entries", map[string]string{
+		"type": "skill",
+	})
+	if rec.Code != 400 {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+	var errResp map[string]string
+	json.NewDecoder(rec.Body).Decode(&errResp)
+	if !strings.Contains(errResp["error"], "title") {
+		t.Errorf("error should mention title: got %v", errResp)
+	}
+}
+
+func TestGetEntryExists(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	// Create an entry first
+	postRec := doReq(mux, "POST", "/entries", map[string]any{
+		"title":   "Get Me",
+		"type":    "skill",
+		"summary": "Getting this entry",
+	})
+	var postResult map[string]any
+	json.NewDecoder(postRec.Body).Decode(&postResult)
+	entryMap := postResult["Entry"].(map[string]any)
+	inner := entryMap["Entry"].(map[string]any)
+	id := inner["ID"].(string)
+
+	rec := doReq(mux, "GET", "/entries/"+id, nil)
+	if rec.Code != 200 {
+		t.Fatalf("GET /entries/{id} status = %d, want 200. Body: %s", rec.Code, rec.Body.String())
+	}
+	var result map[string]any
+	json.NewDecoder(rec.Body).Decode(&result)
+	gotEntry := result["Entry"].(map[string]any)
+	gotInner := gotEntry["Entry"].(map[string]any)
+	if gotInner["Title"] != "Get Me" {
+		t.Errorf("Title = %v, want 'Get Me'", gotInner["Title"])
+	}
+}
+
+func TestGetEntryNotFound(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	rec := doReq(mux, "GET", "/entries/nonexistent-id", nil)
+	if rec.Code != 404 {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestEntriesSearch(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	doReq(mux, "POST", "/entries", map[string]any{
+		"title":   "Searchable REST API",
+		"type":    "skill",
+		"summary": "Building REST APIs",
+	})
+	doReq(mux, "POST", "/entries", map[string]any{
+		"title":   "Another Entry",
+		"type":    "reference",
+		"summary": "Some reference",
+	})
+
+	rec := doReq(mux, "GET", "/entries?q=REST", nil)
+	if rec.Code != 200 {
+		t.Fatalf("search status = %d, want 200. Body: %s", rec.Code, rec.Body.String())
+	}
+	var results []any
+	json.NewDecoder(rec.Body).Decode(&results)
+	if len(results) == 0 {
+		t.Error("expected at least 1 search result")
+	}
+}
+
+func TestPostProjects(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	rec := doReq(mux, "POST", "/projects", map[string]string{
+		"name":        "new-project",
+		"description": "A brand new project",
+	})
+	if rec.Code != 201 {
+		t.Fatalf("POST /projects status = %d, want 201. Body: %s", rec.Code, rec.Body.String())
+	}
+	var result map[string]any
+	json.NewDecoder(rec.Body).Decode(&result)
+	if result["Name"] != "new-project" {
+		t.Errorf("Name = %v, want 'new-project'", result["Name"])
+	}
+	if result["ID"] == nil || result["ID"] == "" {
+		t.Error("expected non-empty ID")
+	}
+}
+
+func TestListProjects(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	doReq(mux, "POST", "/projects", map[string]string{"name": "Alpha"})
+	doReq(mux, "POST", "/projects", map[string]string{"name": "Beta"})
+
+	rec := doReq(mux, "GET", "/projects", nil)
+	if rec.Code != 200 {
+		t.Fatalf("GET /projects status = %d, want 200. Body: %s", rec.Code, rec.Body.String())
+	}
+	var results []any
+	json.NewDecoder(rec.Body).Decode(&results)
+	if len(results) != 2 {
+		t.Errorf("expected 2 projects, got %d", len(results))
+	}
+}
+
+func TestDeleteEntryArchive(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	// Create entry
+	postRec := doReq(mux, "POST", "/entries", map[string]any{
+		"title":   "To Archive",
+		"type":    "skill",
+		"summary": "Will be archived",
+	})
+	var postResult map[string]any
+	json.NewDecoder(postRec.Body).Decode(&postResult)
+	entryMap := postResult["Entry"].(map[string]any)
+	inner := entryMap["Entry"].(map[string]any)
+	id := inner["ID"].(string)
+
+	rec := doReq(mux, "DELETE", "/entries/"+id, nil)
+	if rec.Code != 200 {
+		t.Fatalf("DELETE /entries/{id} status = %d, want 200. Body: %s", rec.Code, rec.Body.String())
+	}
+	var delResult map[string]string
+	json.NewDecoder(rec.Body).Decode(&delResult)
+	if delResult["status"] != "archived" {
+		t.Errorf("status = %q, want 'archived'", delResult["status"])
+	}
+
+	// Verify archived entry returns 404
+	rec2 := doReq(mux, "GET", "/entries/"+id, nil)
+	if rec2.Code != 404 {
+		t.Errorf("GET archived entry status = %d, want 404", rec2.Code)
+	}
+}
+
+func TestPostArtifacts(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	ctx := context.Background()
+	srv.projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "art-proj"})
+
+	rec := doReq(mux, "POST", "/artifacts", map[string]any{
+		"title":   "Test Artifact",
+		"type":    "markdown",
+		"content": "# Hello",
+		"summary": "A markdown artifact",
+		"project": "art-proj",
+	})
+	if rec.Code != 201 {
+		t.Fatalf("POST /artifacts status = %d, want 201. Body: %s", rec.Code, rec.Body.String())
+	}
+	var result map[string]any
+	json.NewDecoder(rec.Body).Decode(&result)
+	if result["Title"] != "Test Artifact" {
+		t.Errorf("Title = %v, want 'Test Artifact'", result["Title"])
+	}
+}
+
+func TestPostContext(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	ctx := context.Background()
+	proj, _ := srv.projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "ctx-proj", Description: "Context project"})
+	srv.entrySvc.SaveEntry(ctx, app.SaveEntryInput{
+		Title: "Use Go", Type: "decision", Summary: "Use Go for backend", Project: proj.ID, Status: "active",
+	})
+
+	rec := doReq(mux, "POST", "/context", map[string]any{
+		"mode":      "planning",
+		"project":   proj.ID,
+		"max_chars": 5000,
+	})
+	if rec.Code != 200 {
+		t.Fatalf("POST /context status = %d, want 200. Body: %s", rec.Code, rec.Body.String())
+	}
+	var result map[string]any
+	json.NewDecoder(rec.Body).Decode(&result)
+	if result["Raw"] == nil {
+		t.Error("expected Raw field in context response")
+	}
+	raw := result["Raw"].(string)
+	if !strings.Contains(raw, "CONTEXT PACK") {
+		t.Error("expected CONTEXT PACK in response")
+	}
+	if !strings.Contains(raw, "Use Go") {
+		t.Error("expected 'Use Go' decision in context pack")
+	}
+}
+
+func TestSessionWrap(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	ctx := context.Background()
+	srv.projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "ses-proj"})
+
+	rec := doReq(mux, "POST", "/sessions/wrap", map[string]any{
+		"project":   "ses-proj",
+		"summary":   "Fixed auth bug",
+		"decisions": []string{"Use JWT"},
+		"pending":   []string{"Add tests"},
+		"learnings": []string{"JWT expiry short"},
+	})
+	if rec.Code != 201 {
+		t.Fatalf("POST /sessions/wrap status = %d, want 201. Body: %s", rec.Code, rec.Body.String())
+	}
+	var result map[string]any
+	json.NewDecoder(rec.Body).Decode(&result)
+	if result["Entry"] == nil {
+		t.Error("expected Entry in session wrap response")
+	}
+}
+
+func TestWorkflows(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	wfBody := map[string]any{
+		"name":        "Review Flow",
+		"description": "Code review steps",
+		"status":      "active",
+		"steps": []map[string]any{
+			{"Title": "Check style", "Instruction": "Run linter", "Required": true},
+			{"Title": "Run tests", "Instruction": "go test ./...", "Required": true},
+		},
+	}
+	rec := doReq(mux, "POST", "/workflows", wfBody)
+	if rec.Code != 201 {
+		t.Fatalf("POST /workflows status = %d, want 201. Body: %s", rec.Code, rec.Body.String())
+	}
+	var result map[string]any
+	json.NewDecoder(rec.Body).Decode(&result)
+	wfID := result["ID"].(string)
+	if wfID == "" {
+		t.Fatal("expected workflow ID")
+	}
+
+	rec2 := doReq(mux, "GET", "/workflows/"+wfID, nil)
+	if rec2.Code != 200 {
+		t.Fatalf("GET /workflows/{id} status = %d, want 200. Body: %s", rec2.Code, rec2.Body.String())
+	}
+	var steps []any
+	json.NewDecoder(rec2.Body).Decode(&steps)
+	if len(steps) != 2 {
+		t.Errorf("expected 2 steps, got %d", len(steps))
+	}
+}
+
+func TestExportImport(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	tmpDir := t.TempDir()
+	exportPath := filepath.Join(tmpDir, "export.json")
+
+	// Export
+	rec := doReq(mux, "POST", "/export", map[string]string{
+		"path": exportPath,
+	})
+	if rec.Code != 200 {
+		t.Fatalf("POST /export status = %d, want 200. Body: %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(exportPath); os.IsNotExist(err) {
+		t.Fatal("export file not created")
+	}
+
+	// Import
+	rec2 := doReq(mux, "POST", "/import", map[string]string{
+		"path": exportPath,
+	})
+	if rec2.Code != 200 {
+		t.Fatalf("POST /import status = %d, want 200. Body: %s", rec2.Code, rec2.Body.String())
+	}
+	var impResult map[string]string
+	json.NewDecoder(rec2.Body).Decode(&impResult)
+	if impResult["status"] != "imported" {
+		t.Errorf("status = %q, want 'imported'", impResult["status"])
+	}
+}
+
+func TestMethodNotAllowed(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	rec := doReq(mux, "POST", "/health", nil)
+	if rec.Code != 405 {
+		t.Errorf("POST /health status = %d, want 405", rec.Code)
+	}
+}
+
+func TestServerConstruction(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	if srv == nil {
+		t.Fatal("NewServer returned nil")
+	}
+	if srv.host != "127.0.0.1" {
+		t.Errorf("host = %q, want '127.0.0.1'", srv.host)
+	}
+	if srv.port != 7438 {
+		t.Errorf("port = %d, want 7438", srv.port)
+	}
+}
+
+func TestEntriesSearchWithFilters(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	ctx := context.Background()
+	srv.projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "proj-a"})
+	pb, _ := srv.projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "proj-b"})
+
+	srv.entrySvc.SaveEntry(ctx, app.SaveEntryInput{
+		Title: "Skill Entry", Type: "skill", Summary: "A skill", Project: "proj-a", Status: "active",
+	})
+	srv.entrySvc.SaveEntry(ctx, app.SaveEntryInput{
+		Title: "Reference Entry", Type: "reference", Summary: "A ref", Project: "proj-b", Status: "active",
+	})
+
+	// Search by type with query
+	rec := doReq(mux, "GET", "/entries?q=Entry&type=skill&limit=10", nil)
+	if rec.Code != 200 {
+		t.Fatalf("search by type status = %d, want 200", rec.Code)
+	}
+	var results []any
+	json.NewDecoder(rec.Body).Decode(&results)
+	found := false
+	for _, r := range results {
+		rm := r.(map[string]any)
+		entry := rm["Entry"].(map[string]any)
+		if entry["Title"] == "Skill Entry" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected to find 'Skill Entry' when filtering by type=skill")
+	}
+
+	// Search by project with query
+	rec = doReq(mux, "GET", "/entries?q=Entry&project="+pb.ID+"&limit=10", nil)
+	if rec.Code != 200 {
+		t.Fatalf("search by project status = %d, want 200", rec.Code)
+	}
+	json.NewDecoder(rec.Body).Decode(&results)
+	found = false
+	for _, r := range results {
+		rm := r.(map[string]any)
+		entry := rm["Entry"].(map[string]any)
+		if entry["Title"] == "Reference Entry" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected to find 'Reference Entry' when filtering by project")
+	}
+}
+
+func TestWorkflowRenderNotFound(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	mux := buildTestMux(srv)
+
+	rec := doReq(mux, "GET", "/workflows/nonexistent", nil)
+	if rec.Code != 404 {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
