@@ -5,16 +5,17 @@ import "time"
 type EntryType string
 
 const (
-	EntryTypePrompt         EntryType = "prompt"
-	EntryTypeSkill          EntryType = "skill"
-	EntryTypeWorkflowNote   EntryType = "workflow_note"
-	EntryTypeReference      EntryType = "reference"
-	EntryTypeUser           EntryType = "user"
-	EntryTypeFeedback       EntryType = "feedback"
-	EntryTypeProjectState   EntryType = "project_state"
-	EntryTypeSession        EntryType = "session"
-	EntryTypeDecision       EntryType = "decision"
+	EntryTypePrompt          EntryType = "prompt"
+	EntryTypeSkill           EntryType = "skill"
+	EntryTypeWorkflowNote    EntryType = "workflow_note"
+	EntryTypeReference       EntryType = "reference"
+	EntryTypeUser            EntryType = "user"
+	EntryTypeFeedback        EntryType = "feedback"
+	EntryTypeProjectState    EntryType = "project_state"
+	EntryTypeSession         EntryType = "session"
+	EntryTypeDecision        EntryType = "decision"
 	EntryTypeArtifactSummary EntryType = "artifact_summary"
+	EntryTypeHandoff         EntryType = "handoff"
 )
 
 func (et EntryType) IsValid() bool {
@@ -22,7 +23,7 @@ func (et EntryType) IsValid() bool {
 	case EntryTypePrompt, EntryTypeSkill, EntryTypeWorkflowNote,
 		EntryTypeReference, EntryTypeUser, EntryTypeFeedback,
 		EntryTypeProjectState, EntryTypeSession, EntryTypeDecision,
-		EntryTypeArtifactSummary:
+		EntryTypeArtifactSummary, EntryTypeHandoff:
 		return true
 	}
 	return false
@@ -31,11 +32,11 @@ func (et EntryType) IsValid() bool {
 type Status string
 
 const (
-	StatusDraft     Status = "draft"
-	StatusActive    Status = "active"
-	StatusArchived  Status = "archived"
+	StatusDraft      Status = "draft"
+	StatusActive     Status = "active"
+	StatusArchived   Status = "archived"
 	StatusDeprecated Status = "deprecated"
-	StatusCanonical Status = "canonical"
+	StatusCanonical  Status = "canonical"
 )
 
 func (s Status) IsValid() bool {
@@ -56,6 +57,7 @@ type Entry struct {
 	Status       Status
 	ProjectID    *string
 	ArtifactID   *string
+	ExternalRef  string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }

@@ -61,7 +61,7 @@ func ValidateArtifactType(t string) error {
 func ValidateRelationType(t string) error {
 	rt := RelationType(t)
 	if !rt.IsValid() {
-		return fmt.Errorf("invalid relation type: %q (expected one of: references, supersedes, related_to, part_of, derived_from, implements)", t)
+		return fmt.Errorf("invalid relation type: %q (expected one of: references, supersedes, related_to, part_of, derived_from, implements, uses, extends, handoff_of, generated_from, depends_on)", t)
 	}
 	return nil
 }

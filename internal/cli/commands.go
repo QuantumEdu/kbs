@@ -15,6 +15,8 @@ func ParseCommand(args []string) (string, error) {
 
 	sub := args[1]
 	switch sub {
+	case "graph":
+		return sub, nil
 	case "init", "version", "mcp", "http", "list-projects", "export":
 		return sub, nil
 	case "add-entry", "search", "save-artifact", "get-context", "add-project", "session-wrap":
@@ -34,6 +36,34 @@ func ParseCommand(args []string) (string, error) {
 			return "", fmt.Errorf("render-workflow requires a workflow ID")
 		}
 		return sub, nil
+	case "memory":
+		if len(args) < 3 {
+			return "", fmt.Errorf("memory requires a subcommand (index, reindex, list-external)")
+		}
+		sub2 := args[2]
+		switch sub2 {
+		case "index":
+			return "memory-index", nil
+		case "reindex":
+			return "memory-reindex", nil
+		case "list-external":
+			return "memory-list-external", nil
+		default:
+			return "", fmt.Errorf("unknown memory subcommand: %s", sub2)
+		}
+	case "entry":
+		if len(args) < 3 {
+			return "", fmt.Errorf("entry requires a subcommand (ref)")
+		}
+		sub2 := args[2]
+		switch sub2 {
+		case "ref":
+			return "entry-ref", nil
+		default:
+			return "", fmt.Errorf("unknown entry subcommand: %s", sub2)
+		}
+	case "ref":
+		return "entry-ref", nil
 	case "import":
 		if len(args) < 3 {
 			return "", fmt.Errorf("import requires a file path")
@@ -331,6 +361,92 @@ type ImportFlags struct {
 }
 
 // ParseImportFlags parses import-specific flags from args.
+// GraphFlags holds parsed graph command flags.
+type GraphFlags struct {
+	EntryID   string
+	Depth     int
+	Format    string
+	Direction string
+}
+
+// ParseGraphFlags parses graph-specific flags from args.
+func ParseGraphFlags(args []string) (*GraphFlags, error) {
+	flags := &GraphFlags{Depth: 3, Format: "mermaid", Direction: "both"}
+
+	fs := flag.NewFlagSet("graph", flag.ContinueOnError)
+	fs.StringVar(&flags.EntryID, "entry", "", "Entry ID to root the graph (required)")
+	fs.IntVar(&flags.Depth, "depth", 3, "Max traversal depth (default 3, max 10)")
+	fs.StringVar(&flags.Format, "format", "mermaid", "Output format: mermaid, json, dot")
+	fs.StringVar(&flags.Direction, "direction", "both", "Traversal direction: outgoing, incoming, both")
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 2 {
+		if err := fs.Parse(args[2:]); err != nil {
+			return nil, fmt.Errorf("parse graph flags: %w", err)
+		}
+	}
+
+	if flags.EntryID == "" {
+		return nil, fmt.Errorf("--entry is required")
+	}
+	if flags.Depth < 1 {
+		flags.Depth = 1
+	}
+	if flags.Depth > 10 {
+		flags.Depth = 10
+	}
+	switch flags.Format {
+	case "mermaid", "json", "dot":
+	default:
+		return nil, fmt.Errorf("invalid format %q, expected: mermaid, json, dot", flags.Format)
+	}
+	switch flags.Direction {
+	case "outgoing", "incoming", "both":
+	default:
+		return nil, fmt.Errorf("invalid direction %q, expected: outgoing, incoming, both", flags.Direction)
+	}
+
+	return flags, nil
+}
+
+// MemoryIndexFlags holds parsed memory index/reindex/list-external command flags.
+type MemoryIndexFlags struct {
+	Path           string
+	ProjectID      string
+	ParseWikilinks bool
+}
+
+// ParseMemoryIndexFlags parses memory index/reindex/list-external flags from args.
+func ParseMemoryIndexFlags(args []string) (*MemoryIndexFlags, error) {
+	flags := &MemoryIndexFlags{}
+
+	fs := flag.NewFlagSet("memory", flag.ContinueOnError)
+	fs.StringVar(&flags.Path, "path", "", "Path to pi-memory-md directory (required for index/reindex)")
+	fs.StringVar(&flags.ProjectID, "project", "", "Target project ID in SkillVault (required)")
+	fs.BoolVar(&flags.ParseWikilinks, "wikilinks", false, "Parse [[wikilinks]] from body to create entry_refs")
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 2 {
+		if err := fs.Parse(args[2:]); err != nil {
+			return nil, fmt.Errorf("parse memory flags: %w", err)
+		}
+	}
+
+	// Path is required for index/reindex but not for list-external
+	cmd := ""
+	if len(args) >= 2 {
+		cmd = args[1]
+	}
+	if cmd != "memory-list-external" && flags.Path == "" {
+		return nil, fmt.Errorf("--path is required")
+	}
+	if flags.ProjectID == "" {
+		return nil, fmt.Errorf("--project is required")
+	}
+
+	return flags, nil
+}
+
 func ParseImportFlags(args []string) (*ImportFlags, error) {
 	if len(args) < 3 {
 		return nil, fmt.Errorf("import requires a file path")

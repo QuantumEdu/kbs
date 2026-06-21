@@ -23,19 +23,21 @@ import (
 const version = "v2-hermes"
 
 type vaultServices struct {
-	store         *db.Store
-	entrySvc      *app.EntryService
-	artifactSvc   *app.ArtifactService
-	workflowSvc   *app.WorkflowService
-	seriesSvc     *app.SeriesService
-	projectSvc    *app.ProjectService
-	contextSvc    *app.ContextService
-	sessionSvc    *app.SessionService
-	exportSvc     *app.VaultExportService
-	importSvc     *app.VaultImportService
-	saveResultSvc *app.SavePromptResultService
-	fileSvc       *files.ArtifactFileService
-	scanner       *security.SecretScanner
+	store          *db.Store
+	entrySvc       *app.EntryService
+	entryRefSvc    *app.EntryRefService
+	memoryIndexSvc *app.MemoryIndexService
+	artifactSvc    *app.ArtifactService
+	workflowSvc    *app.WorkflowService
+	seriesSvc      *app.SeriesService
+	projectSvc     *app.ProjectService
+	contextSvc     *app.ContextService
+	sessionSvc     *app.SessionService
+	exportSvc      *app.VaultExportService
+	importSvc      *app.VaultImportService
+	saveResultSvc  *app.SavePromptResultService
+	fileSvc        *files.ArtifactFileService
+	scanner        *security.SecretScanner
 }
 
 func main() {
@@ -138,6 +140,8 @@ func openVault() *vaultServices {
 	workflowSvc := app.NewWorkflowService(store.Workflows)
 	seriesSvc := app.NewSeriesService(store.Series, store.Entries)
 	projectSvc := app.NewProjectService(store.Projects)
+	entryRefSvc := app.NewEntryRefService(store.EntryLinks, store.Entries)
+	memoryIndexSvc := app.NewMemoryIndexService(store.Entries, store.Projects, entryRefSvc)
 	contextSvc := app.NewContextService(store.Entries, store.Projects, store.Series, store.Workflows, store.Artifacts, entrySvc)
 	sessionSvc := app.NewSessionService(entrySvc, artifactSvc, projectSvc, store.Entries, store.Artifacts, store.Projects)
 	exportSvc := app.NewVaultExportService(store.ImportExport, store.Artifacts, store.Entries, store.Projects, store.Workflows)
@@ -145,19 +149,21 @@ func openVault() *vaultServices {
 	saveResultSvc := app.NewSavePromptResultService(store.Entries, store.Projects, store.Artifacts)
 
 	return &vaultServices{
-		store:         store,
-		entrySvc:      entrySvc,
-		artifactSvc:   artifactSvc,
-		workflowSvc:   workflowSvc,
-		seriesSvc:     seriesSvc,
-		projectSvc:    projectSvc,
-		contextSvc:    contextSvc,
-		sessionSvc:    sessionSvc,
-		exportSvc:     exportSvc,
-		importSvc:     importSvc,
-		saveResultSvc: saveResultSvc,
-		fileSvc:       fileSvc,
-		scanner:       scanner,
+		store:          store,
+		entrySvc:       entrySvc,
+		entryRefSvc:    entryRefSvc,
+		memoryIndexSvc: memoryIndexSvc,
+		artifactSvc:    artifactSvc,
+		workflowSvc:    workflowSvc,
+		seriesSvc:      seriesSvc,
+		projectSvc:     projectSvc,
+		contextSvc:     contextSvc,
+		sessionSvc:     sessionSvc,
+		exportSvc:      exportSvc,
+		importSvc:      importSvc,
+		saveResultSvc:  saveResultSvc,
+		fileSvc:        fileSvc,
+		scanner:        scanner,
 	}
 }
 
@@ -508,6 +514,221 @@ func runCLI(cmd string) {
 			Type:      output.Type,
 			ProjectID: output.ProjectID,
 		}))
+
+	case "memory-index", "memory-reindex", "memory-list-external":
+		flags, err := cli.ParseMemoryIndexFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		listMode := cmd == "memory-list-external"
+
+		if listMode {
+			results, err := svc.entrySvc.Search(ctx, domain.SearchQuery{
+				Query:           "pimem",
+				IncludeArchived: true,
+				Limit:           9999,
+			})
+			if err != nil {
+				cli.PrintError(err)
+				os.Exit(1)
+			}
+			if len(results) == 0 {
+				fmt.Println("No shadow entries found.")
+				return
+			}
+			fmt.Printf("Shadow entries (%d):\n", len(results))
+			for _, r := range results {
+				if r.Entry.ExternalRef == "" {
+					continue
+				}
+				fmt.Printf("  [%s] %s\n", r.Entry.ID, r.Entry.Title)
+				fmt.Printf("    Path:  %s\n", r.Entry.ExternalRef)
+				fmt.Printf("    Type:  %s | Status: %s\n", r.Entry.Type, r.Entry.Status)
+			}
+			return
+		}
+
+		result, err := svc.memoryIndexSvc.Index(ctx, flags.Path, flags.ProjectID, flags.ParseWikilinks)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Memory index complete for %s -> project %s\n", flags.Path, flags.ProjectID)
+		fmt.Printf("  Indexed:   %d\n", result.Indexed)
+		fmt.Printf("  Orphaned:  %d\n", result.Orphaned)
+		if result.Skipped > 0 {
+			fmt.Printf("  Skipped:   %d\n", result.Skipped)
+		}
+		if result.Failed > 0 {
+			fmt.Printf("  Failed:    %d\n", result.Failed)
+			for _, f := range result.FailedFiles {
+				fmt.Printf("    - %s\n", f)
+			}
+		}
+		if len(result.MissingTargets) > 0 {
+			fmt.Printf("  Missing wikilink targets: %d\n", len(result.MissingTargets))
+		}
+
+	case "graph":
+		flags, err := cli.ParseGraphFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		result, err := svc.entryRefSvc.GetEntryGraph(ctx, app.GetGraphInput{
+			EntryID:   flags.EntryID,
+			Direction: flags.Direction,
+			MaxDepth:  flags.Depth,
+		})
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		switch flags.Format {
+		case "json":
+			out := map[string]interface{}{
+				"root_entry": flags.EntryID,
+				"direction":  flags.Direction,
+				"depth":      flags.Depth,
+				"node_count": len(result.Nodes),
+				"edge_count": len(result.Edges),
+				"nodes":      result.Nodes,
+				"edges":      result.Edges,
+			}
+			data, _ := json.MarshalIndent(out, "", "  ")
+			fmt.Println(string(data))
+
+		case "dot":
+			fmt.Println("digraph G {")
+			fmt.Printf("  // Root: %s, %d nodes, %d edges\n", flags.EntryID, len(result.Nodes), len(result.Edges))
+			for _, n := range result.Nodes {
+				fmt.Printf("  %q;\n", n.EntryID)
+			}
+			for _, e := range result.Edges {
+				label := e.Label
+				if label == "" {
+					label = string(e.RelationType)
+				}
+				fmt.Printf("  %q -> %q [label=%q];\n", e.FromEntryID, e.ToEntryID, label)
+			}
+			fmt.Println("}")
+
+		default: // mermaid
+			fmt.Println("graph TD")
+			fmt.Printf("  %% Root: %s, depth %d, direction: %s\n", flags.EntryID, flags.Depth, flags.Direction)
+			for _, e := range result.Edges {
+				label := e.Label
+				if label == "" {
+					label = string(e.RelationType)
+				}
+				fmt.Printf("  %s -->|%s| %s\n", e.FromEntryID, label, e.ToEntryID)
+			}
+			if len(result.Edges) == 0 {
+				fmt.Printf("  %s[\"No connections\"]\n", flags.EntryID)
+			}
+		}
+
+	case "entry-ref":
+		if len(os.Args) < 4 {
+			cli.PrintError(fmt.Errorf("usage: skillvault entry ref <subcommand> [args...]"))
+			os.Exit(1)
+		}
+		sub := os.Args[3]
+		switch sub {
+		case "add":
+			if len(os.Args) < 7 {
+				cli.PrintError(fmt.Errorf("usage: skillvault entry ref add <source_id> <target_id> <ref_type> [--label <txt>]"))
+				os.Exit(1)
+			}
+			sourceID := os.Args[4]
+			targetID := os.Args[5]
+			refType := os.Args[6]
+			label := ""
+			for i, a := range os.Args[7:] {
+				if a == "--label" && i+1 < len(os.Args[7:]) {
+					label = os.Args[7+i+1]
+				}
+			}
+			link, err := svc.entryRefSvc.SaveRef(ctx, app.AddRefInput{
+				SourceID: sourceID,
+				TargetID: targetID,
+				RefType:  refType,
+				Label:    label,
+			})
+			if err != nil {
+				cli.PrintError(err)
+				os.Exit(1)
+			}
+			fmt.Printf("Saved ref: %s --[%s]--> %s\n", link.FromEntryID, link.RelationType, link.ToEntryID)
+			if link.Label != "" {
+				fmt.Printf("  Label: %s\n", link.Label)
+			}
+
+		case "list":
+			var srcPtr, tgtPtr, typePtr *string
+			includeArchived := false
+			for i, a := range os.Args[4:] {
+				v := ""
+				if i+1 < len(os.Args[4:]) {
+					v = os.Args[4+i+1]
+				}
+				switch a {
+				case "--source":
+					srcPtr = &v
+				case "--target":
+					tgtPtr = &v
+				case "--type":
+					typePtr = &v
+				case "--include-archived":
+					includeArchived = true
+				}
+			}
+			links, err := svc.entryRefSvc.ListRefs(ctx, app.ListRefsInput{
+				SourceID:        srcPtr,
+				TargetID:        tgtPtr,
+				RefType:         typePtr,
+				IncludeArchived: includeArchived,
+			})
+			if err != nil {
+				cli.PrintError(err)
+				os.Exit(1)
+			}
+			if len(links) == 0 {
+				fmt.Println("No refs found.")
+				return
+			}
+			fmt.Printf("Found %d ref(s):\n", len(links))
+			for _, l := range links {
+				la := ""
+				if l.Label != "" {
+					la = fmt.Sprintf(" (%s)", l.Label)
+				}
+				fmt.Printf("  %s --[%s%s]--> %s\n", l.FromEntryID, l.RelationType, la, l.ToEntryID)
+			}
+
+		case "remove":
+			if len(os.Args) < 7 {
+				cli.PrintError(fmt.Errorf("usage: skillvault entry ref remove <source_id> <target_id> <ref_type>"))
+				os.Exit(1)
+			}
+			sourceID := os.Args[4]
+			targetID := os.Args[5]
+			refType := os.Args[6]
+			if err := svc.entryRefSvc.RemoveRef(ctx, sourceID, targetID, refType); err != nil {
+				cli.PrintError(err)
+				os.Exit(1)
+			}
+			fmt.Printf("Removed ref: %s --[%s]--> %s\n", sourceID, refType, targetID)
+
+		default:
+			cli.PrintError(fmt.Errorf("unknown entry ref subcommand: %s", sub))
+			os.Exit(1)
+		}
 	}
 }
 
@@ -522,7 +743,7 @@ func runMCP() {
 		svc.workflowSvc,
 		svc.sessionSvc,
 		svc.projectSvc,
-	)
+	).WithEntryRefService(svc.entryRefSvc)
 	server := mcp.NewServer(reg)
 
 	fmt.Fprintln(os.Stderr, "SkillVault MCP server starting...")

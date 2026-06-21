@@ -47,6 +47,23 @@ type EntryLinkStore interface {
 	Save(ctx context.Context, link domain.EntryLink) error
 	GetLinks(ctx context.Context, entryID string) ([]domain.EntryLink, error)
 	GetLinksByType(ctx context.Context, entryID string, relationType string) ([]domain.EntryLink, error)
+	ListRefs(ctx context.Context, filter EntryLinkFilter) ([]domain.EntryLink, error)
+	RemoveRef(ctx context.Context, fromEntryID, toEntryID, relationType string) error
+	ReachableRefs(ctx context.Context, entryID string, refType string, maxDepth int) ([]EntryLinkNode, error)
+	GetEntryGraph(ctx context.Context, entryID string, refTypes []string, direction string, maxDepth int) ([]EntryLinkNode, []domain.EntryLink, error)
+}
+
+type EntryLinkFilter struct {
+	SourceID        *string
+	TargetID        *string
+	RefType         *string
+	Active          *bool
+	IncludeArchived bool
+}
+
+type EntryLinkNode struct {
+	EntryID string
+	Depth   int
 }
 
 type ProjectStore interface {
