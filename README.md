@@ -153,17 +153,18 @@ DB decides. Disk remembers. Qu@ntum delivers.
 
 ```
 cmd/skillvault/
-├── internal/cli/         # 14 flat CLI commands (stdlib, no Cobra)
-├── internal/mcp/         # 10 MCP tools over stdio JSON-RPC 2.0
-├── internal/api/         # HTTP scaffold (future)
-├── internal/app/         # Use cases: save, search, context, session, etc.
+├── internal/cli/         # 18 CLI commands (stdlib, no Cobra)
+├── internal/mcp/         # 13 MCP tools over stdio JSON-RPC 2.0
+├── internal/api/         # HTTP API (local only)
+├── internal/app/         # Use cases: save, search, context, session, refs, memory
 ├── internal/domain/      # Pure entities + validators
-├── internal/db/          # SQLite + FTS5 (7 stores + migrations)
+├── internal/db/          # SQLite + FTS5 (8 stores + 2 migrations)
 ├── internal/files/       # Artifact filesystem (objects/YYYY/MM/)
 ├── internal/context/     # Qu@ntum context compiler (7 modes)
 ├── internal/security/    # Secret scanner (4 regex patterns)
-├── internal/vars/        # Variable detection + injection
-└── internal/export/      # Import/Export with conflict resolution
+├── internal/vars/        # Variable detection + injection + frontmatter parser
+├── internal/export/      # Import/Export with conflict resolution
+└── internal/api/         # HTTP REST server
 ```
 
 ### Storage Layout
@@ -182,7 +183,7 @@ cmd/skillvault/
 
 ---
 
-## CLI Commands (14)
+## CLI Commands (18)
 
 | Command | Description | Example |
 |---------|-------------|---------|
@@ -198,12 +199,15 @@ cmd/skillvault/
 | `add-workflow` | Create a workflow (JSON file) | `skillvault add-workflow workflow.json` |
 | `render-workflow` | Render workflow as checklist | `skillvault render-workflow spec-plan-task` |
 | `session-wrap` | Save session with decisions | `skillvault session-wrap --project myapp --summary "..." --decisions "d1,d2"` |
+| `graph` | Visualize entry graph | `skillvault graph --entry e1 --format mermaid` |
+| `entry ref add/list/remove` | Manage graph edges | `skillvault entry ref add e1 e2 depends_on` |
+| `memory index/reindex/list-external` | Index pi-memory.md files | `skillvault memory index --path ~/memory --project myapp` |
 | `export` | Export vault to JSON | `skillvault export vault.json` |
 | `import` | Import vault from JSON | `skillvault import vault.json` |
 
 ---
 
-## MCP Tools (10)
+## MCP Tools (13)
 
 For AI agents (Claude Code, OpenCode, etc.):
 
@@ -219,6 +223,9 @@ For AI agents (Claude Code, OpenCode, etc.):
 | `session_wrap` | Create session entry with decisions, pending items, learnings |
 | `archive_entry` | Set entry status to archived |
 | `list_projects` | List all projects with status |
+| `save_entry_ref` | Create/update a graph edge between two entries (with cycle detection) |
+| `list_entry_refs` | List graph edges with filters |
+| `get_entry_graph` | Traverse entry graph from a starting entry |
 
 ### MCP Setup (Claude Code / OpenCode)
 
@@ -246,7 +253,7 @@ ln -sf ~/tools/skillvault ~/tools/mcp
 
 ## Entity Model
 
-### Entry Types (10)
+### Entry Types (11)
 
 | Type | Purpose |
 |------|---------|
@@ -260,6 +267,7 @@ ln -sf ~/tools/skillvault ~/tools/mcp
 | `session` | Session summary |
 | `decision` | Architectual decision |
 | `artifact_summary` | Summary of a stored artifact |
+| `handoff` | Session handoff document |
 
 ### Status Model
 
@@ -271,18 +279,32 @@ ln -sf ~/tools/skillvault ~/tools/mcp
 | `deprecated` | Kept for history, not recommended |
 | `canonical` | Preferred version |
 
-### Relations (EntryLink)
+### Relations (EntryLink — 11 types)
 
-Entries can be explicitly related:
+Entries can be explicitly related via a directed graph with cycle detection:
 
 ```
-references  → links to supporting content
-supersedes  → newer version replaces older
-related_to  → loosely connected
-part_of     → compositional relationship
-derived_from→ source → derived relationship
-implements  → implements a spec/decision
+references   → links to supporting content
+supersedes   → newer version replaces older (cycle-prone)
+related_to   → loosely connected
+part_of      → compositional relationship (cycle-prone)
+derived_from → source → derived relationship
+implements   → implements a spec/decision
+uses         → source invokes target (agent uses workflow)
+extends      → source specializes target
+handoff_of   → handoff entry refers to session work
+generated_from → entry derives from another
+depends_on   → source depends on target (cycle-prone)
 ```
+
+**Cycle detection**: `depends_on`, `part_of`, and `supersedes` validate against
+transitive cycles using `WITH RECURSIVE` CTE before insertion. Max depth: 10.
+
+**Traversal**: `GetEntryGraph` supports multi-direction (`outgoing|incoming|both`)
+traversal with configurable depth. CLI: `skillvault graph --entry <id>`.
+
+**Memory index**: Shadow entries from pi-memory-md are automatically linked via
+`external_ref`. Wikilinks (`[[target]]`) in markdown bodies become `related_to` edges.
 
 ---
 

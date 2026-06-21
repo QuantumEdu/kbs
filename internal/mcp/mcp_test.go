@@ -29,10 +29,11 @@ func setupMCPServices(t *testing.T) (*ToolRegistry, *app.ProjectService, func())
 	workflowSvc := app.NewWorkflowService(store.Workflows)
 	seriesSvc := app.NewSeriesService(store.Series, store.Entries)
 	projectSvc := app.NewProjectService(store.Projects)
+	entryRefSvc := app.NewEntryRefService(store.EntryLinks, store.Entries)
 	contextSvc := app.NewContextService(store.Entries, store.Projects, store.Series, store.Workflows, store.Artifacts, entrySvc)
 	sessionSvc := app.NewSessionService(entrySvc, artifactSvc, projectSvc, store.Entries, store.Artifacts, store.Projects)
 
-	reg := NewServiceToolRegistry(entrySvc, artifactSvc, contextSvc, seriesSvc, workflowSvc, sessionSvc, projectSvc)
+	reg := NewServiceToolRegistry(entrySvc, artifactSvc, contextSvc, seriesSvc, workflowSvc, sessionSvc, projectSvc).WithEntryRefService(entryRefSvc)
 	cleanup := func() { sqlDB.Close() }
 	return reg, projectSvc, cleanup
 }
@@ -59,7 +60,7 @@ func TestServerInitialize(t *testing.T) {
 	}
 }
 
-func TestToolsListReturns10Tools(t *testing.T) {
+func TestToolsListReturns13Tools(t *testing.T) {
 	reg := NewToolRegistry(nil)
 	s := NewServer(reg)
 	ctx := context.Background()
@@ -87,13 +88,13 @@ func TestToolsListReturns10Tools(t *testing.T) {
 		if !ok {
 			t.Fatalf("tools is not an array: %T", toolsRaw)
 		}
-		if len(tools) != 10 {
-			t.Errorf("expected 10 tools, got %d", len(tools))
+		if len(tools) != 13 {
+			t.Errorf("expected 13 tools, got %d", len(tools))
 		}
 		return
 	}
-	if len(interfaces) != 10 {
-		t.Errorf("expected 10 tools, got %d", len(interfaces))
+	if len(interfaces) != 13 {
+		t.Errorf("expected 13 tools, got %d", len(interfaces))
 	}
 }
 
@@ -215,8 +216,8 @@ func TestSearchEntriesMCP(t *testing.T) {
 	})
 
 	result, err := reg.Call(ctx, "search_entries", map[string]interface{}{
-		"query":  "REST",
-		"limit":  float64(10),
+		"query":   "REST",
+		"limit":   float64(10),
 		"project": "testproj",
 	})
 	if err != nil {
@@ -291,6 +292,9 @@ func TestToolNamesAreCorrect(t *testing.T) {
 		"session_wrap",
 		"archive_entry",
 		"list_projects",
+		"save_entry_ref",
+		"list_entry_refs",
+		"get_entry_graph",
 	}
 
 	if len(names) != len(expected) {
@@ -497,4 +501,217 @@ func TestSaveEntryRejectsMissingTitle(t *testing.T) {
 	if !strings.Contains(result.Content[0].Text, "title is required") {
 		t.Errorf("expected 'title is required', got: %s", result.Content[0].Text)
 	}
+}
+
+func TestSaveEntryRefMCP(t *testing.T) {
+	reg, projectSvc, cleanup := setupMCPServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "testproj"})
+
+	// Create two entries via MCP
+	e1, _ := reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "Source Entry",
+		"type":    "skill",
+		"summary": "A source entry",
+		"project": "testproj",
+	})
+	// Parse ID from response
+	id1 := extractEntryID(t, e1)
+
+	e2, _ := reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "Target Entry",
+		"type":    "skill",
+		"summary": "A target entry",
+		"project": "testproj",
+	})
+	id2 := extractEntryID(t, e2)
+
+	// Save ref between them
+	result, err := reg.Call(ctx, "save_entry_ref", map[string]interface{}{
+		"source_id":     id1,
+		"target_id":     id2,
+		"relation_type": "references",
+		"label":         "test link",
+	})
+	if err != nil {
+		t.Fatalf("save_entry_ref failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("save_entry_ref returned error: %s", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, id1) || !strings.Contains(result.Content[0].Text, id2) {
+		t.Errorf("result should contain entry IDs, got: %s", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, "references") {
+		t.Errorf("result should contain relation type, got: %s", result.Content[0].Text)
+	}
+}
+
+func TestSaveEntryRefMissingArgsMCP(t *testing.T) {
+	reg, _, cleanup := setupMCPServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	result, err := reg.Call(ctx, "save_entry_ref", map[string]interface{}{
+		"source_id": "e1",
+	})
+	if err != nil {
+		t.Fatalf("save_entry_ref should not return dispatch error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for missing target_id and relation_type")
+	}
+	if !strings.Contains(result.Content[0].Text, "required") {
+		t.Errorf("expected 'required' in error, got: %s", result.Content[0].Text)
+	}
+}
+
+func TestListEntryRefsMCP(t *testing.T) {
+	reg, projectSvc, cleanup := setupMCPServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "testproj"})
+
+	e1 := saveTestEntry(t, reg, "Source", "skill")
+	e2 := saveTestEntry(t, reg, "Target", "skill")
+	e3 := saveTestEntry(t, reg, "Other", "skill")
+
+	// Create two refs
+	_, _ = reg.Call(ctx, "save_entry_ref", map[string]interface{}{
+		"source_id":     e1,
+		"target_id":     e2,
+		"relation_type": "references",
+	})
+	_, _ = reg.Call(ctx, "save_entry_ref", map[string]interface{}{
+		"source_id":     e1,
+		"target_id":     e3,
+		"relation_type": "related_to",
+	})
+
+	// List all refs from e1
+	result, err := reg.Call(ctx, "list_entry_refs", map[string]interface{}{
+		"source_id": e1,
+	})
+	if err != nil {
+		t.Fatalf("list_entry_refs failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("list_entry_refs returned error: %s", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, "2 ref(s)") && !strings.Contains(result.Content[0].Text, "Found 2") {
+		t.Errorf("expected 2 refs, got: %s", result.Content[0].Text)
+	}
+
+	// List by type
+	result, err = reg.Call(ctx, "list_entry_refs", map[string]interface{}{
+		"source_id":     e1,
+		"relation_type": "references",
+	})
+	if err != nil {
+		t.Fatalf("list_entry_refs by type failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("list_entry_refs by type returned error: %s", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, "1 ref(s)") && !strings.Contains(result.Content[0].Text, "Found 1") {
+		t.Errorf("expected 1 ref, got: %s", result.Content[0].Text)
+	}
+}
+
+func TestGetEntryGraphMCP(t *testing.T) {
+	reg, projectSvc, cleanup := setupMCPServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "testproj"})
+
+	a := saveTestEntry(t, reg, "A", "skill")
+	b := saveTestEntry(t, reg, "B", "skill")
+	c := saveTestEntry(t, reg, "C", "skill")
+
+	// A depends_on B, B depends_on C
+	_, _ = reg.Call(ctx, "save_entry_ref", map[string]interface{}{
+		"source_id":     a,
+		"target_id":     b,
+		"relation_type": "depends_on",
+	})
+	_, _ = reg.Call(ctx, "save_entry_ref", map[string]interface{}{
+		"source_id":     b,
+		"target_id":     c,
+		"relation_type": "depends_on",
+	})
+
+	// Get graph rooted at A, depth 3
+	result, err := reg.Call(ctx, "get_entry_graph", map[string]interface{}{
+		"entry_id":  a,
+		"max_depth": 3,
+	})
+	if err != nil {
+		t.Fatalf("get_entry_graph failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("get_entry_graph returned error: %s", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, "2 edges") && !strings.Contains(result.Content[0].Text, "Graph rooted") {
+		t.Errorf("expected graph output, got: %s", result.Content[0].Text)
+	}
+
+	// Test cycle detection: adding C depends_on A should fail
+	result, err = reg.Call(ctx, "save_entry_ref", map[string]interface{}{
+		"source_id":     c,
+		"target_id":     a,
+		"relation_type": "depends_on",
+	})
+	if err != nil {
+		t.Fatalf("cyclic save_entry_ref should not return dispatch error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for cycle detection")
+	}
+	if !strings.Contains(result.Content[0].Text, "cycle_detected") {
+		t.Errorf("expected 'cycle_detected' in error, got: %s", result.Content[0].Text)
+	}
+}
+
+// Helper to extract entry ID from MCP save_entry response
+func extractEntryID(t *testing.T, result *ToolCallResult) string {
+	t.Helper()
+	if result == nil || len(result.Content) == 0 {
+		t.Fatal("empty result from save_entry")
+	}
+	text := result.Content[0].Text
+	// Format: "Saved: sv-abc123"
+	const prefix = "Saved: "
+	idx := strings.Index(text, prefix)
+	if idx < 0 {
+		t.Fatalf("cannot find 'Saved: ' in response: %s", text)
+	}
+	rest := text[idx+len(prefix):]
+	end := strings.Index(rest, "\n")
+	if end > 0 {
+		return rest[:end]
+	}
+	return strings.TrimSpace(rest)
+}
+
+// Helper to save an entry and return its ID
+func saveTestEntry(t *testing.T, reg *ToolRegistry, title, typ string) string {
+	t.Helper()
+	ctx := context.Background()
+	result, err := reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   title,
+		"type":    typ,
+		"summary": "Test entry " + title,
+		"project": "testproj",
+	})
+	if err != nil {
+		t.Fatalf("save_entry(%s) failed: %v", title, err)
+	}
+	if result.IsError {
+		t.Fatalf("save_entry(%s) returned error: %s", title, result.Content[0].Text)
+	}
+	return extractEntryID(t, result)
 }

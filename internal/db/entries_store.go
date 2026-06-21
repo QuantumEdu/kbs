@@ -40,8 +40,8 @@ func (s *sqliteEntryStore) Save(ctx context.Context, entry domain.Entry, tags []
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO entries (id, name, title, slug, type, content, summary, body_optional, status, project_id, artifact_id, tags_denorm, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		INSERT INTO entries (id, name, title, slug, type, content, summary, body_optional, status, project_id, artifact_id, external_ref, tags_denorm, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name,
 			title=excluded.title,
@@ -53,9 +53,10 @@ func (s *sqliteEntryStore) Save(ctx context.Context, entry domain.Entry, tags []
 			status=excluded.status,
 			project_id=excluded.project_id,
 			artifact_id=excluded.artifact_id,
+			external_ref=excluded.external_ref,
 			tags_denorm=excluded.tags_denorm,
 			updated_at=CURRENT_TIMESTAMP
-	`, entry.ID, entry.Title, entry.Title, entry.Slug, string(entry.Type), entry.BodyOptional, entry.Summary, entry.BodyOptional, string(entry.Status), projectID, artifactID, tagsDenorm)
+	`, entry.ID, entry.Title, entry.Title, entry.Slug, string(entry.Type), entry.BodyOptional, entry.Summary, entry.BodyOptional, string(entry.Status), projectID, artifactID, entry.ExternalRef, tagsDenorm)
 	if err != nil {
 		return fmt.Errorf("upsert entry: %w", err)
 	}
@@ -69,7 +70,7 @@ func (s *sqliteEntryStore) Save(ctx context.Context, entry domain.Entry, tags []
 		}
 	}
 
-	if err := s.syncFTS(ctx, tx, entry.ID, entry.Title, entry.Summary, entry.BodyOptional, tagsDenorm); err != nil {
+	if err := s.syncFTS(ctx, tx, entry.ID, entry.Title, entry.Summary, entry.BodyOptional, entry.ExternalRef, tagsDenorm); err != nil {
 		return fmt.Errorf("sync FTS5: %w", err)
 	}
 
@@ -85,10 +86,10 @@ func (s *sqliteEntryStore) Get(ctx context.Context, id string, includeArchived b
 	var status string
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, title, slug, type, project_id, summary, body_optional, status, artifact_id
+		SELECT id, title, slug, type, project_id, summary, body_optional, status, artifact_id, COALESCE(external_ref,'')
 		FROM entries WHERE id = ?
 	`, id).Scan(&result.Entry.ID, &result.Entry.Title, &result.Entry.Slug, &result.Entry.Type,
-		&projectID, &summary, &bodyOptional, &status, &artifactID)
+		&projectID, &summary, &bodyOptional, &status, &artifactID, &result.Entry.ExternalRef)
 	if err == sql.ErrNoRows {
 		return result, fmt.Errorf("entry %q not found", id)
 	}
@@ -139,7 +140,7 @@ func (s *sqliteEntryStore) Search(ctx context.Context, q domain.SearchQuery) ([]
 		args = append(args, q.Query)
 	}
 
-	query := `SELECT e.id, e.title, e.slug, e.type, e.project_id, e.summary, e.body_optional, e.status, e.artifact_id
+	query := `SELECT e.id, e.title, e.slug, e.type, e.project_id, e.summary, e.body_optional, e.status, e.artifact_id, COALESCE(e.external_ref,'')
 		FROM entries_fts e_fts
 		JOIN entries e ON e.id = e_fts.id`
 
@@ -186,7 +187,7 @@ func (s *sqliteEntryStore) Search(ctx context.Context, q domain.SearchQuery) ([]
 		var bodyOptional sql.NullString
 		var status string
 		if err := rows.Scan(&r.Entry.ID, &r.Entry.Title, &r.Entry.Slug, &r.Entry.Type, &projectID,
-			&summary, &bodyOptional, &status, &artifactID); err != nil {
+			&summary, &bodyOptional, &status, &artifactID, &r.Entry.ExternalRef); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
 		r.Entry.Status = domain.Status(status)
@@ -240,7 +241,7 @@ func (s *sqliteEntryStore) Archive(ctx context.Context, id string) error {
 }
 
 func (s *sqliteEntryStore) List(ctx context.Context, filter domain.EntryFilter) ([]domain.EntryListResult, error) {
-	query := "SELECT e.id, e.title, e.slug, e.type, e.project_id, e.summary, e.body_optional, e.status, e.artifact_id FROM entries e WHERE 1=1"
+	query := "SELECT e.id, e.title, e.slug, e.type, e.project_id, e.summary, e.body_optional, e.status, e.artifact_id, COALESCE(e.external_ref,'') FROM entries e WHERE 1=1"
 	var args []interface{}
 
 	if !filter.IncludeArchived {
@@ -276,7 +277,7 @@ func (s *sqliteEntryStore) List(ctx context.Context, filter domain.EntryFilter) 
 	for rows.Next() {
 		var r row
 		if err := rows.Scan(&r.entry.Entry.ID, &r.entry.Entry.Title, &r.entry.Entry.Slug, &r.entry.Entry.Type,
-			&r.projID, &r.summary, &r.bodyOptional, &r.status, &r.artifactID); err != nil {
+			&r.projID, &r.summary, &r.bodyOptional, &r.status, &r.artifactID, &r.entry.Entry.ExternalRef); err != nil {
 			return nil, fmt.Errorf("scan entry: %w", err)
 		}
 		r.entry.Entry.Status = domain.Status(r.status)
@@ -349,13 +350,13 @@ func strSliceToInterface(s []string) []interface{} {
 	return result
 }
 
-func (s *sqliteEntryStore) syncFTS(ctx context.Context, tx *sql.Tx, id, title, summary, body, tagsDenorm string) error {
+func (s *sqliteEntryStore) syncFTS(ctx context.Context, tx *sql.Tx, id, title, summary, body, externalRef, tagsDenorm string) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM entries_fts WHERE id = ?", id); err != nil {
 		return fmt.Errorf("delete from fts: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
-		"INSERT INTO entries_fts (id, title, summary, body_optional, tags_denorm) VALUES (?, ?, ?, ?, ?)",
-		id, title, summary, body, tagsDenorm,
+		"INSERT INTO entries_fts (id, title, summary, body_optional, tags_denorm, external_ref) VALUES (?, ?, ?, ?, ?, ?)",
+		id, title, summary, body, tagsDenorm, externalRef,
 	); err != nil {
 		return fmt.Errorf("insert into fts: %w", err)
 	}

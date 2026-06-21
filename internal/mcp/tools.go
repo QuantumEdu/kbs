@@ -19,6 +19,7 @@ type ToolRegistry struct {
 	handler ToolHandler
 
 	entrySvc    *app.EntryService
+	entryRefSvc *app.EntryRefService
 	artifactSvc *app.ArtifactService
 	contextSvc  *app.ContextService
 	seriesSvc   *app.SeriesService
@@ -32,6 +33,12 @@ func NewToolRegistry(handler ToolHandler) *ToolRegistry {
 	reg := &ToolRegistry{handler: handler}
 	reg.registerV2Tools()
 	return reg
+}
+
+// WithEntryRefService sets the entry ref service for graph operations.
+func (r *ToolRegistry) WithEntryRefService(svc *app.EntryRefService) *ToolRegistry {
+	r.entryRefSvc = svc
+	return r
 }
 
 // NewServiceToolRegistry creates a registry backed by app services.
@@ -114,6 +121,24 @@ func (r *ToolRegistry) registerV2Tools() {
 			"id": map[string]interface{}{"type": "string", "description": "Entry ID"},
 		})},
 		{Name: "list_projects", Description: "List all projects and their statuses", InputSchema: schemaObj(map[string]interface{}{})},
+		{Name: "save_entry_ref", Description: "Create or update a link between two entries (graph edge)", InputSchema: schemaObj(map[string]interface{}{
+			"source_id":     map[string]interface{}{"type": "string", "description": "Source entry ID (required)"},
+			"target_id":     map[string]interface{}{"type": "string", "description": "Target entry ID (required)"},
+			"relation_type": map[string]interface{}{"type": "string", "description": "Relation type: references, supersedes, related_to, part_of, derived_from, implements, uses, extends, handoff_of, generated_from, depends_on"},
+			"label":         map[string]interface{}{"type": "string", "description": "Optional label for the link"},
+		})},
+		{Name: "list_entry_refs", Description: "List graph edges between entries", InputSchema: schemaObj(map[string]interface{}{
+			"source_id":        map[string]interface{}{"type": "string", "description": "Filter by source entry ID"},
+			"target_id":        map[string]interface{}{"type": "string", "description": "Filter by target entry ID"},
+			"relation_type":    map[string]interface{}{"type": "string", "description": "Filter by relation type"},
+			"include_archived": map[string]interface{}{"type": "boolean", "description": "Include soft-deleted refs"},
+		})},
+		{Name: "get_entry_graph", Description: "Traverse entry graph from a starting entry, returning connected nodes and edges", InputSchema: schemaObj(map[string]interface{}{
+			"entry_id":  map[string]interface{}{"type": "string", "description": "Starting entry ID (required)"},
+			"ref_types": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "Filter by relation types"},
+			"direction": map[string]interface{}{"type": "string", "description": "outgoing, incoming, or both (default)"},
+			"max_depth": map[string]interface{}{"type": "number", "description": "Max traversal depth (default 3, max 10)"},
+		})},
 	}
 }
 
@@ -155,6 +180,12 @@ func (r *ToolRegistry) dispatch(ctx context.Context, name string, args map[strin
 		return r.handleArchiveEntry(ctx, args)
 	case "list_projects":
 		return r.handleListProjects(ctx, args)
+	case "save_entry_ref":
+		return r.handleSaveEntryRef(ctx, args)
+	case "list_entry_refs":
+		return r.handleListEntryRefs(ctx, args)
+	case "get_entry_graph":
+		return r.handleGetEntryGraph(ctx, args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -500,6 +531,135 @@ func textResult(text string) *ToolCallResult {
 	return &ToolCallResult{
 		Content: []ToolContent{{Type: "text", Text: text}},
 	}
+}
+
+func (r *ToolRegistry) handleSaveEntryRef(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	sourceID := strArg(args, "source_id")
+	targetID := strArg(args, "target_id")
+	refType := strArg(args, "relation_type")
+	label := strArg(args, "label")
+
+	if sourceID == "" || targetID == "" || refType == "" {
+		return errResult("Error: source_id, target_id, and relation_type are required"), nil
+	}
+
+	var svc *app.EntryRefService
+	if r.entryRefSvc != nil {
+		svc = r.entryRefSvc
+	} else {
+		return errResult("Error: entry ref service not available"), nil
+	}
+
+	input := app.AddRefInput{
+		SourceID: sourceID,
+		TargetID: targetID,
+		RefType:  refType,
+		Label:    label,
+	}
+
+	link, err := svc.SaveRef(ctx, input)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Saved ref: %s --[%s]--> %s\n", link.FromEntryID, link.RelationType, link.ToEntryID))
+	if link.Label != "" {
+		b.WriteString(fmt.Sprintf("  Label: %s\n", link.Label))
+	}
+	return textResult(b.String()), nil
+}
+
+func (r *ToolRegistry) handleListEntryRefs(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	sourceID := strArg(args, "source_id")
+	targetID := strArg(args, "target_id")
+	refType := strArg(args, "relation_type")
+	includeArchived := boolArg(args, "include_archived")
+
+	var svc *app.EntryRefService
+	if r.entryRefSvc != nil {
+		svc = r.entryRefSvc
+	} else {
+		return errResult("Error: entry ref service not available"), nil
+	}
+
+	var srcPtr, tgtPtr, typePtr *string
+	if sourceID != "" {
+		srcPtr = &sourceID
+	}
+	if targetID != "" {
+		tgtPtr = &targetID
+	}
+	if refType != "" {
+		typePtr = &refType
+	}
+
+	links, err := svc.ListRefs(ctx, app.ListRefsInput{
+		SourceID:        srcPtr,
+		TargetID:        tgtPtr,
+		RefType:         typePtr,
+		IncludeArchived: includeArchived,
+	})
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+
+	if len(links) == 0 {
+		return textResult("No refs found."), nil
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Found %d ref(s):\n", len(links)))
+	for _, l := range links {
+		la := ""
+		if l.Label != "" {
+			la = fmt.Sprintf(" (%s)", l.Label)
+		}
+		b.WriteString(fmt.Sprintf("  %s --[%s%s]--> %s\n", l.FromEntryID, l.RelationType, la, l.ToEntryID))
+	}
+	return textResult(b.String()), nil
+}
+
+func (r *ToolRegistry) handleGetEntryGraph(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	entryID := strArg(args, "entry_id")
+	if entryID == "" {
+		return errResult("Error: entry_id is required"), nil
+	}
+
+	refTypes := parseStrings(args["ref_types"])
+	direction := strArg(args, "direction")
+	maxDepth := intArg(args, "max_depth")
+
+	var svc *app.EntryRefService
+	if r.entryRefSvc != nil {
+		svc = r.entryRefSvc
+	} else {
+		return errResult("Error: entry ref service not available"), nil
+	}
+
+	result, err := svc.GetEntryGraph(ctx, app.GetGraphInput{
+		EntryID:   entryID,
+		RefTypes:  refTypes,
+		Direction: direction,
+		MaxDepth:  maxDepth,
+	})
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Graph rooted at %s (%d nodes, %d edges):\n", entryID, len(result.Nodes), len(result.Edges)))
+	if len(result.Edges) > 0 {
+		b.WriteString("\nEdges:\n")
+		for _, e := range result.Edges {
+			la := ""
+			if e.Label != "" {
+				la = fmt.Sprintf(" (%s)", e.Label)
+			}
+			b.WriteString(fmt.Sprintf("  %s --[%s%s]--> %s\n", e.FromEntryID, e.RelationType, la, e.ToEntryID))
+		}
+	}
+	return textResult(b.String()), nil
 }
 
 func errResult(text string) *ToolCallResult {

@@ -1,6 +1,6 @@
--- SkillVault Schema Reference (v2 Hermes)
+-- SkillVault Schema Reference (v2 Hermes) + Sprint 1 entry_refs + handoff + external_ref
 -- This file is the consolidated reference schema.
--- Keep in sync with internal/db/migrations/002_hermes.sql.
+-- Keep in sync with internal/db/migrations/002_entry_refs_and_handoff.sql.
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version     INTEGER PRIMARY KEY,
@@ -22,12 +22,13 @@ CREATE TABLE IF NOT EXISTS entries (
     id              TEXT PRIMARY KEY,
     title           TEXT NOT NULL,
     slug            TEXT NOT NULL UNIQUE,
-    type            TEXT NOT NULL CHECK(type IN ('prompt','skill','workflow_note','reference','user','feedback','project_state','session','decision','artifact_summary')),
+    type            TEXT NOT NULL CHECK(type IN ('prompt','skill','workflow_note','reference','user','feedback','project_state','session','decision','artifact_summary','handoff')),
     summary         TEXT DEFAULT '',
     body_optional   TEXT DEFAULT '',
     status          TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('draft','active','archived','deprecated','canonical')),
     project_id      TEXT REFERENCES projects(id),
     artifact_id     TEXT,
+    external_ref    TEXT DEFAULT '',
     tags_denorm     TEXT DEFAULT '',
     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -103,7 +104,13 @@ CREATE TABLE IF NOT EXISTS series_entries (
 CREATE TABLE IF NOT EXISTS entry_links (
     from_entry_id  TEXT NOT NULL REFERENCES entries(id),
     to_entry_id    TEXT NOT NULL REFERENCES entries(id),
-    relation_type  TEXT NOT NULL CHECK(relation_type IN ('references','supersedes','related_to','part_of','derived_from','implements')),
+    relation_type  TEXT NOT NULL CHECK(relation_type IN (
+        'references','supersedes','related_to','part_of','derived_from','implements',
+        'uses','extends','handoff_of','generated_from','depends_on'
+    )),
+    label          TEXT DEFAULT '',
+    active         INTEGER DEFAULT 1,
+    created_at     DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (from_entry_id, to_entry_id, relation_type)
 );
 
@@ -113,6 +120,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
     summary,
     body_optional,
     tags_denorm,
+    external_ref,
     tokenize='porter unicode61'
 );
 
@@ -132,3 +140,4 @@ CREATE INDEX IF NOT EXISTS idx_series_entries_series_order ON series_entries(ser
 CREATE INDEX IF NOT EXISTS idx_series_status ON series(status);
 CREATE INDEX IF NOT EXISTS idx_entry_links_from ON entry_links(from_entry_id);
 CREATE INDEX IF NOT EXISTS idx_entry_links_to ON entry_links(to_entry_id);
+CREATE INDEX IF NOT EXISTS idx_entry_links_active ON entry_links(active);

@@ -39,6 +39,15 @@ func TestParseSubcommand(t *testing.T) {
 		{"add-workflow no arg", []string{"skillvault", "add-workflow"}, "", true},
 		{"render-workflow no arg", []string{"skillvault", "render-workflow"}, "", true},
 		{"import no arg", []string{"skillvault", "import"}, "", true},
+		{"graph no entry", []string{"skillvault", "graph", "--format", "json"}, "graph", false},
+		{"memory index no project", []string{"skillvault", "memory", "index", "--path", "/tmp"}, "memory-index", false},
+
+		// New v1-final commands
+		{"graph", []string{"skillvault", "graph", "--entry", "e1", "--format", "json"}, "graph", false},
+		{"memory index", []string{"skillvault", "memory", "index", "--path", "/tmp/mem", "--project", "p"}, "memory-index", false},
+		{"memory reindex", []string{"skillvault", "memory", "reindex", "--path", "/tmp/mem", "--project", "p"}, "memory-reindex", false},
+		{"memory list-external", []string{"skillvault", "memory", "list-external", "--project", "p"}, "memory-list-external", false},
+		{"entry ref add", []string{"skillvault", "entry", "ref", "add", "s", "t", "depends_on"}, "entry-ref", false},
 
 		// Errors
 		{"no args", []string{"skillvault"}, "", true},
