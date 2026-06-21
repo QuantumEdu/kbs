@@ -9,5 +9,6 @@ vendor/
 .vscode/
 .idea/
 
-# Binary
-skillvault
+# Binary (root only)
+/skillvault
+/skillvault.exe

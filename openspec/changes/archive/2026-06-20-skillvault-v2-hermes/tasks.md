@@ -7,7 +7,7 @@
 
 ## Phase 1: Foundation (domain + schema)
 
-### T-01 — Domain entities, constants, and validators
+- [x] T-01 — Domain entities, constants, and validators
 
 **Description**: Define all domain structs, type constants, and validation functions. Pure Go — no external imports. Includes: Entry (10 types), Project, Artifact (10 types), Workflow, WorkflowStep, Series, SeriesEntry, Tag, EntryLink (6 relation types), ContextRequest, ContextMode (7 modes), SearchQuery, SearchResult, Status (5 values), EntryFilter. Validation: ValidateEntry, ValidateProject, ValidateArtifact, ValidateWorkflow, ValidateSeries, ValidateTag, ValidateLink, ValidateStatus, ValidateContextRequest.
 
@@ -39,7 +39,7 @@
 
 ---
 
-### T-02 — Vars path resolver
+- [x] T-02 — Vars path resolver
 
 **Description**: Pure functions for vault root detection and resolution. `VaultRoot()` returns `~/.skillvault/`. Subdirectory resolvers for `objects/`, `exports/`, `cache/`. Respects `SKILLVAULT_HOME` env var override. No internal imports.
 
@@ -59,7 +59,7 @@
 
 ---
 
-### T-03 — SQL migration files
+- [x] T-03 — SQL migration files
 
 **Description**: Two sequential migration files embedded via `go:embed`. `001_init.sql`: v1-alpha schema (schema_migrations, projects, entries, entry_tags, series, series_entries, workflow_steps, entries_fts). `002_hermes.sql`: v2 additions (artifacts, workflows, workflow_steps evolved, entry_links, tags, content_fts, ALTER TABLE entries ADD status/artifact_id, indexes). Idempotent via schema_migrations tracking.
 
@@ -82,7 +82,7 @@
 
 ---
 
-### T-04 — DB connection and migration runner
+- [x] T-04 — DB connection and migration runner
 
 **Description**: Database initialization (`InitDB`) using `modernc.org/sqlite`. Opens/reuses the vault DB via vault root path. Runs pending migrations. Supports `SKILLVAULT_DB=:memory:` for test mode. Provides `Store` struct fields and `NewStore()` constructor.
 
@@ -105,7 +105,7 @@
 
 ## Phase 2: Store implementations
 
-### T-05 — ProjectStore + TagStore
+- [x] T-05 — ProjectStore + TagStore
 
 **Description**: SQLite implementations of `ProjectStore` and `TagStore` interfaces. `ProjectStore`: Save (INSERT/UPDATE), Get (by ID or slug), List (with includeArchived filter). `TagStore`: Save (INSERT OR IGNORE by slug), Search (by name prefix), List (all). Tag normalization: lowercase, trim, spaces to dashes, deduplicate.
 
@@ -127,7 +127,7 @@
 
 ---
 
-### T-06 — EntryStore + EntryLinkStore
+- [x] T-06 — EntryStore + EntryLinkStore
 
 **Description**: SQLite implementations of `EntryStore` and `EntryLinkStore`. `EntryStore`: Save (INSERT entry + tags + FTS in transaction), Get (by ID or slug), Search (delegates to search package), Archive (SET status='archived'), List (with EntryFilter for type/project/status). `EntryLinkStore`: Save (INSERT directed link), GetByEntry (outgoing/incoming links), ListByRelation. All operations use transactions.
 
@@ -151,7 +151,7 @@
 
 ---
 
-### T-07 — ArtifactStore
+- [x] T-07 — ArtifactStore
 
 **Description**: SQLite implementation of `ArtifactStore`. Save (INSERT artifact metadata), Get (by ID or slug), List (by optional project filter). Stores references to file paths and content hashes computed by the files layer.
 
@@ -172,7 +172,7 @@
 
 ---
 
-### T-08 — WorkflowStore + SeriesStore
+- [x] T-08 — WorkflowStore + SeriesStore
 
 **Description**: SQLite implementations of `WorkflowStore` and `SeriesStore`. `WorkflowStore`: Save (workflow + steps in transaction), Get (by ID or slug), GetSteps (ordered by order_index), List (with includeArchived). `SeriesStore`: Save, Get, Compose (ordered SeriesEntry with entry metadata JOIN), List.
 
@@ -195,7 +195,7 @@
 
 ---
 
-### T-09 — Top-level Store composition
+- [x] T-09 — Top-level Store composition
 
 **Description**: Composed `Store` struct that embeds all sub-stores (EntryStore, ProjectStore, ArtifactStore, WorkflowStore, SeriesStore, TagStore, EntryLinkStore). `NewStore(db)` constructor. Includes `Close()` method and accessor helpers. The single `Store` struct is passed to app services.
 
@@ -215,7 +215,7 @@
 
 ---
 
-### T-10 — Search (FTS5 abstraction)
+- [x] T-10 — Search (FTS5 abstraction)
 
 **Description**: FTS5 search abstraction layer. `Search(ctx, query string, filters SearchFilters)` queries `content_fts` virtual table with proper quoting to prevent FTS5 syntax errors. Filters: type, project, tag, status, includeArchived, limit. Returns `[]SearchResult` with id, title, type, summary, project, status, tags, artifact_ref. Handles FTS5 special characters by sanitizing input.
 
@@ -241,7 +241,7 @@
 
 ## Phase 3: Secret scanner
 
-### T-11 — SecretScanner
+- [x] T-11 — SecretScanner
 
 **Description**: Pure regex-based scanner. `Scan(content)` returns all matches with type, start, end. `ScanAndRedact(content)` returns redacted content (replaces matches with `[REDACTED <type>]`), list of matches, and ok bool. 4 patterns: OpenAI key (`sk-[A-Za-z0-9_-]{20,}`), private key (`-----BEGIN (RSA |EC |OPENSSH |)?PRIVATE KEY-----`), GitHub PAT (`ghp_[A-Za-z0-9_]{20,}`), Slack token (`xox[baprs]-[A-Za-z0-9-]{20,}`). Returns `ErrSecretDetected` with matched types on scan failure.
 
@@ -268,7 +268,7 @@
 
 ## Phase 4: Artifact filesystem
 
-### T-12 — ArtifactFileService
+- [x] T-12 — ArtifactFileService
 
 **Description**: Filesystem-backed artifact storage. `Write(content, ext)` computes SHA-256 hash, generates slug from content prefix + hash[:8], builds path `objects/YYYY/MM/<slug>.<ext>`, creates dirs, writes file, detects MIME (extension map with content fallback), returns `ArtifactFileResult{relativePath, hash, sizeBytes, mimeType}`. `Read(relativePath)` resolves against vault root and returns content. `Hash(content)` returns hex SHA-256. `DetectMIME(filename, content)` uses extension map then http.DetectContentType.
 
@@ -294,7 +294,7 @@
 
 ## Phase 5: Hermes context compiler
 
-### T-13 — Context compiler (7 modes)
+- [x] T-13 — Context compiler (7 modes)
 
 **Description**: Hermes context compiler implementing `HermesContextService`. `Compile(ctx, req)` builds context pack from DB queries organized by mode. 7 modes: `profile` (user + feedback entries), `project` (active project state + decisions + artifact summaries), `workflow` (workflow steps), `skill` (active skill entries), `planning` (profile + project + workflow combined), `session_recall` (last 10 session entries), `full_brief` (all sections). Priority-ordered sections (1–8). Truncation removes lowest-priority sections first when content exceeds `max_chars`. Output format: structured Markdown with `## Scope`, `## Section Title` sections. `include[]` filter whitelists sections.
 
@@ -323,7 +323,7 @@
 
 ## Phase 6: Import/Export
 
-### T-14 — ExportService
+- [x] T-14 — ExportService
 
 **Description**: JSON export of entire vault. Exports all projects, entries (with tags), workflows + steps, series + entries, tags, artifact metadata, and artifact manifest (paths + hashes). Wraps in schema version and timestamp. Writes to specified file path. Uses `encoding/json` with indented output.
 
@@ -345,7 +345,7 @@
 
 ---
 
-### T-15 — ImportService
+- [x] T-15 — ImportService
 
 **Description**: JSON import of SkillVault export data. Reads JSON file, validates schema version, validates structure before any writes (pre-commit validation). Uses transaction for atomic import. On duplicate slug: adds conflict suffix instead of silent overwrite. Rebuilds FTS index after import. Returns import summary (counts of imported entities, conflicts).
 
@@ -371,7 +371,7 @@
 
 ## Phase 7: App/use case layer
 
-### T-16 — EntryService (SaveEntry, GetEntry, SearchEntries, ArchiveEntry)
+- [x] T-16 — EntryService (SaveEntry, GetEntry, SearchEntries, ArchiveEntry)
 
 **Description**: Entry use cases. `SaveEntry(input)` → validate entry, normalize tags, scan for secrets (reject if found), auto-generate slug, persist via store, return entry with ID and slug. `GetEntry(idOrSlug)` → retrieve entry + tags + artifact ref. `SearchEntries(query)` → delegate to search package, return results. `ArchiveEntry(idOrSlug)` → verify entry exists, set status to archived. Integrates SecretScanner into Save path.
 
@@ -394,7 +394,7 @@
 
 ---
 
-### T-17 — ArtifactService (SaveArtifact)
+- [x] T-17 — ArtifactService (SaveArtifact)
 
 **Description**: Artifact use case. `SaveArtifact(input)` → validate artifact, scan content for secrets (reject if found), write file via ArtifactFileService, compute hash/size/MIME, persist metadata via store, optionally create artifact_summary entry, return artifact with metadata. Integrates SecretScanner and ArtifactFileService.
 
@@ -416,7 +416,7 @@
 
 ---
 
-### T-18 — ProjectService + WorkflowService + SeriesService
+- [x] T-18 — ProjectService + WorkflowService + SeriesService
 
 **Description**: `ProjectService`: AddProject (validate + persist), ListProjects (with includeArchived). `WorkflowService`: AddWorkflow (validate + persist with steps), RenderWorkflow (get by slug + ordered steps). `SeriesService`: ComposeSeries (ordered entries with metadata), ListSeries.
 
@@ -440,7 +440,7 @@
 
 ---
 
-### T-19 — SessionService + ContextService
+- [x] T-19 — SessionService + ContextService
 
 **Description**: `SessionService.SessionWrap(input)` → build session-type entry from summary + decisions + pending + learnings, persist entry, link to project if specified, optionally link artifacts. `ContextService.GetContext(req)` → validate request, delegate to Hermes compiler, return context string.
 
@@ -462,7 +462,7 @@
 
 ---
 
-### T-20 — Services composition
+- [x] T-20 — Services composition
 
 **Description**: `Services` struct composing all services (Entry, Artifact, Project, Workflow, Series, Session, Context, Export, Import). `NewServices(stores, files, scanner, compiler, vars)` constructor wires all dependencies. `ExportService` and `ImportService` adapters wired here.
 
@@ -487,7 +487,7 @@
 
 ## Phase 8: CLI commands
 
-### T-21 — CLI adapter (14 commands)
+- [x] T-21 — CLI adapter (14 commands)
 
 **Description**: All 14 CLI commands using `flag` + `os.Args` (zero external deps). Commands: `init`, `add-entry`, `search`, `get`, `save-artifact`, `get-context`, `add-project`, `list-projects`, `archive`, `add-workflow`, `render-workflow`, `session-wrap`, `export`, `import`. Each command parses flags, calls appropriate app service, formats output as human-readable text. Subcommand routing via `os.Args[1]`. Help text for each command. Structured as flat command dispatch in `commands.go`.
 
@@ -514,7 +514,7 @@
 
 ## Phase 9: MCP tools
 
-### T-22 — MCP server + handlers (10 tools)
+- [x] T-22 — MCP server + handlers (10 tools)
 
 **Description**: JSON-RPC 2.0 over stdio MCP server. Lists 10 tools via `list_tools`. Dispatches `call_tool` to handler. Tools: `save_entry`, `search_entries`, `get_entry`, `save_artifact`, `get_context`, `compose_series`, `render_workflow`, `session_wrap`, `archive_entry`, `list_projects`. Input validation, error responses as JSON-RPC errors. Uses the same app services as CLI. Three files: server.go (stdio read/write loop), handlers.go (tool dispatch), types.go (Tool, ToolCallParams, JSONRPCRequest/Response structs).
 
@@ -542,7 +542,7 @@
 
 ## Phase 10: Main wiring + integration
 
-### T-23 — main.go (DI + vault init)
+- [x] T-23 — main.go (DI + vault init)
 
 **Description**: Binary entry point. Detects subcommand (`skillvault` → CLI, no subcommand or `serve-mcp` → MCP). Initializes vault: detect vault root, create directories if needed, open DB, run migrations. Wires all dependencies: `Store` → `Services` → CLI or MCP. Handles `SKILLVAULT_DB=:memory:` for test mode. Handles `SKILLVAULT_HOME` override. Single `main()` function.
 
@@ -566,7 +566,7 @@
 
 ## Phase 11: Tests for all acceptance criteria
 
-### T-24 — Acceptance tests covering AC1–AC10
+- [x] T-24 — Acceptance tests covering AC1–AC10
 
 **Description**: Comprehensive integration and acceptance test suite. Uses `SKILLVAULT_DB=:memory:`. Covers all 10 acceptance criteria. Each AC is a named test case. Tests exercise the full stack from CLI commands and MCP tool calls through to store persistence. Validates output formats, error states, and edge cases.
 

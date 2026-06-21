@@ -1,0 +1,387 @@
+# SkillVault v2 Hermes — Delta Specs
+
+> All capabilities are **ADDED** (v2 supersedes v1-alpha with new architecture).
+> Source: `skillvault_v1_alpha_spec.md` (sections 4–20, authoritative).
+> v1-alpha delta specs archived at `sdd/skillvault-v1-alpha/spec` (Engram #58).
+
+---
+
+## Capability 1: Hybrid Storage Model
+
+See spec §5 (§5.1–§5.4).
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-HYB-01 | Vault root at `~/.skillvault/` with subdirectories `objects/`, `exports/`, `snapshots/`, `cache/` | MUST |
+| REQ-HYB-02 | SQLite (`vault.db`) stores IDs, titles, types, status, summaries, tags, project/series/workflow links, artifact references, content hashes, timestamps, and FTS5 indexes | MUST |
+| REQ-HYB-03 | Filesystem under `objects/YYYY/MM/<artifact-slug>.<ext>` stores long AI outputs, PDF analyses, specs, reports, session transcripts, large prompts, JSON exports, Markdown documents | MUST |
+| REQ-HYB-04 | Content stored in DB directly only when small and frequently retrieved | SHOULD |
+| REQ-HYB-05 | Content stored as artifact file when: long, final document, AI output, PDF analysis, generated spec/report, or may overload context | MUST |
+| REQ-HYB-06 | `objects/` directory uses year/month subdirectories for filesystem organization | MUST |
+| REQ-HYB-07 | No cloud sync, no daemon, no vector DB in v2 — local-first only | MUST |
+
+**Scenarios**:
+- GIVEN no vault exists, WHEN `skillvault init` runs, THEN `~/.skillvault/vault.db` is created alongside `objects/`, `exports/`, and `cache/` subdirectories.
+- GIVEN a long PDF analysis is saved, WHEN `save_artifact` is called, THEN content is stored as a file under `objects/YYYY/MM/` and DB stores metadata, summary, content hash, and file path.
+- GIVEN small frequently retrieved content, WHEN `add-entry` with inline body is called, THEN body stored in DB directly without creating an artifact file.
+
+---
+
+## Capability 2: Entry Entity + 10 Types
+
+See spec §6.1.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-ENT-01 | Entry fields: `id`, `title`, `slug`, `type`, `summary`, `body` (optional), `status`, `project_id` (nullable), `artifact_id` (nullable), `created_at`, `updated_at` | MUST |
+| REQ-ENT-02 | Required entry types: `prompt`, `skill`, `workflow_note`, `reference`, `user`, `feedback`, `project_state`, `session`, `decision`, `artifact_summary` | MUST |
+| REQ-ENT-03 | Entry type validation rejects unknown types | MUST |
+| REQ-ENT-04 | Slug auto-generated from title if not provided, unique per type | MUST |
+| REQ-ENT-05 | Entry may have zero or more tags via join table | MUST |
+| REQ-ENT-06 | Entry may link to at most one artifact | SHOULD |
+
+**Scenarios**:
+- GIVEN valid entry data with type `decision`, WHEN `save_entry` MCP tool or `add-entry` CLI command is called, THEN entry is persisted with auto-generated slug, timestamps, and status defaulting to `draft`.
+- GIVEN entry with invalid type `invalid_type`, WHEN `save_entry` is attempted, THEN entry is rejected with validation error.
+- GIVEN entry with type `artifact_summary`, WHEN saved, THEN entry references an existing artifact by `artifact_id`.
+
+---
+
+## Capability 3: Project Entity
+
+See spec §6.2.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-PRJ-01 | Project fields: `id`, `name`, `slug`, `description`, `status` (active | archived), `created_at`, `updated_at` | MUST |
+| REQ-PRJ-02 | Projects group entries, decisions, sessions, workflows, and artifacts | MUST |
+| REQ-PRJ-03 | Project status defaults to `active` on creation | MUST |
+| REQ-PRJ-04 | `list-projects` CLI and `list_projects` MCP tool return all active projects; optional flag includes archived | MUST |
+| REQ-PRJ-05 | Archiving a project does not cascade-archive its entries | MUST |
+
+**Scenarios**:
+- GIVEN an active project with 5 entries, WHEN `list-projects` is called, THEN project appears in output.
+- GIVEN project is archived, WHEN `list-projects` is called without `--include-archived`, THEN project is excluded.
+- GIVEN project is created, WHEN `add-project` CLI command is called, THEN project is persisted with slug, description, and active status.
+
+---
+
+## Capability 4: Artifact Entity + File-Backed Storage
+
+See spec §6.3 and §5.3.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-ART-01 | Artifact fields: `id`, `title`, `slug`, `type`, `file_path`, `mime_type`, `summary`, `content_hash`, `size_bytes`, `project_id` (nullable), `source_entry_id` (nullable), `created_at`, `updated_at` | MUST |
+| REQ-ART-02 | Artifact types: `markdown`, `json`, `txt`, `html`, `pdf_reference`, `ai_output`, `pdf_analysis`, `spec`, `report`, `session_output` | MUST |
+| REQ-ART-03 | File path stored as relative path under `objects/` directory | MUST |
+| REQ-ART-04 | Content hash (SHA-256) computed on save; used for deduplication and integrity | MUST |
+| REQ-ART-05 | MIME type auto-detected from file extension or content | MUST |
+| REQ-ART-06 | Size in bytes tracked in artifact metadata | MUST |
+| REQ-ART-07 | Artifact may be linked to a source entry via `source_entry_id` | SHOULD |
+| REQ-ART-08 | At least one of `content` or `file_path` must be provided when saving an artifact | MUST |
+
+**Scenarios**:
+- GIVEN AI output content with title and type `ai_output`, WHEN `save_artifact` MCP tool is called, THEN content is written to `objects/YYYY/MM/<slug>.md`, artifact metadata is stored in DB with hash, size, and path.
+- GIVEN artifact is saved for project X, WHEN `search` is called with project filter X, THEN artifact metadata appears in results.
+- GIVEN artifact save request without content or file_path, WHEN `save_artifact` is called, THEN request is rejected with validation error.
+
+---
+
+## Capability 5: Workflow + WorkflowStep Entities
+
+See spec §6.4–§6.5.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-WKF-01 | Workflow fields: `id`, `name`, `slug`, `description`, `status` (active | archived | draft), `created_at`, `updated_at` | MUST |
+| REQ-WKF-02 | WorkflowStep fields: `id`, `workflow_id`, `order_index`, `title`, `instruction`, `required` (boolean), `expected_output` (optional) | MUST |
+| REQ-WKF-03 | Steps ordered by `order_index` ascending, sequential from 1 | MUST |
+| REQ-WKF-04 | A workflow must have at least one step to be considered usable | SHOULD |
+| REQ-WKF-05 | Workflows are not executable — they are renderable instruction checklists | MUST |
+
+**Scenarios**:
+- GIVEN a workflow with 3 steps, WHEN `render_workflow` is called, THEN steps are returned in order with title, instruction, and required flag.
+- GIVEN a new workflow is created via `add-workflow` CLI command, WHEN workflow steps are added, THEN each step has sequential ordering, title, and instruction.
+- GIVEN a step marked `required: true`, WHEN the workflow is rendered, THEN the required step is clearly indicated in output.
+
+---
+
+## Capability 6: Series + SeriesEntry Entities
+
+See spec §6.6.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-SER-01 | Series fields: `id`, `name`, `slug`, `description`, `status` | MUST |
+| REQ-SER-02 | SeriesEntry fields: `series_id`, `entry_id`, `order_index` | MUST |
+| REQ-SER-03 | Series groups ordered entries (e.g., learning path, prompt chain, architecture checklist) | MUST |
+| REQ-SER-04 | `compose_series` MCP tool returns ordered entries with their metadata | MUST |
+| REQ-SER-05 | An entry may belong to multiple series | SHOULD |
+| REQ-SER-06 | Series status supports the same 5-status model | MUST |
+
+**Scenarios**:
+- GIVEN a series with 4 entries in order, WHEN `compose_series` MCP tool is called with series slug, THEN entries returned in correct order with metadata.
+- GIVEN an entry belongs to two different series, WHEN either series is composed, THEN entry appears in both ordered results.
+- GIVEN series is archived, WHEN normal search is performed, THEN series entries are excluded from default context.
+
+---
+
+## Capability 7: Tag Entity
+
+See spec §6.7.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-TAG-01 | Tag fields: `id`, `name`, `slug` | MUST |
+| REQ-TAG-02 | Tags shared across entries — one tag can appear on many entries | MUST |
+| REQ-TAG-03 | Tag slug normalized: lowercase, trimmed, spaces to dashes | MUST |
+| REQ-TAG-04 | Empty tag names rejected | MUST |
+| REQ-TAG-05 | Duplicate tags on same entry deduplicated | MUST |
+
+**Scenarios**:
+- GIVEN entry with tags `["Go", "go", "cli-tools"]`, WHEN saved, THEN normalized tags are `["go", "cli-tools"]` (deduplicated, lowercased).
+- GIVEN entry saved with tag `"  "`, WHEN validation runs, THEN empty tag is rejected.
+- GIVEN entry with tag `"TDD"` exists, WHEN another entry is saved with tag `"tdd"`, THEN both entries share the same normalized tag `"tdd"`.
+
+---
+
+## Capability 8: EntryLink Entity + Relation Types
+
+See spec §6.8.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-LNK-01 | EntryLink fields: `from_entry_id`, `to_entry_id`, `relation_type` | MUST |
+| REQ-LNK-02 | Relation types: `references`, `supersedes`, `related_to`, `part_of`, `derived_from`, `implements` | MUST |
+| REQ-LNK-03 | EntryLink creates a directed relationship between two entries | MUST |
+| REQ-LNK-04 | Invalid relation type is rejected | MUST |
+| REQ-LNK-05 | Self-referencing links (from == to) are rejected | MUST |
+
+**Scenarios**:
+- GIVEN entry A and entry B exist, WHEN link with type `references` is created from A to B, THEN querying entry A shows B as a reference.
+- GIVEN entry A supersedes entry B, WHEN search returns both, THEN the `supersedes` relationship is available in metadata.
+- GIVEN link with invalid type `invalid_rel`, WHEN creation is attempted, THEN link is rejected with validation error.
+
+---
+
+## Capability 9: Multi-Status Model
+
+See spec §7.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-STA-01 | Required statuses: `draft`, `active`, `archived`, `deprecated`, `canonical` | MUST |
+| REQ-STA-02 | Status semantics: `draft` (not ready), `active` (normal retrieval), `archived` (excluded from context), `deprecated` (not recommended), `canonical` (preferred version) | MUST |
+| REQ-STA-03 | `get_context` MUST exclude `archived` and `deprecated` content by default | MUST |
+| REQ-STA-04 | `include_archived` query parameter re-enables visibility of archived content | MUST |
+| REQ-STA-05 | Entry, project, workflow, and series all support the status model | MUST |
+| REQ-STA-06 | Default status for new entries is `draft` | MUST |
+| REQ-STA-07 | Archive is a status change, not a delete — no data loss | MUST |
+
+**Scenarios**:
+- GIVEN entry has status `archived`, WHEN `search_entries` is called without `include_archived`, THEN entry is excluded from results.
+- GIVEN entry has status `canonical`, WHEN context is compiled, THEN canonical entries are prioritized per context priority rules.
+- GIVEN entry has status `deprecated`, WHEN `get_context` is called, THEN deprecated entry is excluded from default context pack.
+
+---
+
+## Capability 10: Hermes Context Layer (7 Modes)
+
+See spec §8 (§8.1–§8.5).
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-HRM-01 | Compile agent context packs via `get_context` | MUST |
+| REQ-HRM-02 | 7 context modes: `profile`, `project`, `workflow`, `skill`, `planning`, `session_recall`, `full_brief` | MUST |
+| REQ-HRM-03 | Context pack structure includes: Scope, User Preferences, Project State, Active Decisions, Relevant Workflows, Suggested Next Action | MUST |
+| REQ-HRM-04 | Input fields: `mode`, `project` (optional), `query` (optional), `workflow` (optional), `include` (array), `exclude_archived` (bool), `max_chars` (int, default 12000) | MUST |
+| REQ-HRM-05 | Context priority order: (1) user feedback/preferences, (2) active project state, (3) canonical decisions, (4) relevant workflow, (5) recent sessions, (6) artifact summaries, (7) references, (8) archived index lines only when requested | MUST |
+| REQ-HRM-06 | Context pack respects `max_chars` limit; truncates lowest priority sections first | MUST |
+| REQ-HRM-07 | `profile` mode returns user preferences and feedback entries | MUST |
+| REQ-HRM-08 | `project` mode returns project decisions, state, and session summaries for a specific project | MUST |
+| REQ-HRM-09 | `planning` mode combines profile, project state, decisions, and workflows | MUST |
+| REQ-HRM-10 | `full_brief` mode returns all available context (subject to max_chars) | MUST |
+| REQ-HRM-11 | Archived and deprecated content excluded by default in all modes | MUST |
+
+**Scenarios**:
+- GIVEN profile entry with user preferences exists, WHEN `get_context(mode=profile)` is called, THEN context pack contains user preferences and feedback entries, with mode scope clearly labeled.
+- GIVEN project X has 3 decisions and 2 session entries, WHEN `get_context(mode=project, project=X)` is called, THEN context pack includes project state, decisions (prioritized as canonical first), and recent session summaries, respecting `max_chars`.
+- GIVEN `get_context` is called with `max_chars=500`, WHEN context compilation exceeds limit, THEN lowest-priority sections are truncated until under limit.
+
+---
+
+## Capability 11: CLI Commands (14)
+
+See spec §9 (§9.1–§9.2).
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-CLI-01 | Binary name: `skillvault` | MUST |
+| REQ-CLI-02 | Required commands: `init`, `add-entry`, `search`, `get`, `save-artifact`, `get-context`, `add-project`, `list-projects`, `archive`, `add-workflow`, `render-workflow`, `session-wrap`, `export`, `import` | MUST |
+| REQ-CLI-03 | `init` creates `~/.skillvault/vault.db`, `objects/`, `exports/`, `cache/` | MUST |
+| REQ-CLI-04 | `add-entry` accepts `--title`, `--type`, `--summary` (required), `--body`, `--project`, `--tags`, `--status` (optional) | MUST |
+| REQ-CLI-05 | `save-artifact` accepts `--title`, `--type`, `--file` (required), `--project`, `--summary`, `--tags`, `--source` (optional) | MUST |
+| REQ-CLI-06 | `get-context` accepts `--mode`, `--project`, `--workflow`, `--include`, `--max-chars` | MUST |
+| REQ-CLI-07 | `session-wrap` creates session entry with decisions, pending items, linked project, and optionally an artifact | MUST |
+| REQ-CLI-08 | `archive` changes entry status to `archived`; does not delete data | MUST |
+| REQ-CLI-09 | `export` exports DB data and optional artifact metadata manifest | MUST |
+| REQ-CLI-10 | `import` imports valid SkillVault JSON; conflict handling on duplicate slugs | MUST |
+| REQ-CLI-11 | `search` supports `--query`, `--type`, `--project`, `--tags`, `--include-archived`, `--limit` | MUST |
+
+**Scenarios**:
+- GIVEN no vault exists, WHEN `skillvault init` runs, THEN `vault.db` plus `objects/`, `exports/`, `cache/` directories are created under `~/.skillvault/`.
+- GIVEN entry exists with status `active`, WHEN `skillvault archive --id <id>` runs, THEN entry status changes to `archived`; data is preserved.
+- GIVEN `skillvault session-wrap --project X --summary "completed auth" --decisions "use JWT" --pending "add refresh"` runs, THEN a session entry is created linked to project X with decisions and pending items.
+
+---
+
+## Capability 12: MCP Tools (10)
+
+See spec §10 (§10.1–§10.10).
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-MCP-01 | 10 MCP tools: `save_entry`, `search_entries`, `get_entry`, `save_artifact`, `get_context`, `compose_series`, `render_workflow`, `session_wrap`, `archive_entry`, `list_projects` | MUST |
+| REQ-MCP-02 | `save_entry` accepts `title`, `type`, `summary`, `body` (optional), `project` (optional), `tags`, `status`; rejects obvious secrets | MUST |
+| REQ-MCP-03 | `search_entries` accepts `query`, `type` (optional), `project` (optional), `tags`, `include_archived` (default false), `limit` (default 10) | MUST |
+| REQ-MCP-04 | `get_entry` returns entry by ID or slug; includes artifact reference if linked | MUST |
+| REQ-MCP-05 | `save_artifact` accepts `title`, `type`, `content` (optional), `file_path` (optional), `summary`, `project` (optional), `tags`; at least one of `content` or `file_path` required | MUST |
+| REQ-MCP-06 | `get_context` accepts `mode`, `project` (optional), `query` (optional), `workflow` (optional), `include`, `exclude_archived`, `max_chars` | MUST |
+| REQ-MCP-07 | `compose_series` returns ordered entries in a series | MUST |
+| REQ-MCP-08 | `render_workflow` returns workflow steps as agent instructions/checklist | MUST |
+| REQ-MCP-09 | `session_wrap` accepts `project` (optional), `summary`, `decisions`, `pending`, `learnings`, `artifacts` | MUST |
+| REQ-MCP-10 | `archive_entry` sets entry status to `archived` | MUST |
+| REQ-MCP-11 | `list_projects` lists projects and their statuses | MUST |
+
+**Scenarios**:
+- GIVEN agent calls `search_entries` with query, type, and project filters, WHEN results match, THEN entries returned with id, title, type, summary, project, status, tags, and optional artifact ref.
+- GIVEN agent calls `get_context` with `mode=project, project=myapp`, WHEN context is compiled, THEN agent receives a structured compact context pack identical to the CLI `get-context` output.
+- GIVEN agent calls `save_entry` with content containing an API key, WHEN secret detection triggers, THEN save is rejected and a warning is returned.
+
+---
+
+## Capability 13: Secret Detection
+
+See spec §12 (§12.1–§12.4).
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-SEC-01 | Reject saving content with obvious secrets on `save_entry` and `save_artifact` | MUST |
+| REQ-SEC-02 | Minimum regex patterns: OpenAI key (`sk-[A-Za-z0-9_-]{20,}`), private key (`-----BEGIN (RSA |EC |OPENSSH |)?PRIVATE KEY-----`), GitHub PAT (`ghp_[A-Za-z0-9_]{20,}`), Slack token (`xox[baprs]-[A-Za-z0-9-]{20,}`) | MUST |
+| REQ-SEC-03 | On secret detection: do NOT save secret value; return warning to caller | MUST |
+| REQ-SEC-04 | Allow saving a redacted note if the user chooses | SHOULD |
+| REQ-SEC-05 | No network calls in core v2 — local-first only | MUST |
+| REQ-SEC-06 | Archive is preferred over hard delete | MUST |
+| REQ-SEC-07 | Hard delete requires explicit confirmation if implemented | SHOULD |
+
+**Scenarios**:
+- GIVEN content contains `sk-proj-AbCdEf1234567890123456789012345678901234567890`, WHEN `save_entry` or `save_artifact` is called, THEN save is rejected with a secret-detected warning.
+- GIVEN content contains `-----BEGIN RSA PRIVATE KEY-----`, WHEN validation runs, THEN secret scanner detects the pattern and rejects the save.
+- GIVEN safe content without any secret pattern, WHEN validation runs, THEN save proceeds normally.
+
+---
+
+## Capability 14: Search (FTS5 with Filters)
+
+See spec §14.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-SRC-01 | Search uses SQLite FTS5 on entry body, summary, title, and artifact summaries | MUST |
+| REQ-SRC-02 | Required filters: `type`, `project`, `tag`, `status`, `include_archived`, `limit` | MUST |
+| REQ-SRC-03 | Search result fields: `id`, `title`, `type`, `summary`, `project`, `status`, `tags`, `artifact_ref` (optional) | MUST |
+| REQ-SRC-04 | Archived entries excluded by default | MUST |
+| REQ-SRC-05 | Partial and fuzzy matching through FTS5 tokenizer (porter unicode61) | MUST |
+
+**Scenarios**:
+- GIVEN vault has entry titled "FastAPI PRD" with body describing FastAPI architecture, WHEN `search --query "fastapi"` is called, THEN entry appears in results with all required fields.
+- GIVEN vault has 3 entries for project "SkillVault" and 2 for "Vitacare", WHEN `search --project SkillVault` is called, THEN only SkillVault entries are returned.
+- GIVEN archived entry matches search query, WHEN `search --query "archived-term"` is called without `--include-archived`, THEN archived entry is excluded.
+
+---
+
+## Capability 15: Workflow Rendering
+
+See spec §15.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-WFR-01 | Workflows are renderable instruction checklists — not executable automation | MUST |
+| REQ-WFR-02 | `render_workflow` MCP tool and `render-workflow` CLI command output clear, ordered steps | MUST |
+| REQ-WFR-03 | Each rendered step includes: order_index, title, instruction, required flag, and expected_output (if set) | MUST |
+| REQ-WFR-04 | Example workflow `spec-plan-task` has 6 ordered steps | SHOULD |
+
+**Scenarios**:
+- GIVEN workflow "spec-plan-task" has 6 steps, WHEN `render_workflow` is called with workflow slug, THEN steps 1–6 are returned in sequential order with full instructions and required flags.
+- GIVEN a workflow step has `expected_output` set, WHEN rendered, THEN the expected output is included in the step instruction output.
+- GIVEN workflow has status `draft`, WHEN context compilation runs, THEN draft workflows are only included if explicitly requested.
+
+---
+
+## Capability 16: Import/Export
+
+See spec §13 (§13.1–§13.2).
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-IEX-01 | Export includes: projects, entries, workflows, workflow steps, series, tags, artifact metadata, artifact manifest | MUST |
+| REQ-IEX-02 | Export format: valid JSON with schema version metadata | MUST |
+| REQ-IEX-03 | Artifact files export: v2 exports paths and hashes; actual file copy is optional | MUST |
+| REQ-IEX-04 | Import accepts valid SkillVault JSON; validates schema version | MUST |
+| REQ-IEX-05 | On duplicate slug during import: do NOT overwrite silently; create conflict suffix or report conflict | MUST |
+| REQ-IEX-06 | Import runs in a transaction; schema validation before any write | SHOULD |
+| REQ-IEX-07 | Export/import available via CLI commands only (not MCP tools) | MUST |
+
+**Scenarios**:
+- GIVEN vault has 2 projects, 5 entries, 2 workflows, 1 series, and 3 artifacts, WHEN `skillvault export vault.json` runs, THEN output JSON contains all records with schema version and export timestamp.
+- GIVEN export JSON has an entry with slug "my-entry", WHEN imported into vault that already has "my-entry", THEN conflict is reported and entry gets a conflict suffix rather than silent overwrite.
+- GIVEN import file has invalid schema version, WHEN import runs, THEN import is rejected with validation error before any writes.
+
+---
+
+## Capability 17: Session Wrap
+
+See spec §10.8.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-SWR-01 | `session_wrap` creates a session-type entry with summary, decisions, pending items, and learnings | MUST |
+| REQ-SWR-02 | `session_wrap` accepts: `project` (optional), `summary`, `decisions` (array), `pending` (array), `learnings` (array), `artifacts` (optional array) | MUST |
+| REQ-SWR-03 | Session entry links to specified project | MUST |
+| REQ-SWR-04 | Session may optionally link one or more artifacts produced during the session | SHOULD |
+| REQ-SWR-05 | `session-wrap` CLI command has same semantics as `session_wrap` MCP tool | MUST |
+
+**Scenarios**:
+- GIVEN session with summary "implemented auth", decisions `["use JWT"]`, pending `["add refresh tokens"]`, WHEN `session_wrap` is called, THEN a session-type entry is created with all data, linked to project if specified.
+- GIVEN session produced artifact "spec.md", WHEN `session_wrap` includes artifact reference, THEN session entry links to artifact.
+- GIVEN `session-wrap` CLI command runs with `--project myapp --summary "fixed bug"`, THEN output confirms session entry created and linked to project myapp.
+
+---
+
+## Coverage Summary
+
+| Capability | Requirements | Scenarios |
+|-----------|-------------|-----------|
+| Hybrid Storage Model | 7 | 3 |
+| Entry Entity + 10 Types | 6 | 3 |
+| Project Entity | 5 | 3 |
+| Artifact Entity + File-Backed Storage | 8 | 3 |
+| Workflow + WorkflowStep Entities | 5 | 3 |
+| Series + SeriesEntry Entities | 6 | 3 |
+| Tag Entity | 5 | 3 |
+| EntryLink + Relation Types | 5 | 3 |
+| Multi-Status Model | 7 | 3 |
+| Hermes Context Layer (7 Modes) | 11 | 3 |
+| CLI Commands (14) | 11 | 3 |
+| MCP Tools (10) | 11 | 3 |
+| Secret Detection | 7 | 3 |
+| Search (FTS5 with Filters) | 5 | 3 |
+| Workflow Rendering | 4 | 3 |
+| Import/Export | 7 | 3 |
+| Session Wrap | 5 | 3 |
+| **Total** | **115** | **51** |
+
+**Happy paths**: entry/project/artifact CRUD, search with filters, context compilation, workflow rendering, session wrap, import/export round-trip.
+**Edge cases**: secret detection rejection, duplicate slug import conflict, archived exclusion in context and search, empty tag rejection, self-referencing link rejection, missing content/file_path on artifact save, max_chars truncation.
+**Error states**: invalid entry type, invalid relation type, invalid schema version on import, secret detected warning, missing required fields on CLI.
