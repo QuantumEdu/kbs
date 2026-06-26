@@ -1,8 +1,9 @@
-# SkillVault v2 Hermes — Delta Specs
+# SkillVault v3 — Delta Specs
 
-> All capabilities are **ADDED** (v2 supersedes v1-alpha with new architecture).
+> All capabilities are **ADDED** (v2 supersedes v1-alpha with new architecture; v3 adds pipeline execution).
 > Source: `skillvault_v1_alpha_spec.md` (sections 4–20, authoritative).
 > v1-alpha delta specs archived at `sdd/skillvault-v1-alpha/spec` (Engram #58).
+> v3 delta specs archived at `openspec/changes/archive/2026-06-26-skillvault-v3-workflow-pipelines/`.
 
 ---
 
@@ -98,12 +99,15 @@ See spec §6.4–§6.5.
 | REQ-WKF-02 | WorkflowStep fields: `id`, `workflow_id`, `order_index`, `title`, `instruction`, `required` (boolean), `expected_output` (optional) | MUST |
 | REQ-WKF-03 | Steps ordered by `order_index` ascending, sequential from 1 | MUST |
 | REQ-WKF-04 | A workflow must have at least one step to be considered usable | SHOULD |
-| REQ-WKF-05 | Workflows are not executable — they are renderable instruction checklists | MUST |
+| REQ-WKF-05 | Workflows are primarily renderable instruction checklists. When steps have `entry_slug` set, they MAY be executed as sequential pipeline steps via `skillvault run`. | MUST |
+| REQ-WKF-06 | Each `workflow_step` MAY include an `entry_slug` referencing a specific entry. When `entry_slug` is NULL, the step is renderable-only. | MUST |
 
 **Scenarios**:
 - GIVEN a workflow with 3 steps, WHEN `render_workflow` is called, THEN steps are returned in order with title, instruction, and required flag.
 - GIVEN a new workflow is created via `add-workflow` CLI command, WHEN workflow steps are added, THEN each step has sequential ordering, title, and instruction.
 - GIVEN a step marked `required: true`, WHEN the workflow is rendered, THEN the required step is clearly indicated in output.
+- GIVEN workflow with step 1 (`entry_slug` set) and step 2 (`entry_slug` null), WHEN `render-workflow` renders the workflow, THEN both steps appear in order with full instructions. WHEN `skillvault run` executes, THEN only step 1 executes; step 2 is skipped.
+- GIVEN a workflow with 3 steps all having `entry_slug` set to valid entries, WHEN `skillvault run` is invoked, THEN steps execute sequentially with system variable substitution.
 
 ---
 
@@ -228,11 +232,15 @@ See spec §9 (§9.1–§9.2).
 | REQ-CLI-09 | `export` exports DB data and optional artifact metadata manifest | MUST |
 | REQ-CLI-10 | `import` imports valid SkillVault JSON; conflict handling on duplicate slugs | MUST |
 | REQ-CLI-11 | `search` supports `--query`, `--type`, `--project`, `--tags`, `--include-archived`, `--limit` | MUST |
+| REQ-CLI-12 | `run` executes workflows: `skillvault run <workflow> <file> [--save output.md]`. Input from file or stdin (`-`). Output to stdout or `--save` path. Sequential pipeline execution. Pre-flight validates entry existence and status. | MUST |
 
 **Scenarios**:
 - GIVEN no vault exists, WHEN `skillvault init` runs, THEN `vault.db` plus `objects/`, `exports/`, `cache/` directories are created under `~/.skillvault/`.
 - GIVEN entry exists with status `active`, WHEN `skillvault archive --id <id>` runs, THEN entry status changes to `archived`; data is preserved.
 - GIVEN `skillvault session-wrap --project X --summary "completed auth" --decisions "use JWT" --pending "add refresh"` runs, THEN a session entry is created linked to project X with decisions and pending items.
+- GIVEN file `article.md` exists, WHEN `skillvault run research_article article.md` executes, THEN final composed output is printed to stdout.
+- GIVEN input piped via stdin, WHEN `echo "test" | skillvault run my_workflow - --save out.md` runs successfully, THEN `out.md` contains `{{final_output}}` content.
+- GIVEN workflow `missing_wf` does not exist, WHEN `skillvault run missing_wf file.md` is invoked, THEN command exits with error indicating workflow not found.
 
 ---
 
@@ -311,7 +319,7 @@ See spec §15.
 
 | ID | Requirement | Strength |
 |----|-------------|----------|
-| REQ-WFR-01 | Workflows are renderable instruction checklists — not executable automation | MUST |
+| REQ-WFR-01 | Workflows are primarily renderable instruction checklists. When a step has `entry_slug` set referencing a valid active entry, that step MAY be executed as part of a sequential pipeline via `skillvault run`. | MUST |
 | REQ-WFR-02 | `render_workflow` MCP tool and `render-workflow` CLI command output clear, ordered steps | MUST |
 | REQ-WFR-03 | Each rendered step includes: order_index, title, instruction, required flag, and expected_output (if set) | MUST |
 | REQ-WFR-04 | Example workflow `spec-plan-task` has 6 ordered steps | SHOULD |
@@ -320,6 +328,7 @@ See spec §15.
 - GIVEN workflow "spec-plan-task" has 6 steps, WHEN `render_workflow` is called with workflow slug, THEN steps 1–6 are returned in sequential order with full instructions and required flags.
 - GIVEN a workflow step has `expected_output` set, WHEN rendered, THEN the expected output is included in the step instruction output.
 - GIVEN workflow has status `draft`, WHEN context compilation runs, THEN draft workflows are only included if explicitly requested.
+- GIVEN workflow step has `entry_slug: summarize` referencing an active entry, WHEN `skillvault run` executes that step, THEN the referenced entry body is composed with system variables and executed in order.
 
 ---
 
@@ -374,11 +383,14 @@ The system MUST maintain integrity across build, runtime, and schema.
 | REQ-CI-03 | HTTP server MUST drain connections on `Shutdown(ctx)` with deadline | MUST |
 | REQ-CI-04 | FTS5 MUST work without CGO: defensive import `_ "modernc.org/sqlite/lib/fts5"` | MUST |
 | REQ-CI-05 | Schema MUST be consistent between migration output and `schema.sql` — no drift | MUST |
+| REQ-CI-06 | Application version MUST be `v3` (upgraded from `v2-quantum`). Import/export schema version SHALL remain `2` (additive change only). v2 exports MUST import into v3 without data loss. | MUST |
 
 **Scenarios**:
 - GIVEN active tool calls, WHEN SIGTERM received, THEN in-flight calls complete, exit code 0 within 5s.
 - GIVEN active connections, WHEN shutdown triggered, THEN no new requests accepted, existing drained, clean exit.
 - GIVEN `CGO_ENABLED=0`, WHEN built and search invoked, THEN FTS5 queries execute correctly.
+- GIVEN no prior runs exist, WHEN `skillvault version` is executed, THEN output is `v3`.
+- GIVEN a v2 export file with schema version 2, WHEN imported into v3, THEN import succeeds without data loss, AND new `runs`/`run_steps` fields are absent (null/empty).
 
 ---
 
@@ -398,6 +410,30 @@ Inner DB layer for all/any tag matching via `entry_tags` junction table. Support
 
 ---
 
+## Capability 20: Pipeline Execution Engine
+
+See delta spec `skillvault-v3-workflow-pipelines`.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-RUN-01 | A `runs` table SHALL track each execution with `id`, `workflow_id`, `input`, `output`, `status` (pending|running|completed|failed), `started_at`, and `finished_at`. | MUST |
+| REQ-RUN-02 | A `run_steps` table SHALL track each step with `id`, `run_id`, `step_id`, `entry_id`, `input`, `output`, `status`, `started_at`, and `finished_at`. | MUST |
+| REQ-RUN-03 | `WorkflowRunService` MUST execute steps in `order_index` ascending order. Each step's output SHALL become `{{previous_output}}` for the next. Execution MUST halt on step failure. | MUST |
+| REQ-RUN-04 | The system SHALL support three system variables: `{{input}}` (initial file/stdin content), `{{previous_output}}` (last completed step output, truncated at 32K), and `{{final_output}}` (all completed step outputs concatenated). | MUST |
+| REQ-RUN-05 | Pre-flight validation SHALL reject execution BEFORE any step runs if a referenced entry slug does not exist or references an archived entry. | MUST |
+| REQ-RUN-06 | `{{previous_output}}` SHALL be truncated at 32K characters with a warning emitted on truncation. | MUST |
+| REQ-RUN-07 | The service SHALL NOT call LLMs; it composes prompts from entry bodies with system variable substitution and records step results. | MUST |
+
+**Scenarios**:
+- GIVEN a workflow with 3 steps, WHEN `skillvault run` executes, THEN a `run` record is created with status `pending`, AND 3 `run_step` records are created with status `pending`, AND statuses transition to `running` then `completed` (or `failed` on error).
+- GIVEN step 2 of 3 fails, WHEN execution halts, THEN run status is `failed`, AND step 1 status is `completed`, step 2 status is `failed`, AND step 3 status remains `pending`.
+- GIVEN initial input "Hello World", WHEN step 1 entry body contains "Process: {{input}}", THEN step executes with "Process: Hello World", AND step output is stored for next step's `{{previous_output}}`.
+- GIVEN step output exceeds 32K characters, WHEN next step substitutes `{{previous_output}}`, THEN variable is truncated at 32K, AND a truncation warning is emitted.
+- GIVEN workflow step references entry slug `extract_wisdom` that does not exist, WHEN `run` is invoked, THEN execution is rejected BEFORE any step runs, AND no `run` or `run_step` records are created.
+- GIVEN workflow step references an archived entry, WHEN `run` is invoked, THEN execution is rejected with a validation error indicating the entry is not active.
+
+---
+
 ## Coverage Summary
 
 | Capability | Requirements | Scenarios |
@@ -406,22 +442,23 @@ Inner DB layer for all/any tag matching via `entry_tags` junction table. Support
 | Entry Entity + 10 Types | 6 | 3 |
 | Project Entity | 5 | 3 |
 | Artifact Entity + File-Backed Storage | 8 | 3 |
-| Workflow + WorkflowStep Entities | 5 | 3 |
+| Workflow + WorkflowStep Entities | 6 | 5 |
 | Series + SeriesEntry Entities | 6 | 3 |
 | Tag Entity | 5 | 3 |
 | EntryLink + Relation Types | 5 | 3 |
 | Multi-Status Model | 7 | 3 |
 | Hermes Context Layer (7 Modes) | 11 | 3 |
-| CLI Commands (14) | 11 | 3 |
+| CLI Commands (15) | 12 | 6 |
 | MCP Tools (12) | 13 | 5 |
 | Secret Detection | 7 | 3 |
 | Search (FTS5 with Filters) | 5 | 3 |
-| Workflow Rendering | 4 | 3 |
+| Workflow Rendering | 4 | 4 |
 | Import/Export | 7 | 3 |
 | Session Wrap | 5 | 3 |
-| Code Integrity | 5 | 3 |
+| Code Integrity | 6 | 5 |
 | Tag Query Support | 3 | 2 |
-| **Total** | **123** | **56** |
+| Pipeline Execution Engine | 7 | 6 |
+| **Total** | **135** | **70** |
 
 **Happy paths**: entry/project/artifact CRUD, search with filters, context compilation, workflow rendering, session wrap, import/export round-trip.
 **Edge cases**: secret detection rejection, duplicate slug import conflict, archived exclusion in context and search, empty tag rejection, self-referencing link rejection, missing content/file_path on artifact save, max_chars truncation.

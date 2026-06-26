@@ -10,9 +10,11 @@ import (
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
+const exportSchemaVersion = 2
+
 func (s *sqliteImportExportStore) ExportAll(ctx context.Context) (domain.VaultExport, error) {
 	export := domain.VaultExport{
-		SchemaVersion: 2,
+		SchemaVersion: exportSchemaVersion,
 		AppVersion:    "v3",
 		ExportedAt:    time.Now().UTC().Format(time.RFC3339),
 		Source:        "skillvault",
@@ -59,6 +61,14 @@ func (s *sqliteImportExportStore) ExportAll(ctx context.Context) (domain.VaultEx
 	if err != nil {
 		return export, fmt.Errorf("export artifacts: %w", err)
 	}
+	export.Data.WorkflowRuns, err = s.exportRuns(ctx)
+	if err != nil {
+		return export, fmt.Errorf("export runs: %w", err)
+	}
+	export.Data.WorkflowRunSteps, err = s.exportRunSteps(ctx)
+	if err != nil {
+		return export, fmt.Errorf("export run_steps: %w", err)
+	}
 
 	return export, nil
 }
@@ -67,8 +77,8 @@ func (s *sqliteImportExportStore) ImportAll(ctx context.Context, data domain.Vau
 	if data.SchemaVersion == 0 {
 		return fmt.Errorf("import rejected: missing schema_version")
 	}
-	if data.SchemaVersion > 2 {
-		return fmt.Errorf("import rejected: schema_version %d is newer than supported (max 2)", data.SchemaVersion)
+	if data.SchemaVersion > exportSchemaVersion {
+		return fmt.Errorf("import rejected: schema_version %d is newer than supported (max %d)", data.SchemaVersion, exportSchemaVersion)
 	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -235,15 +245,53 @@ func (s *sqliteImportExportStore) ImportAll(ctx context.Context, data domain.Vau
 			id = ws.ID
 		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO workflow_steps (id, workflow_id, order_index, title, instruction, required, expected_output)
-			 VALUES (?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO workflow_steps (id, workflow_id, order_index, title, instruction, required, expected_output, entry_slug)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(id) DO UPDATE SET
 			 workflow_id=excluded.workflow_id, order_index=excluded.order_index,
 			 title=excluded.title, instruction=excluded.instruction,
-			 required=excluded.required, expected_output=excluded.expected_output`,
-			id, ws.WorkflowID, ws.OrderIndex, ws.Title, ws.Instruction, required, ws.ExpectedOutput)
+			 required=excluded.required, expected_output=excluded.expected_output,
+			 entry_slug=excluded.entry_slug`,
+			id, ws.WorkflowID, ws.OrderIndex, ws.Title, ws.Instruction, required, ws.ExpectedOutput, ws.EntrySlug)
 		if err != nil {
 			return fmt.Errorf("import workflow_step: %w", err)
+		}
+	}
+
+	for _, run := range data.Data.WorkflowRuns {
+		finishedAt := interface{}(nil)
+		if run.FinishedAt != nil {
+			finishedAt = *run.FinishedAt
+		}
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO runs (id, workflow_id, input, output, status, started_at, finished_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(id) DO UPDATE SET
+			 workflow_id=excluded.workflow_id, input=excluded.input,
+			 output=excluded.output, status=excluded.status,
+			 started_at=excluded.started_at, finished_at=excluded.finished_at`,
+			run.ID, run.WorkflowID, run.Input, run.Output, string(run.Status), run.StartedAt, finishedAt)
+		if err != nil {
+			return fmt.Errorf("import run %s: %w", run.ID, err)
+		}
+	}
+
+	for _, rs := range data.Data.WorkflowRunSteps {
+		finishedAt := interface{}(nil)
+		if rs.FinishedAt != nil {
+			finishedAt = *rs.FinishedAt
+		}
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO run_steps (id, run_id, step_id, entry_id, input, output, status, started_at, finished_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(id) DO UPDATE SET
+			 run_id=excluded.run_id, step_id=excluded.step_id,
+			 entry_id=excluded.entry_id, input=excluded.input,
+			 output=excluded.output, status=excluded.status,
+			 started_at=excluded.started_at, finished_at=excluded.finished_at`,
+			rs.ID, rs.RunID, rs.StepID, rs.EntryID, rs.Input, rs.Output, string(rs.Status), rs.StartedAt, finishedAt)
+		if err != nil {
+			return fmt.Errorf("import run_step %s: %w", rs.ID, err)
 		}
 	}
 
@@ -402,7 +450,7 @@ func (s *sqliteImportExportStore) exportWorkflows(ctx context.Context) ([]domain
 }
 
 func (s *sqliteImportExportStore) exportWorkflowSteps(ctx context.Context) ([]domain.WorkflowStep, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, workflow_id, order_index, COALESCE(title,''), COALESCE(instruction,''), required, COALESCE(expected_output,'') FROM workflow_steps ORDER BY workflow_id, order_index`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, workflow_id, order_index, COALESCE(title,''), COALESCE(instruction,''), required, COALESCE(expected_output,''), COALESCE(entry_slug,'') FROM workflow_steps ORDER BY workflow_id, order_index`)
 	if err != nil {
 		return nil, err
 	}
@@ -412,7 +460,7 @@ func (s *sqliteImportExportStore) exportWorkflowSteps(ctx context.Context) ([]do
 		var ws domain.WorkflowStep
 		var stepID int64
 		var required int
-		if err := rows.Scan(&stepID, &ws.WorkflowID, &ws.OrderIndex, &ws.Title, &ws.Instruction, &required, &ws.ExpectedOutput); err != nil {
+		if err := rows.Scan(&stepID, &ws.WorkflowID, &ws.OrderIndex, &ws.Title, &ws.Instruction, &required, &ws.ExpectedOutput, &ws.EntrySlug); err != nil {
 			return nil, err
 		}
 		ws.ID = fmt.Sprintf("%d", stepID)
@@ -464,6 +512,48 @@ func scanProjects(rows *sql.Rows) ([]domain.Project, error) {
 }
 
 var _ ImportExportStore = (*sqliteImportExportStore)(nil)
+
+func (s *sqliteImportExportStore) exportRuns(ctx context.Context) ([]domain.WorkflowRun, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, workflow_id, COALESCE(input,''), COALESCE(output,''), COALESCE(status,'pending'), started_at, finished_at FROM runs ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []domain.WorkflowRun
+	for rows.Next() {
+		var r domain.WorkflowRun
+		var finishedAt sql.NullTime
+		if err := rows.Scan(&r.ID, &r.WorkflowID, &r.Input, &r.Output, &r.Status, &r.StartedAt, &finishedAt); err != nil {
+			return nil, err
+		}
+		if finishedAt.Valid {
+			r.FinishedAt = &finishedAt.Time
+		}
+		results = append(results, r)
+	}
+	return results, nil
+}
+
+func (s *sqliteImportExportStore) exportRunSteps(ctx context.Context) ([]domain.WorkflowRunStep, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, run_id, step_id, entry_id, COALESCE(input,''), COALESCE(output,''), COALESCE(status,'pending'), started_at, finished_at FROM run_steps ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var results []domain.WorkflowRunStep
+	for rows.Next() {
+		var rs domain.WorkflowRunStep
+		var finishedAt sql.NullTime
+		if err := rows.Scan(&rs.ID, &rs.RunID, &rs.StepID, &rs.EntryID, &rs.Input, &rs.Output, &rs.Status, &rs.StartedAt, &finishedAt); err != nil {
+			return nil, err
+		}
+		if finishedAt.Valid {
+			rs.FinishedAt = &finishedAt.Time
+		}
+		results = append(results, rs)
+	}
+	return results, nil
+}
 
 func (s *sqliteImportExportStore) exportEntryLinks(ctx context.Context) ([]domain.EntryLink, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT from_entry_id, to_entry_id, relation_type, COALESCE(label,'') FROM entry_links WHERE active = 1 ORDER BY from_entry_id, to_entry_id")

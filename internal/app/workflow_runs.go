@@ -15,7 +15,7 @@ import (
 	"github.com/quantum-6/skillvault/internal/vars"
 )
 
-const maxPreviousOutputLen = 32000
+const maxPreviousOutputLen = 32768
 
 // WorkflowRunService executes workflow steps as sequential pipeline steps.
 type WorkflowRunService struct {

@@ -36,15 +36,15 @@ Chain strategy: stacked-to-main
 
 ## Phase 2: App Service + CLI + Wiring (PR 2)
 
-- [ ] 2.1 Create `internal/app/workflow_runs.go` — `WorkflowRunService.RunPipeline()`: pre-flight resolve entry_slugs → validate active; create run+steps pending; sequential loop substituting `{{input}}`/`{{previous_output}}`/`{{final_output}}` via `vars.Resolve()`, stdout prompt, stdin result, update status; truncate previous_output at 32K with warning
-- [ ] 2.2 Add `RunFlags` + `ParseRunFlags()` to `internal/cli/commands.go`; register `"run"` in `ParseCommand()` (positional `<workflow> <file>`, `--save <path>`)
-- [ ] 2.3 Wire `run` case in `cmd/skillvault/main.go`: add `workflowRunSvc` to vaultServices, parse flags, read input (file or stdin), call RunPipeline, write `--save` output
-- [ ] 2.4 Bump version `"v2-quantum"` → `"v3"` in `cmd/skillvault/main.go`, `internal/db/import_export_store.go` (AppVersion), and `internal/mcp/server.go` (server version `"v1-alpha"` → `"v3"`)
+- [x] 2.1 Create `internal/app/workflow_runs.go` — `WorkflowRunService.RunPipeline()`: pre-flight resolve entry_slugs → validate active; create run+steps pending; sequential loop substituting `{{input}}`/`{{previous_output}}`/`{{final_output}}` via `vars.Resolve()`, stdout prompt, stdin result, update status; truncate previous_output at 32K with warning
+- [x] 2.2 Add `RunFlags` + `ParseRunFlags()` to `internal/cli/commands.go`; register `"run"` in `ParseCommand()` (positional `<workflow> <file>`, `--save <path>`)
+- [x] 2.3 Wire `run` case in `cmd/skillvault/main.go`: add `workflowRunSvc` to vaultServices, parse flags, read input (file or stdin), call RunPipeline, write `--save` output
+- [x] 2.4 Bump version `"v2-quantum"` → `"v3"` in `cmd/skillvault/main.go`, `internal/db/import_export_store.go` (AppVersion), and `internal/mcp/server.go` (server version `"v1-alpha"` → `"v3"`)
 
 ## Phase 3: Tests + Import/Export (PR 3)
 
-- [ ] 3.1 Extend `internal/db/import_export_store.go`: `ExportAll()` exports runs+run_steps; `ImportAll()` imports them with idempotent upsert
-- [ ] 3.2 Create `internal/db/workflow_run_store_test.go` — table-driven: CreateRun (success, empty, duplicate), GetRun, ListRuns, UpdateStepStatus transitions
-- [ ] 3.3 Create `internal/app/workflow_runs_test.go` — full lifecycle, pre-flight rejection (missing slug, archived entry), truncation at 32K, skip-steps-without-entry_slug
-- [ ] 3.4 Update `"v2-quantum"` → `"v3"` in test files: `main_test.go:150`, `import_export_store_test.go:65–66`, `filters_test.go:143,152–153`
-- [ ] 3.5 Add `run` CLI parsing tests to `internal/cli/cli_test.go` — valid, missing args, `--save`
+- [x] 3.1 Extend `internal/db/import_export_store.go`: `ExportAll()` exports runs+run_steps; `ImportAll()` imports them with idempotent upsert
+- [x] 3.2 Create `internal/db/workflow_run_store_test.go` — table-driven: CreateRun (success, empty, duplicate), GetRun, ListRuns, UpdateStepStatus transitions
+- [x] 3.3 Create `internal/app/workflow_runs_test.go` — full lifecycle, pre-flight rejection (missing slug, archived entry), truncation at 32K, skip-steps-without-entry_slug
+- [x] 3.4 Update `"v2-quantum"` → `"v3"` in test files: `main_test.go:150`, `import_export_store_test.go:65–66`, `filters_test.go:143,152–153`
+- [x] 3.5 Add `run` CLI parsing tests to `internal/cli/cli_test.go` — valid, missing args, `--save`

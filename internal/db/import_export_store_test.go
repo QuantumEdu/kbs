@@ -7,7 +7,7 @@ import (
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
-func setupImportExportStore(t *testing.T) (EntryStore, WorkflowStore, SeriesStore, ProjectStore, ArtifactStore, EntryLinkStore, TagStore, ImportExportStore, func()) {
+func setupImportExportStore(t *testing.T) (EntryStore, WorkflowStore, SeriesStore, ProjectStore, ArtifactStore, EntryLinkStore, TagStore, WorkflowRunStore, ImportExportStore, func()) {
 	t.Helper()
 	db, err := OpenDB(":memory:")
 	if err != nil {
@@ -24,13 +24,14 @@ func setupImportExportStore(t *testing.T) (EntryStore, WorkflowStore, SeriesStor
 	artifactStore := &sqliteArtifactStore{db: db}
 	linkStore := &sqliteEntryLinkStore{db: db}
 	tagStore := &sqliteTagStore{db: db}
+	rstore := &sqliteWorkflowRunStore{db: db}
 	ieStore := &sqliteImportExportStore{db: db}
 	cleanup := func() { db.Close() }
-	return entryStore, workflowStore, seriesStore, projectStore, artifactStore, linkStore, tagStore, ieStore, cleanup
+	return entryStore, workflowStore, seriesStore, projectStore, artifactStore, linkStore, tagStore, rstore, ieStore, cleanup
 }
 
 func TestExportRoundTrip(t *testing.T) {
-	estore, wfstore, sstore, pstore, astore, linkStore, tagStore, iestore, cleanup := setupImportExportStore(t)
+	estore, wfstore, sstore, pstore, astore, linkStore, tagStore, rstore, iestore, cleanup := setupImportExportStore(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -45,6 +46,14 @@ func TestExportRoundTrip(t *testing.T) {
 	wfstore.Save(ctx, domain.Workflow{ID: "wf-1", Name: "Test WF", Slug: "test-wf", Description: "A workflow", Status: domain.StatusActive}, []domain.WorkflowStep{
 		{Title: "Step 1", Instruction: "Do step 1", OrderIndex: 1, Required: true},
 		{Title: "Step 2", Instruction: "Do step 2", OrderIndex: 2, Required: false},
+	})
+
+	rstore.CreateRun(ctx, domain.WorkflowRun{
+		ID: "run-1", WorkflowID: "wf-1", Input: "input.md", Output: "result",
+		Status: domain.RunStatusCompleted,
+	}, []domain.WorkflowRunStep{
+		{ID: "rs-1", RunID: "run-1", StepID: 1, EntryID: "e1", Input: "input.md", Output: "step1 done", Status: domain.RunStatusCompleted},
+		{ID: "rs-2", RunID: "run-1", StepID: 2, EntryID: "e2", Input: "", Output: "step2 done", Status: domain.RunStatusCompleted},
 	})
 
 	sstore.Save(ctx, domain.Series{ID: "ser-1", Name: "Test Series", Slug: "test-series", Status: domain.StatusActive})
@@ -99,6 +108,12 @@ func TestExportRoundTrip(t *testing.T) {
 	if len(exported.Data.EntryLinks) != 1 {
 		t.Errorf("expected 1 entry_link, got %d", len(exported.Data.EntryLinks))
 	}
+	if len(exported.Data.WorkflowRuns) != 1 {
+		t.Errorf("expected 1 workflow_run, got %d", len(exported.Data.WorkflowRuns))
+	}
+	if len(exported.Data.WorkflowRunSteps) != 2 {
+		t.Errorf("expected 2 workflow_run_steps, got %d", len(exported.Data.WorkflowRunSteps))
+	}
 
 	db2, err := OpenDB(":memory:")
 	if err != nil {
@@ -127,10 +142,19 @@ func TestExportRoundTrip(t *testing.T) {
 	if len(reexported.Data.EntryLinks) != 1 {
 		t.Errorf("round-trip: expected 1 entry_link, got %d", len(reexported.Data.EntryLinks))
 	}
+	if len(reexported.Data.WorkflowRuns) != 1 {
+		t.Errorf("round-trip: expected 1 workflow_run, got %d", len(reexported.Data.WorkflowRuns))
+	}
+	if len(reexported.Data.WorkflowRunSteps) != 2 {
+		t.Errorf("round-trip: expected 2 workflow_run_steps, got %d", len(reexported.Data.WorkflowRunSteps))
+	}
+	if reexported.Data.WorkflowRuns[0].ID != "run-1" {
+		t.Errorf("round-trip: workflow_run ID = %q, want 'run-1'", reexported.Data.WorkflowRuns[0].ID)
+	}
 }
 
 func TestImportRejectsMissingVersion(t *testing.T) {
-	_, _, _, _, _, _, _, iestore, cleanup := setupImportExportStore(t)
+	_, _, _, _, _, _, _, _, iestore, cleanup := setupImportExportStore(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -141,7 +165,7 @@ func TestImportRejectsMissingVersion(t *testing.T) {
 }
 
 func TestImportRejectsHigherVersion(t *testing.T) {
-	_, _, _, _, _, _, _, iestore, cleanup := setupImportExportStore(t)
+	_, _, _, _, _, _, _, _, iestore, cleanup := setupImportExportStore(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -150,3 +174,5 @@ func TestImportRejectsHigherVersion(t *testing.T) {
 		t.Fatal("expected error for unsupported schema_version")
 	}
 }
+
+

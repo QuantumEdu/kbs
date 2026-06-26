@@ -366,7 +366,7 @@ func TestRunPipelineTruncationWarning(t *testing.T) {
 		t.Errorf("run status = %q, want 'completed'", run.Status)
 	}
 	// Final output should still be step outputs concatenated with newlines
-	if !strings.HasPrefix(output, strings.Repeat("X", 32000)) {
+	if !strings.HasPrefix(output, strings.Repeat("X", 32768)) {
 		t.Error("final output should have step 1 output (possibly truncated)")
 	}
 
