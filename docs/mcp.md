@@ -1,4 +1,4 @@
-# MCP Server — 13 herramientas para agentes AI
+# MCP Server — 15 herramientas para agentes AI
 
 SkillVault funciona como servidor MCP (Model Context Protocol) sobre stdio JSON-RPC 2.0. Esto permite que agentes como Claude Code, OpenCode, o cualquier cliente MCP lean y escriban directamente en tu vault.
 
@@ -201,6 +201,43 @@ Lista todos los proyectos con su estado.
 
 ---
 
+### `search_by_tags`
+
+Busca entradas por tags usando intersección (all) o unión (any).
+
+**Parámetros:**
+- `tags` (string[], requerido) — Tags a buscar
+- `match` (string, opcional) — `all` (intersección, default) o `any` (unión)
+- `type` (string, opcional) — Filtrar por tipo de entrada
+- `project` (string, opcional) — Filtrar por proyecto
+- `limit` (int, opcional) — Máximo de resultados (default: 20)
+
+**Ejemplo desde el agente:**
+```json
+{
+  "method": "search_by_tags",
+  "params": {
+    "tags": ["tdd", "go"],
+    "match": "all"
+  }
+}
+```
+
+---
+
+### `get_context_bundle`
+
+Obtiene un bundle estructurado de contexto de proyecto en una sola llamada.
+
+**Parámetros:**
+- `project` (string, opcional) — Slug del proyecto
+
+**Respuesta:** JSON estructurado con información del proyecto, entradas agrupadas por tipo y referencias a artefactos.
+
+Útil como primera llamada cuando un agente comienza a trabajar en un proyecto conocido.
+
+---
+
 ### `save_entry_ref`
 
 Crea o actualiza una arista (relación) entre dos entradas.
@@ -264,13 +301,16 @@ Traversa el grafo desde una entrada raíz y devuelve nodos y aristas conectados.
 ## Flujo típico desde el agente
 
 ```
-1. Al inicio de sesión → get_context(mode=planning, project=miapp)
-   → El agente recibe contexto de lo que se estaba haciendo
+1. Al inicio de sesión → get_context_bundle(project=miapp)
+   → Bundle completo: proyecto + entradas agrupadas por tipo + artefactos
 
 2. Durante la sesión → save_entry(...) o save_artifact(...)
    → Guarda skills, decisiones, outputs largos
 
-3. Al cerrar → session_wrap(project, summary, decisions, pending, learnings)
+3. Búsqueda específica → search_by_tags(tags=["go","tdd"], match="all")
+   → Encuentra entradas exactas por tags
+
+4. Al cerrar → session_wrap(project, summary, decisions, pending, learnings)
    → Persiste el estado de la sesión para la próxima
 ```
 

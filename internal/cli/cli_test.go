@@ -41,6 +41,8 @@ func TestParseSubcommand(t *testing.T) {
 		{"import no arg", []string{"skillvault", "import"}, "", true},
 		{"graph no entry", []string{"skillvault", "graph", "--format", "json"}, "graph", false},
 		{"memory index no project", []string{"skillvault", "memory", "index", "--path", "/tmp"}, "memory-index", false},
+		{"run no args", []string{"skillvault", "run"}, "", true},
+		{"run missing file", []string{"skillvault", "run", "wf"}, "", true},
 
 		// New v1-final commands
 		{"graph", []string{"skillvault", "graph", "--entry", "e1", "--format", "json"}, "graph", false},
@@ -48,6 +50,9 @@ func TestParseSubcommand(t *testing.T) {
 		{"memory reindex", []string{"skillvault", "memory", "reindex", "--path", "/tmp/mem", "--project", "p"}, "memory-reindex", false},
 		{"memory list-external", []string{"skillvault", "memory", "list-external", "--project", "p"}, "memory-list-external", false},
 		{"entry ref add", []string{"skillvault", "entry", "ref", "add", "s", "t", "depends_on"}, "entry-ref", false},
+		{"run", []string{"skillvault", "run", "wf", "input.md"}, "run", false},
+		{"run with save", []string{"skillvault", "run", "wf", "input.md", "--save", "out.md"}, "run", false},
+		{"run with stdin", []string{"skillvault", "run", "wf", "-"}, "run", false},
 
 		// Errors
 		{"no args", []string{"skillvault"}, "", true},
@@ -498,6 +503,70 @@ func TestTagItems(t *testing.T) {
 				if result[i] != tt.want[i] {
 					t.Errorf("result[%d] = %q, want %q", i, result[i], tt.want[i])
 				}
+			}
+		})
+	}
+}
+
+func TestParseRunFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    RunFlags
+		wantErr bool
+	}{
+		{
+			name: "basic workflow and file",
+			args: []string{"skillvault", "run", "my_wf", "input.md"},
+			want: RunFlags{Workflow: "my_wf", FilePath: "input.md"},
+		},
+		{
+			name: "stdin input with dash",
+			args: []string{"skillvault", "run", "my_wf", "-"},
+			want: RunFlags{Workflow: "my_wf", FilePath: "-"},
+		},
+		{
+			name: "with save flag",
+			args: []string{"skillvault", "run", "my_wf", "input.md", "--save", "output.md"},
+			want: RunFlags{Workflow: "my_wf", FilePath: "input.md", SavePath: "output.md"},
+		},
+		{
+			name: "stdin with save",
+			args: []string{"skillvault", "run", "research_article", "-", "--save", "out.md"},
+			want: RunFlags{Workflow: "research_article", FilePath: "-", SavePath: "out.md"},
+		},
+		{
+			name:    "missing workflow",
+			args:    []string{"skillvault", "run"},
+			wantErr: true,
+		},
+		{
+			name:    "missing file path",
+			args:    []string{"skillvault", "run", "my_wf"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flags, err := ParseRunFlags(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseRunFlags failed: %v", err)
+			}
+			if flags.Workflow != tt.want.Workflow {
+				t.Errorf("Workflow = %q, want %q", flags.Workflow, tt.want.Workflow)
+			}
+			if flags.FilePath != tt.want.FilePath {
+				t.Errorf("FilePath = %q, want %q", flags.FilePath, tt.want.FilePath)
+			}
+			if flags.SavePath != tt.want.SavePath {
+				t.Errorf("SavePath = %q, want %q", flags.SavePath, tt.want.SavePath)
 			}
 		})
 	}

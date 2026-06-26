@@ -228,6 +228,113 @@ func (s *sqliteEntryStore) Search(ctx context.Context, q domain.SearchQuery) ([]
 	return results, nil
 }
 
+func (s *sqliteEntryStore) SearchByTags(ctx context.Context, tags []string, matchAll bool, typePtr, projectPtr *string, limit int) ([]domain.EntrySearchResult, error) {
+	if len(tags) == 0 {
+		return nil, fmt.Errorf("at least one tag is required")
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+
+	query := "SELECT e.id, e.title, e.slug, e.type, e.project_id, e.summary, e.body_optional, e.status, e.artifact_id, COALESCE(e.external_ref,'') FROM entries e JOIN entry_tags et ON e.id = et.entry_id WHERE e.status != 'archived' AND et.tag IN (" + placeholders(len(tags)) + ")"
+	var args []interface{}
+	for _, t := range tags {
+		args = append(args, t)
+	}
+
+	if typePtr != nil {
+		query += " AND e.type = ?"
+		args = append(args, *typePtr)
+	}
+	if projectPtr != nil {
+		query += " AND e.project_id = ?"
+		args = append(args, *projectPtr)
+	}
+
+	if matchAll {
+		query += " GROUP BY e.id HAVING COUNT(DISTINCT et.tag) = ?"
+		args = append(args, len(tags))
+	} else {
+		query += " GROUP BY e.id"
+	}
+
+	query += " ORDER BY e.title LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search by tags: %w", err)
+	}
+	defer rows.Close()
+
+	type row struct {
+		result       domain.EntrySearchResult
+		projectID    sql.NullString
+		artifactID   sql.NullString
+		summary      sql.NullString
+		bodyOptional sql.NullString
+		status       string
+	}
+	var rowsData []row
+	var entryIDs []string
+
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.result.Entry.ID, &r.result.Entry.Title, &r.result.Entry.Slug, &r.result.Entry.Type,
+			&r.projectID, &r.summary, &r.bodyOptional, &r.status, &r.artifactID, &r.result.Entry.ExternalRef); err != nil {
+			return nil, fmt.Errorf("scan search by tags: %w", err)
+		}
+		r.result.Entry.Status = domain.Status(r.status)
+		if r.projectID.Valid {
+			r.result.Entry.ProjectID = &r.projectID.String
+		}
+		if r.artifactID.Valid {
+			r.result.Entry.ArtifactID = &r.artifactID.String
+		}
+		if r.summary.Valid {
+			r.result.Entry.Summary = r.summary.String
+		}
+		if r.bodyOptional.Valid {
+			r.result.Entry.BodyOptional = r.bodyOptional.String
+		}
+		rowsData = append(rowsData, r)
+		entryIDs = append(entryIDs, r.result.Entry.ID)
+	}
+	rows.Close()
+
+	tagMap := make(map[string][]string)
+	if len(entryIDs) > 0 {
+		tagRows, err := s.db.QueryContext(ctx, "SELECT entry_id, tag FROM entry_tags WHERE entry_id IN ("+placeholders(len(entryIDs))+") ORDER BY entry_id, tag",
+			strSliceToInterface(entryIDs)...)
+		if err != nil {
+			return nil, fmt.Errorf("get tags for search: %w", err)
+		}
+		defer tagRows.Close()
+		for tagRows.Next() {
+			var eid, tag string
+			if err := tagRows.Scan(&eid, &tag); err != nil {
+				return nil, fmt.Errorf("scan tag: %w", err)
+			}
+			tagMap[eid] = append(tagMap[eid], tag)
+		}
+		tagRows.Close()
+	}
+
+	results := make([]domain.EntrySearchResult, 0, len(rowsData))
+	for _, r := range rowsData {
+		tagNames := tagMap[r.result.Entry.ID]
+		for _, tn := range tagNames {
+			r.result.Tags = append(r.result.Tags, domain.Tag{ID: tn, Name: tn, Slug: tn})
+		}
+		if r.result.Tags == nil {
+			r.result.Tags = []domain.Tag{}
+		}
+		results = append(results, r.result)
+	}
+
+	return results, nil
+}
+
 func (s *sqliteEntryStore) Archive(ctx context.Context, id string) error {
 	result, err := s.db.ExecContext(ctx, "UPDATE entries SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id = ?", id)
 	if err != nil {

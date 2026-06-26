@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/quantum-6/skillvault/internal/app"
 	"github.com/quantum-6/skillvault/internal/domain"
@@ -77,10 +78,12 @@ func (s *Server) Start() error {
 	return s.srv.ListenAndServe()
 }
 
-// Stop gracefully shuts down the server.
+// Stop gracefully shuts down the server, draining active connections.
 func (s *Server) Stop() error {
 	if s.srv != nil {
-		return s.srv.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return s.srv.Shutdown(ctx)
 	}
 	return nil
 }

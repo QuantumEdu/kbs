@@ -139,6 +139,16 @@ func (r *ToolRegistry) registerV2Tools() {
 			"direction": map[string]interface{}{"type": "string", "description": "outgoing, incoming, or both (default)"},
 			"max_depth": map[string]interface{}{"type": "number", "description": "Max traversal depth (default 3, max 10)"},
 		})},
+		{Name: "search_by_tags", Description: "Search entries by tags with all/any match against the junction table", InputSchema: schemaObj(map[string]interface{}{
+			"tags":    map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "Tags to match (required)"},
+			"match":   map[string]interface{}{"type": "string", "description": "all (intersection) or any (union). Default: all"},
+			"type":    map[string]interface{}{"type": "string", "description": "Filter by entry type"},
+			"project": map[string]interface{}{"type": "string", "description": "Filter by project"},
+			"limit":   map[string]interface{}{"type": "number", "description": "Max results (default 20)"},
+		})},
+		{Name: "get_context_bundle", Description: "Return structured JSON bundle: project info, entries grouped by type, and artifact refs", InputSchema: schemaObj(map[string]interface{}{
+			"project": map[string]interface{}{"type": "string", "description": "Project name or ID"},
+		})},
 	}
 }
 
@@ -186,6 +196,10 @@ func (r *ToolRegistry) dispatch(ctx context.Context, name string, args map[strin
 		return r.handleListEntryRefs(ctx, args)
 	case "get_entry_graph":
 		return r.handleGetEntryGraph(ctx, args)
+	case "search_by_tags":
+		return r.handleSearchByTags(ctx, args)
+	case "get_context_bundle":
+		return r.handleGetContextBundle(ctx, args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -660,6 +674,162 @@ func (r *ToolRegistry) handleGetEntryGraph(ctx context.Context, args map[string]
 		}
 	}
 	return textResult(b.String()), nil
+}
+
+func (r *ToolRegistry) handleSearchByTags(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	tags := parseStrings(args["tags"])
+	if len(tags) == 0 {
+		return errResult("Error: tags is required"), nil
+	}
+
+	match := strArg(args, "match")
+	matchAll := match != "any"
+
+	typ := strArg(args, "type")
+	project := strArg(args, "project")
+	limit := intArg(args, "limit")
+	if limit <= 0 {
+		limit = 20
+	}
+
+	var typePtr, projectID *string
+	if typ != "" {
+		typePtr = &typ
+	}
+	if project != "" {
+		proj, err := r.projectSvc.GetProject(ctx, project)
+		if err == nil {
+			projectID = &proj.ID
+		} else {
+			projectID = &project
+		}
+	}
+
+	results, err := r.entrySvc.SearchByTags(ctx, tags, matchAll, typePtr, projectID, limit)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+
+	if len(results) == 0 {
+		return textResult("No results found."), nil
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Found %d result(s):\n", len(results)))
+	for _, r := range results {
+		proj := "global"
+		if r.Entry.ProjectID != nil {
+			proj = *r.Entry.ProjectID
+		}
+		b.WriteString(fmt.Sprintf("\n  [%s] %s\n", r.Entry.ID, r.Entry.Title))
+		b.WriteString(fmt.Sprintf("    Type:    %s\n", r.Entry.Type))
+		b.WriteString(fmt.Sprintf("    Summary: %s\n", r.Entry.Summary))
+		b.WriteString(fmt.Sprintf("    Project: %s\n", proj))
+		b.WriteString(fmt.Sprintf("    Status:  %s\n", r.Entry.Status))
+		if len(r.Tags) > 0 {
+			tagNames := make([]string, len(r.Tags))
+			for i, t := range r.Tags {
+				tagNames[i] = t.Name
+			}
+			b.WriteString(fmt.Sprintf("    Tags:    %s\n", strings.Join(tagNames, ", ")))
+		}
+	}
+	return textResult(b.String()), nil
+}
+
+func (r *ToolRegistry) handleGetContextBundle(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	project := strArg(args, "project")
+
+	type bundleProject struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Status      string `json:"status"`
+	}
+
+	type bundleEntry struct {
+		ID      string   `json:"id"`
+		Title   string   `json:"title"`
+		Summary string   `json:"summary"`
+		Status  string   `json:"status"`
+		Tags    []string `json:"tags"`
+	}
+
+	type bundleArtifact struct {
+		ID      string `json:"id"`
+		Title   string `json:"title"`
+		Type    string `json:"type"`
+		Summary string `json:"summary"`
+	}
+
+	type bundle struct {
+		Project   *bundleProject           `json:"project,omitempty"`
+		Entries   map[string][]bundleEntry `json:"entries"`
+		Artifacts []bundleArtifact         `json:"artifacts"`
+	}
+
+	out := bundle{
+		Entries:   make(map[string][]bundleEntry),
+		Artifacts: []bundleArtifact{},
+	}
+
+	var projectID *string
+	if project != "" {
+		proj, err := r.projectSvc.GetProject(ctx, project)
+		if err != nil {
+			return errResult("Error: project not found: " + err.Error()), nil
+		}
+		projectID = &proj.ID
+
+		out.Project = &bundleProject{
+			ID:          proj.ID,
+			Name:        proj.Name,
+			Description: proj.Description,
+			Status:      string(proj.Status),
+		}
+	}
+
+	filter := domain.EntryFilter{}
+	if projectID != nil {
+		filter.ProjectID = projectID
+	}
+	entries, err := r.entrySvc.List(ctx, filter)
+	if err != nil {
+		return errResult("Error: listing entries: " + err.Error()), nil
+	}
+	for _, e := range entries {
+		typ := string(e.Entry.Type)
+		be := bundleEntry{
+			ID:      e.Entry.ID,
+			Title:   e.Entry.Title,
+			Summary: e.Entry.Summary,
+			Status:  string(e.Entry.Status),
+			Tags:    make([]string, 0, len(e.Tags)),
+		}
+		for _, t := range e.Tags {
+			be.Tags = append(be.Tags, t.Name)
+		}
+		out.Entries[typ] = append(out.Entries[typ], be)
+	}
+
+	artifacts, err := r.artifactSvc.ListArtifacts(ctx, projectID)
+	if err == nil {
+		for _, a := range artifacts {
+			out.Artifacts = append(out.Artifacts, bundleArtifact{
+				ID:      a.ID,
+				Title:   a.Title,
+				Type:    string(a.Type),
+				Summary: a.Summary,
+			})
+		}
+	}
+
+	data, err := json.Marshal(out)
+	if err != nil {
+		return errResult("Error: marshal bundle: " + err.Error()), nil
+	}
+
+	return textResult(string(data)), nil
 }
 
 func errResult(text string) *ToolCallResult {

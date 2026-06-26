@@ -46,6 +46,7 @@ Orquesta el dominio y los stores. Cada servicio expone operaciones de alto nivel
 | `GetContextService` | Compila contexto desde DB + aplica truncado |
 | `SessionService` | Crea session entry + links a proyecto/artefactos |
 | `ImportExportService` | Exporta/importa vault completo con resolución de conflictos |
+| `WorkflowRunService` | Ejecuta pipelines: pre-flight, inyección de variables, IO paso a paso |
 
 ### Adapters
 

@@ -1,6 +1,7 @@
--- SkillVault Schema Reference (v2 Hermes) + Sprint 1 entry_refs + handoff + external_ref
+-- SkillVault Schema Reference (v3 Workflow Pipelines) + Sprint 1 entry_refs + handoff + external_ref
 -- This file is the consolidated reference schema.
--- Keep in sync with internal/db/migrations/002_entry_refs_and_handoff.sql.
+-- Keep in sync with internal/db/migrations/002_entry_refs_and_handoff.sql, 003_hermes.sql,
+-- and 004_workflow_pipelines.sql.
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version     INTEGER PRIMARY KEY,
@@ -20,8 +21,10 @@ CREATE TABLE IF NOT EXISTS projects (
 
 CREATE TABLE IF NOT EXISTS entries (
     id              TEXT PRIMARY KEY,
+    name            TEXT,
     title           TEXT NOT NULL,
     slug            TEXT NOT NULL UNIQUE,
+    content         TEXT,
     type            TEXT NOT NULL CHECK(type IN ('prompt','skill','workflow_note','reference','user','feedback','project_state','session','decision','artifact_summary','handoff')),
     summary         TEXT DEFAULT '',
     body_optional   TEXT DEFAULT '',
@@ -42,8 +45,8 @@ CREATE TABLE IF NOT EXISTS tags (
 
 CREATE TABLE IF NOT EXISTS entry_tags (
     entry_id TEXT NOT NULL REFERENCES entries(id),
-    tag_id   TEXT NOT NULL REFERENCES tags(id),
-    PRIMARY KEY (entry_id, tag_id)
+    tag      TEXT NOT NULL,
+    PRIMARY KEY (entry_id, tag)
 );
 
 CREATE TABLE IF NOT EXISTS artifacts (
@@ -80,6 +83,7 @@ CREATE TABLE IF NOT EXISTS workflow_steps (
     instruction     TEXT DEFAULT '',
     required        INTEGER DEFAULT 1,
     expected_output TEXT DEFAULT '',
+    entry_slug      TEXT DEFAULT '',
     UNIQUE(workflow_id, order_index)
 );
 
@@ -99,6 +103,30 @@ CREATE TABLE IF NOT EXISTS series_entries (
     order_index INTEGER NOT NULL,
     PRIMARY KEY (series_id, entry_id),
     UNIQUE(series_id, order_index)
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    id          TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL REFERENCES workflows(id),
+    input       TEXT DEFAULT '',
+    output      TEXT DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending','running','completed','failed')),
+    started_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    finished_at DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS run_steps (
+    id          TEXT PRIMARY KEY,
+    run_id      TEXT NOT NULL REFERENCES runs(id),
+    step_id     INTEGER NOT NULL REFERENCES workflow_steps(id),
+    entry_id    TEXT NOT NULL REFERENCES entries(id),
+    input       TEXT DEFAULT '',
+    output      TEXT DEFAULT '',
+    status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK(status IN ('pending','running','completed','failed')),
+    started_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    finished_at DATETIME
 );
 
 CREATE TABLE IF NOT EXISTS entry_links (
@@ -126,11 +154,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
 
 CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(type);
 CREATE INDEX IF NOT EXISTS idx_entries_project_id ON entries(project_id);
-CREATE INDEX IF NOT EXISTS idx_entries_status ON entries(status);
+CREATE INDEX IF NOT EXISTS idx_entries_status ON entries(status) WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS idx_entries_slug ON entries(slug);
 CREATE INDEX IF NOT EXISTS idx_projects_slug ON projects(slug);
 CREATE INDEX IF NOT EXISTS idx_tags_slug ON tags(slug);
-CREATE INDEX IF NOT EXISTS idx_entry_tags_tag_id ON entry_tags(tag_id);
+CREATE INDEX IF NOT EXISTS idx_entry_tags_tag ON entry_tags(tag);
 CREATE INDEX IF NOT EXISTS idx_artifacts_project_id ON artifacts(project_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_slug ON artifacts(slug);
 CREATE INDEX IF NOT EXISTS idx_workflows_slug ON workflows(slug);
@@ -140,4 +168,6 @@ CREATE INDEX IF NOT EXISTS idx_series_entries_series_order ON series_entries(ser
 CREATE INDEX IF NOT EXISTS idx_series_status ON series(status);
 CREATE INDEX IF NOT EXISTS idx_entry_links_from ON entry_links(from_entry_id);
 CREATE INDEX IF NOT EXISTS idx_entry_links_to ON entry_links(to_entry_id);
-CREATE INDEX IF NOT EXISTS idx_entry_links_active ON entry_links(active);
+CREATE INDEX IF NOT EXISTS idx_entry_links_active ON entry_links(active) WHERE active = 1;
+CREATE INDEX IF NOT EXISTS idx_runs_workflow ON runs(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_run_steps_run ON run_steps(run_id);

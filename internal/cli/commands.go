@@ -36,6 +36,11 @@ func ParseCommand(args []string) (string, error) {
 			return "", fmt.Errorf("render-workflow requires a workflow ID")
 		}
 		return sub, nil
+	case "run":
+		if len(args) < 4 {
+			return "", fmt.Errorf("run requires <workflow> <file>")
+		}
+		return sub, nil
 	case "memory":
 		if len(args) < 3 {
 			return "", fmt.Errorf("memory requires a subcommand (index, reindex, list-external)")
@@ -358,6 +363,39 @@ func ParseExportFlags(args []string) (*ExportFlags, error) {
 // ImportFlags holds parsed import command flags.
 type ImportFlags struct {
 	FilePath string
+}
+
+// RunFlags holds parsed run command flags.
+type RunFlags struct {
+	Workflow string
+	FilePath string
+	SavePath string
+}
+
+// ParseRunFlags parses run-specific flags from args.
+// Usage: skillvault run <workflow> <file> [--save <path>]
+func ParseRunFlags(args []string) (*RunFlags, error) {
+	if len(args) < 4 {
+		return nil, fmt.Errorf("run requires <workflow> <file>")
+	}
+
+	flags := &RunFlags{
+		Workflow: args[2],
+		FilePath: args[3],
+	}
+
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs.StringVar(&flags.SavePath, "save", "", "Save output to file path")
+
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 4 {
+		if err := fs.Parse(args[4:]); err != nil {
+			return nil, fmt.Errorf("parse run flags: %w", err)
+		}
+	}
+
+	return flags, nil
 }
 
 // ParseImportFlags parses import-specific flags from args.

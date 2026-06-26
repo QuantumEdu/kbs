@@ -1,4 +1,4 @@
-# CLI Reference — 18 comandos
+# CLI Reference — 19 comandos
 
 Todas las entradas usan **slugs** como identificadores. Un slug es el título en kebab-case: `"Clean Architecture Review"` → `clean-architecture-review`.
 
@@ -223,6 +223,31 @@ Output:
 - [ ] Review with team
 - [ ] Create tasks
 ```
+
+---
+
+## `run`
+
+Ejecuta un workflow como pipeline paso a paso.
+
+```bash
+skillvault run <workflow-slug> <input-file> [--save output.md]
+skillvault run research-article article.md --save result.md
+skillvault run research-article -                  # leer input desde stdin
+```
+
+| Flag | Requerido | Descripción |
+|------|-----------|-------------|
+| `--save` | ❌ | Guarda el output final en un archivo |
+
+El pipeline ejecuta cada paso del workflow que tenga `entry_slug` configurado:
+1. Resuelve la entry asociada y verifica que esté activa
+2. Inyecta `{{input}}`, `{{previous_output}}`, `{{final_output}}` en el contenido
+3. Muestra el prompt renderizado en stdout
+4. Lee la respuesta del agente desde stdin
+5. Pasa el resultado al siguiente paso como `{{previous_output}}`
+
+Pasos sin `entry_slug` se saltean (checklists renderizables).
 
 ---
 

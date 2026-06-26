@@ -86,6 +86,10 @@ func (s *ArtifactService) GetArtifact(ctx context.Context, id string) (*domain.A
 	return &a, nil
 }
 
+func (s *ArtifactService) ListArtifacts(ctx context.Context, projectID *string) ([]domain.Artifact, error) {
+	return s.artifactStore.List(ctx, projectID)
+}
+
 func (s *ArtifactService) LinkArtifactToEntry(ctx context.Context, artifactID, entryID string) error {
 	_, err := s.artifactStore.Get(ctx, artifactID)
 	if err != nil {

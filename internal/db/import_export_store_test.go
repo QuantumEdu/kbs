@@ -62,8 +62,8 @@ func TestExportRoundTrip(t *testing.T) {
 	if exported.SchemaVersion != 2 {
 		t.Errorf("SchemaVersion = %d, want 2", exported.SchemaVersion)
 	}
-	if exported.AppVersion != "v2-quantum" {
-		t.Errorf("AppVersion = %q, want 'v2-quantum'", exported.AppVersion)
+	if exported.AppVersion != "v3" {
+		t.Errorf("AppVersion = %q, want 'v3'", exported.AppVersion)
 	}
 	if exported.ExportedAt == "" {
 		t.Error("ExportedAt should not be empty")

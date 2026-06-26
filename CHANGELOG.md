@@ -2,6 +2,42 @@
 
 All notable changes to SkillVault Qu@ntum are documented here.
 
+## v3.0.0 — Workflow Pipelines
+
+**2026-06-23**
+
+### Added
+
+- **Workflow Pipelines**: ejecución secuencial de steps con `{{input}}`, `{{previous_output}}`, `{{final_output}}`
+  - Nuevas tablas `runs` + `run_steps` (migración 004)
+  - `WorkflowRun` / `WorkflowRunStep` domain entities
+  - `WorkflowRunStore` CRUD (CreateRun, GetRun, ListRuns, UpdateStepStatus)
+  - `WorkflowRunService.RunPipeline()` — pre-flight, variable injection, IO paso a paso
+- **CLI `run`**: `skillvault run <workflow> <file> [--save output.md]`
+  - Flujo interactivo: stdout prompt → stdin respuesta por step
+  - Truncación de `{{previous_output}}` a 32K
+- **MCP Tools** (2 nuevas):
+  - `search_by_tags(tags, match=all|any)` — búsqueda por tags con intersección/unión
+  - `get_context_bundle(project)` — bundle estructurado con entradas agrupadas por tipo
+- **`entry_slug`** en `workflow_steps` para vincular steps a entries ejecutables
+- **Graceful shutdown**: MCP server responde a SIGTERM/SIGINT, HTTP API drena conexiones
+- **Partial indexes**: `WHERE status='active'` en entries, `WHERE active=1` en entry_links
+- **`go 1.25.0`** — portabilidad con Go toolchain estándar
+
+### Changed
+
+- Version bump: `v2-quantum` → `v3` (main.go, import_export_store.go, mcp/server.go)
+- `schema.sql` sync: `entry_tags` usa `tag TEXT NOT NULL` (no `tag_id`), +runs/run_steps DDL
+- README actualizado: 19 CLI commands, 15 MCP tools, v3 status
+
+### Fixed
+
+- Conflictos de migración: `002_hermes.sql` → `003_hermes.sql` (version duplicada)
+- FTS5 defensivo: verificado sin CGO
+- HTTP API: `Close()` → `Shutdown(ctx)` con 5s deadline
+
+---
+
 ## v2.0.0 — Release
 
 **2026-06-20**

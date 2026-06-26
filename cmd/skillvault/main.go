@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 
 	_ "modernc.org/sqlite"
 
@@ -20,7 +23,7 @@ import (
 	"github.com/quantum-6/skillvault/internal/security"
 )
 
-const version = "v2-quantum"
+const version = "v3"
 
 type vaultServices struct {
 	store          *db.Store
@@ -29,6 +32,7 @@ type vaultServices struct {
 	memoryIndexSvc *app.MemoryIndexService
 	artifactSvc    *app.ArtifactService
 	workflowSvc    *app.WorkflowService
+	workflowRunSvc *app.WorkflowRunService
 	seriesSvc      *app.SeriesService
 	projectSvc     *app.ProjectService
 	contextSvc     *app.ContextService
@@ -147,6 +151,7 @@ func openVault() *vaultServices {
 	exportSvc := app.NewVaultExportService(store.ImportExport, store.Artifacts, store.Entries, store.Projects, store.Workflows)
 	importSvc := app.NewVaultImportService(store.ImportExport, store.Entries, store.Projects, store.Artifacts)
 	saveResultSvc := app.NewSavePromptResultService(store.Entries, store.Projects, store.Artifacts)
+	workflowRunSvc := app.NewWorkflowRunService(store.Workflows, store.WorkflowRuns, store.Entries)
 
 	return &vaultServices{
 		store:          store,
@@ -155,6 +160,7 @@ func openVault() *vaultServices {
 		memoryIndexSvc: memoryIndexSvc,
 		artifactSvc:    artifactSvc,
 		workflowSvc:    workflowSvc,
+		workflowRunSvc: workflowRunSvc,
 		seriesSvc:      seriesSvc,
 		projectSvc:     projectSvc,
 		contextSvc:     contextSvc,
@@ -431,6 +437,49 @@ func runCLI(cmd string) {
 			if s.ExpectedOutput != "" {
 				fmt.Printf("     Expected: %s\n", s.ExpectedOutput)
 			}
+		}
+
+	case "run":
+		flags, err := cli.ParseRunFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		// Read input from file or stdin
+		var input string
+		if flags.FilePath == "-" {
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				cli.PrintError(fmt.Errorf("read stdin: %w", err))
+				os.Exit(1)
+			}
+			input = string(data)
+		} else {
+			data, err := os.ReadFile(flags.FilePath)
+			if err != nil {
+				cli.PrintError(fmt.Errorf("read input file %q: %w", flags.FilePath, err))
+				os.Exit(1)
+			}
+			input = string(data)
+		}
+
+		// Run the pipeline
+		run, output, err := svc.workflowRunSvc.RunPipeline(ctx, flags.Workflow, input, os.Stdin, os.Stdout)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		// Write output to --save path if specified
+		if flags.SavePath != "" {
+			if err := os.WriteFile(flags.SavePath, []byte(output), 0644); err != nil {
+				cli.PrintError(fmt.Errorf("write output to %q: %w", flags.SavePath, err))
+				os.Exit(1)
+			}
+			fmt.Fprintf(os.Stderr, "Run %s completed. Output saved to %s\n", run.ID, flags.SavePath)
+		} else {
+			fmt.Fprintf(os.Stderr, "Run %s completed.\n", run.ID)
 		}
 
 	case "session-wrap":
@@ -746,9 +795,13 @@ func runMCP() {
 	).WithEntryRefService(svc.entryRefSvc)
 	server := mcp.NewServer(reg)
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	fmt.Fprintln(os.Stderr, "SkillVault MCP server starting...")
-	if err := server.Run(context.Background()); err != nil {
+	if err := server.Run(ctx); err != nil && err != context.Canceled {
 		fmt.Fprintf(os.Stderr, "MCP server error: %v\n", err)
 		os.Exit(1)
 	}
+	fmt.Fprintln(os.Stderr, "SkillVault MCP server shut down.")
 }

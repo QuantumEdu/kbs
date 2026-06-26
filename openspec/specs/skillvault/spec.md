@@ -236,28 +236,32 @@ See spec §9 (§9.1–§9.2).
 
 ---
 
-## Capability 12: MCP Tools (10)
+## Capability 12: MCP Tools (12)
 
-See spec §10 (§10.1–§10.10).
+See spec §10 (§10.1–§10.12).
 
 | ID | Requirement | Strength |
 |----|-------------|----------|
-| REQ-MCP-01 | 10 MCP tools: `save_entry`, `search_entries`, `get_entry`, `save_artifact`, `get_context`, `compose_series`, `render_workflow`, `session_wrap`, `archive_entry`, `list_projects` | MUST |
-| REQ-MCP-02 | `save_entry` accepts `title`, `type`, `summary`, `body` (optional), `project` (optional), `tags`, `status`; rejects obvious secrets | MUST |
-| REQ-MCP-03 | `search_entries` accepts `query`, `type` (optional), `project` (optional), `tags`, `include_archived` (default false), `limit` (default 10) | MUST |
-| REQ-MCP-04 | `get_entry` returns entry by ID or slug; includes artifact reference if linked | MUST |
-| REQ-MCP-05 | `save_artifact` accepts `title`, `type`, `content` (optional), `file_path` (optional), `summary`, `project` (optional), `tags`; at least one of `content` or `file_path` required | MUST |
-| REQ-MCP-06 | `get_context` accepts `mode`, `project` (optional), `query` (optional), `workflow` (optional), `include`, `exclude_archived`, `max_chars` | MUST |
-| REQ-MCP-07 | `compose_series` returns ordered entries in a series | MUST |
-| REQ-MCP-08 | `render_workflow` returns workflow steps as agent instructions/checklist | MUST |
-| REQ-MCP-09 | `session_wrap` accepts `project` (optional), `summary`, `decisions`, `pending`, `learnings`, `artifacts` | MUST |
-| REQ-MCP-10 | `archive_entry` sets entry status to `archived` | MUST |
-| REQ-MCP-11 | `list_projects` lists projects and their statuses | MUST |
+| REQ-MCP-01 | 12 MCP tools: `save_entry`, `search_entries`, `get_entry`, `save_artifact`, `get_context`, `compose_series`, `render_workflow`, `session_wrap`, `archive_entry`, `list_projects`, `search_by_tags`, `get_context_bundle` | MUST |
+| REQ-MCP-02 | `save_entry`: `title`, `type`, `summary`, `body`(opt), `project`(opt), `tags`, `status`; rejects secrets | MUST |
+| REQ-MCP-03 | `search_entries`: `query`, `type`(opt), `project`(opt), `tags`, `include_archived`(default false), `limit`(default 10) | MUST |
+| REQ-MCP-04 | `get_entry`: returns entry by ID/slug with artifact ref if linked | MUST |
+| REQ-MCP-05 | `save_artifact`: `title`, `type`, `content`(opt), `file_path`(opt), `summary`, `project`(opt), `tags`; at least one of content/file_path required | MUST |
+| REQ-MCP-06 | `get_context`: `mode`, `project`(opt), `query`(opt), `workflow`(opt), `include`, `exclude_archived`, `max_chars` | MUST |
+| REQ-MCP-07 | `compose_series`: returns ordered entries in a series | MUST |
+| REQ-MCP-08 | `render_workflow`: returns steps as agent instructions/checklist | MUST |
+| REQ-MCP-09 | `session_wrap`: `project`(opt), `summary`, `decisions`, `pending`, `learnings`, `artifacts` | MUST |
+| REQ-MCP-10 | `archive_entry`: sets status to `archived` | MUST |
+| REQ-MCP-11 | `list_projects`: lists projects and statuses | MUST |
+| REQ-MCP-12 | `search_by_tags`: `tags`(array, req), `match`(`all`/`any`, default `all`), `type`(opt), `project`(opt), `limit`(default 20). Returns id, title, type, summary, project, status, tags. Uses REQ-TQR-01/02. | MUST |
+| REQ-MCP-13 | `get_context_bundle`: `project`(opt). Returns structured JSON — project info, entries grouped by type, artifact refs. Cross-refs Hermes Context Layer (Capability 10). | MUST |
 
 **Scenarios**:
-- GIVEN agent calls `search_entries` with query, type, and project filters, WHEN results match, THEN entries returned with id, title, type, summary, project, status, tags, and optional artifact ref.
-- GIVEN agent calls `get_context` with `mode=project, project=myapp`, WHEN context is compiled, THEN agent receives a structured compact context pack identical to the CLI `get-context` output.
-- GIVEN agent calls `save_entry` with content containing an API key, WHEN secret detection triggers, THEN save is rejected and a warning is returned.
+- GIVEN `search_entries` with filters, WHEN results match, THEN entries returned with full metadata.
+- GIVEN `get_context(mode=project, project=myapp)`, WHEN compiled, THEN returns compact context pack matching CLI output.
+- GIVEN `save_entry` with API key content, WHEN secret detected, THEN save rejected with warning.
+- GIVEN entries tagged `["tdd","go"]` and `["tdd"]`, WHEN `search_by_tags(tags=["tdd","go"], match="all")`, THEN only dual-tagged entry returned.
+- GIVEN project X with 2 decisions, 1 session, 1 artifact, WHEN `get_context_bundle(project="X")`, THEN response contains project object, `decisions`(2), `sessions`(1), and artifact refs.
 
 ---
 
@@ -359,6 +363,41 @@ See spec §10.8.
 
 ---
 
+## Capability 18: Code Integrity
+
+The system MUST maintain integrity across build, runtime, and schema.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-CI-01 | `go.mod` MUST use `go 1.24` — code compiles with standard Go 1.24, no 1.26-specific features | MUST |
+| REQ-CI-02 | MCP server MUST shut down within 5s of SIGTERM, draining active calls before exit | MUST |
+| REQ-CI-03 | HTTP server MUST drain connections on `Shutdown(ctx)` with deadline | MUST |
+| REQ-CI-04 | FTS5 MUST work without CGO: defensive import `_ "modernc.org/sqlite/lib/fts5"` | MUST |
+| REQ-CI-05 | Schema MUST be consistent between migration output and `schema.sql` — no drift | MUST |
+
+**Scenarios**:
+- GIVEN active tool calls, WHEN SIGTERM received, THEN in-flight calls complete, exit code 0 within 5s.
+- GIVEN active connections, WHEN shutdown triggered, THEN no new requests accepted, existing drained, clean exit.
+- GIVEN `CGO_ENABLED=0`, WHEN built and search invoked, THEN FTS5 queries execute correctly.
+
+---
+
+## Capability 19: Tag Query Support
+
+Inner DB layer for all/any tag matching via `entry_tags` junction table. Supports Capability 7 (Tag Entity) and 14 (Search FTS5).
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-TQR-01 | `match_all`: entry MUST have ALL specified tags (intersection) | MUST |
+| REQ-TQR-02 | `match_any`: entry MUST have at least one tag (union) | MUST |
+| REQ-TQR-03 | Input tags MUST be normalized (lowercase, trim, deduplicate), consistent with REQ-TAG-03/05 | MUST |
+
+**Scenarios**:
+- GIVEN entries tagged `["go","cli"]`, `["go"]`, `["cli"]`, WHEN `match="all"` with `["go","cli"]`, THEN only dual-tagged entry returned.
+- GIVEN same entries, WHEN `match="any"` with `["go","cli"]`, THEN all three returned.
+
+---
+
 ## Coverage Summary
 
 | Capability | Requirements | Scenarios |
@@ -374,13 +413,15 @@ See spec §10.8.
 | Multi-Status Model | 7 | 3 |
 | Hermes Context Layer (7 Modes) | 11 | 3 |
 | CLI Commands (14) | 11 | 3 |
-| MCP Tools (10) | 11 | 3 |
+| MCP Tools (12) | 13 | 5 |
 | Secret Detection | 7 | 3 |
 | Search (FTS5 with Filters) | 5 | 3 |
 | Workflow Rendering | 4 | 3 |
 | Import/Export | 7 | 3 |
 | Session Wrap | 5 | 3 |
-| **Total** | **115** | **51** |
+| Code Integrity | 5 | 3 |
+| Tag Query Support | 3 | 2 |
+| **Total** | **123** | **56** |
 
 **Happy paths**: entry/project/artifact CRUD, search with filters, context compilation, workflow rendering, session wrap, import/export round-trip.
 **Edge cases**: secret detection rejection, duplicate slug import conflict, archived exclusion in context and search, empty tag rejection, self-referencing link rejection, missing content/file_path on artifact save, max_chars truncation.

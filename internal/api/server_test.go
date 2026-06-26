@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -534,5 +537,105 @@ func TestWorkflowRenderNotFound(t *testing.T) {
 	rec := doReq(mux, "GET", "/workflows/nonexistent", nil)
 	if rec.Code != 404 {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestServerGracefulShutdown(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	// Create a real HTTP server on a random port with a slow handler
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {
+		// Simulate work that takes time — Shutdown must drain this
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(200)
+		w.Write([]byte("pong"))
+	})
+
+	srv.srv = &http.Server{
+		Addr:    addr,
+		Handler: mux,
+	}
+
+	// Start server in background
+	serveDone := make(chan struct{})
+	go func() {
+		defer close(serveDone)
+		_ = srv.srv.Serve(listener)
+	}()
+
+	// Wait for server to be ready
+	baseURL := fmt.Sprintf("http://%s", addr)
+	client := &http.Client{Timeout: 5 * time.Second}
+	var ok bool
+	for i := 0; i < 20; i++ {
+		resp, err := client.Get(baseURL + "/ping")
+		if err == nil && resp.StatusCode == 200 {
+			resp.Body.Close()
+			ok = true
+			break
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !ok {
+		t.Fatal("server did not become ready")
+	}
+
+	// Send a request that's still in-flight when Stop() is called
+	var reqSucceeded bool
+	reqDone := make(chan struct{})
+	go func() {
+		defer close(reqDone)
+		resp, err := client.Get(baseURL + "/ping")
+		if err != nil {
+			t.Logf("in-flight request error: %v", err)
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode == 200 {
+			reqSucceeded = true
+		}
+	}()
+
+	// Give the goroutine time to start the request
+	time.Sleep(50 * time.Millisecond)
+
+	// Graceful shutdown via Stop() — must drain in-flight request
+	if err := srv.Stop(); err != nil {
+		t.Fatalf("Stop() failed: %v", err)
+	}
+
+	// Wait for Serve to return
+	select {
+	case <-serveDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not return after Stop()")
+	}
+
+	// In-flight request MUST complete (drained, not killed)
+	select {
+	case <-reqDone:
+	case <-time.After(1 * time.Second):
+		t.Error("in-flight request was not drained by Stop()")
+	}
+	if !reqSucceeded {
+		t.Error("Stop() must drain in-flight requests; use Shutdown(ctx) not Close()")
+	}
+
+	// Verify server is no longer accepting connections
+	_, err = client.Get(baseURL + "/ping")
+	if err == nil {
+		t.Error("expected connection to be refused after shutdown")
 	}
 }

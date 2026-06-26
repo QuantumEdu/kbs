@@ -169,6 +169,14 @@ func (s *EntryService) Archive(ctx context.Context, id string) error {
 	return s.store.Archive(ctx, id)
 }
 
+func (s *EntryService) SearchByTags(ctx context.Context, tags []string, matchAll bool, typePtr, projectPtr *string, limit int) ([]domain.EntrySearchResult, error) {
+	tags = domain.NormalizeTags(tags)
+	if len(tags) == 0 {
+		return nil, fmt.Errorf("at least one tag is required")
+	}
+	return s.store.SearchByTags(ctx, tags, matchAll, typePtr, projectPtr, limit)
+}
+
 func (s *EntryService) ArchiveEntry(ctx context.Context, id string) error {
 	return s.store.Archive(ctx, id)
 }

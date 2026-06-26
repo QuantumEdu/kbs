@@ -14,10 +14,10 @@ Store, search, and retrieve prompts, skills, workflows, decisions, project memor
 ```
 
 **Codename:** Qu@ntum  
-**Status:** v2 — Production-ready alpha  
+**Status:** v3 — Pipeline execution  
 **Binary size:** ~7 MB  
 **Dependencies:** Zero frameworks. Only `modernc.org/sqlite`.  
-**Language:** Go 1.26+
+**Language:** Go 1.25+
 
 ---
 
@@ -26,7 +26,7 @@ Store, search, and retrieve prompts, skills, workflows, decisions, project memor
 | Guide | Description |
 |-------|-------------|
 | [`docs/quickstart.md`](docs/quickstart.md) | Install, init, and first 6 steps in 5 minutes |
-| [`docs/commands.md`](docs/commands.md) | Full CLI reference — all 14 commands with flags |
+| [`docs/commands.md`](docs/commands.md) | Full CLI reference — all 19 commands with flags |
 | [`docs/mcp.md`](docs/mcp.md) | MCP server setup for Claude Code / OpenCode |
 | [`docs/tutorial.md`](docs/tutorial.md) | Real-world workflow: project → skills → context → session |
 | [`docs/architecture.md`](docs/architecture.md) | Clean Architecture deep-dive, data flows, design decisions |
@@ -156,7 +156,7 @@ cmd/skillvault/
 ├── internal/cli/         # 18 CLI commands (stdlib, no Cobra)
 ├── internal/mcp/         # 13 MCP tools over stdio JSON-RPC 2.0
 ├── internal/api/         # HTTP API (local only)
-├── internal/app/         # Use cases: save, search, context, session, refs, memory
+├── internal/app/         # Use cases: save, search, context, session, refs, memory, pipeline
 ├── internal/domain/      # Pure entities + validators
 ├── internal/db/          # SQLite + FTS5 (8 stores + 2 migrations)
 ├── internal/files/       # Artifact filesystem (objects/YYYY/MM/)
@@ -183,7 +183,7 @@ cmd/skillvault/
 
 ---
 
-## CLI Commands (18)
+## CLI Commands (19)
 
 | Command | Description | Example |
 |---------|-------------|---------|
@@ -198,6 +198,7 @@ cmd/skillvault/
 | `archive` | Archive an entry | `skillvault archive clean-architecture-review` |
 | `add-workflow` | Create a workflow (JSON file) | `skillvault add-workflow workflow.json` |
 | `render-workflow` | Render workflow as checklist | `skillvault render-workflow spec-plan-task` |
+| `run` | Execute a workflow pipeline step by step | `skillvault run research-article article.md --save output.md` |
 | `session-wrap` | Save session with decisions | `skillvault session-wrap --project myapp --summary "..." --decisions "d1,d2"` |
 | `graph` | Visualize entry graph | `skillvault graph --entry e1 --format mermaid` |
 | `entry ref add/list/remove` | Manage graph edges | `skillvault entry ref add e1 e2 depends_on` |
@@ -207,7 +208,7 @@ cmd/skillvault/
 
 ---
 
-## MCP Tools (13)
+## MCP Tools (15)
 
 For AI agents (Claude Code, OpenCode, etc.):
 
@@ -226,6 +227,8 @@ For AI agents (Claude Code, OpenCode, etc.):
 | `save_entry_ref` | Create/update a graph edge between two entries (with cycle detection) |
 | `list_entry_refs` | List graph edges with filters |
 | `get_entry_graph` | Traverse entry graph from a starting entry |
+| `search_by_tags` | Search entries by tag intersection (all) or union (any) |
+| `get_context_bundle` | Get structured project context bundle with entries grouped by type |
 
 ### MCP Setup (Claude Code / OpenCode)
 
@@ -366,6 +369,7 @@ SkillVault → creates session entry + optional artifact
 | Hybrid DB+disk | ❌ | ❌ | ❌ | ✅ |
 | Secret detection | ❌ | ❌ | ❌ | ✅ |
 | Workflow checklists | ❌ | ❌ | ❌ | ✅ |
+| Workflow pipelines | ❌ | ❌ | ❌ | ✅ (v3) |
 | Single 10MB binary | ❌ | ❌ | ❌ | ✅ |
 | Zero cloud dependency | ✅ | ❌ | ❌ | ✅ |
 | Portable (any OS) | ✅ | ❌ | ❌ | ✅ |
@@ -406,7 +410,8 @@ Test pyramid:
 | Phase | Status |
 |-------|--------|
 | v1-alpha (SQLite vault) | ✅ Archived |
-| v2 Qu@ntum (Hybrid + Context) | ✅ Active |
+| v2 Qu@ntum (Hybrid + Context) | ✅ Archived |
+| v3 Qu@ntum (Workflow Pipelines) | ✅ Active |
 | Cloud sync | 🔲 Future |
 | TUI | 🔲 Future |
 | Vector search | 🔲 Future |

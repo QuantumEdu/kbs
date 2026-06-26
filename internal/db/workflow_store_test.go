@@ -171,3 +171,71 @@ func TestSaveWorkflowReplacesSteps(t *testing.T) {
 		t.Errorf("Instruction = %q, want 'New step'", got[0].Instruction)
 	}
 }
+
+func TestWorkflowStepsEntrySlug(t *testing.T) {
+	_, wstore, cleanup := setupWorkflowStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	w := domain.Workflow{ID: "wf-es", Name: "Entry Slug WF", Slug: "entry-slug-wf", Status: domain.StatusActive}
+	steps := []domain.WorkflowStep{
+		{ID: "es-1", WorkflowID: "wf-es", OrderIndex: 1, Title: "Executable", Instruction: "This one runs", EntrySlug: "summarize"},
+		{ID: "es-2", WorkflowID: "wf-es", OrderIndex: 2, Title: "Renderable", Instruction: "This one is checkbox only", EntrySlug: ""},
+	}
+
+	if err := wstore.Save(ctx, w, steps); err != nil {
+		t.Fatalf("Save workflow failed: %v", err)
+	}
+
+	gotSteps, err := wstore.GetSteps(ctx, "wf-es")
+	if err != nil {
+		t.Fatalf("GetSteps failed: %v", err)
+	}
+	if len(gotSteps) != 2 {
+		t.Fatalf("expected 2 steps, got %d", len(gotSteps))
+	}
+
+	// Step 1 has entry_slug set
+	if gotSteps[0].EntrySlug != "summarize" {
+		t.Errorf("step 0 EntrySlug = %q, want 'summarize'", gotSteps[0].EntrySlug)
+	}
+	if gotSteps[0].Title != "Executable" {
+		t.Errorf("step 0 Title = %q, want 'Executable'", gotSteps[0].Title)
+	}
+
+	// Step 2 has entry_slug empty
+	if gotSteps[1].EntrySlug != "" {
+		t.Errorf("step 1 EntrySlug = %q, want ''", gotSteps[1].EntrySlug)
+	}
+	if gotSteps[1].Title != "Renderable" {
+		t.Errorf("step 1 Title = %q, want 'Renderable'", gotSteps[1].Title)
+	}
+}
+
+func TestWorkflowStepsEntrySlugDefault(t *testing.T) {
+	_, wstore, cleanup := setupWorkflowStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	w := domain.Workflow{ID: "wf-def", Name: "Default Slug WF", Slug: "default-slug-wf", Status: domain.StatusActive}
+	steps := []domain.WorkflowStep{
+		{ID: "def-1", WorkflowID: "wf-def", OrderIndex: 1, Title: "Only Render", Instruction: "Just render me"},
+	}
+
+	if err := wstore.Save(ctx, w, steps); err != nil {
+		t.Fatalf("Save workflow failed: %v", err)
+	}
+
+	gotSteps, err := wstore.GetSteps(ctx, "wf-def")
+	if err != nil {
+		t.Fatalf("GetSteps failed: %v", err)
+	}
+	if len(gotSteps) != 1 {
+		t.Fatalf("expected 1 step, got %d", len(gotSteps))
+	}
+
+	// When entry_slug is not set, it should come back as empty
+	if gotSteps[0].EntrySlug != "" {
+		t.Errorf("step EntrySlug = %q, want '' (empty when not set)", gotSteps[0].EntrySlug)
+	}
+}

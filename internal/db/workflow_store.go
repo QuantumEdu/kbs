@@ -46,9 +46,9 @@ func (s *sqliteWorkflowStore) Save(ctx context.Context, w domain.Workflow, steps
 			required = 1
 		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO workflow_steps (workflow_id, order_index, title, instruction, required, expected_output)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
-			w.ID, step.OrderIndex, step.Title, step.Instruction, required, step.ExpectedOutput)
+			`INSERT INTO workflow_steps (workflow_id, order_index, title, instruction, required, expected_output, entry_slug)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			w.ID, step.OrderIndex, step.Title, step.Instruction, required, step.ExpectedOutput, step.EntrySlug)
 		if err != nil {
 			return fmt.Errorf("insert step %d: %w", step.OrderIndex, err)
 		}
@@ -82,7 +82,7 @@ func (s *sqliteWorkflowStore) Get(ctx context.Context, id string) (domain.Workfl
 
 func (s *sqliteWorkflowStore) GetSteps(ctx context.Context, workflowID string) ([]domain.WorkflowStep, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, workflow_id, order_index, title, instruction, required, COALESCE(expected_output,'')
+		SELECT id, workflow_id, order_index, title, instruction, required, COALESCE(expected_output,''), COALESCE(entry_slug,'')
 		FROM workflow_steps WHERE workflow_id = ? ORDER BY order_index
 	`, workflowID)
 	if err != nil {
@@ -96,7 +96,7 @@ func (s *sqliteWorkflowStore) GetSteps(ctx context.Context, workflowID string) (
 		var stepID int64
 		var required int
 		if err := rows.Scan(&stepID, &step.WorkflowID, &step.OrderIndex,
-			&step.Title, &step.Instruction, &required, &step.ExpectedOutput); err != nil {
+			&step.Title, &step.Instruction, &required, &step.ExpectedOutput, &step.EntrySlug); err != nil {
 			return nil, fmt.Errorf("scan step: %w", err)
 		}
 		step.ID = fmt.Sprintf("%d", stepID)

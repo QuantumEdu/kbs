@@ -13,7 +13,7 @@ import (
 func (s *sqliteImportExportStore) ExportAll(ctx context.Context) (domain.VaultExport, error) {
 	export := domain.VaultExport{
 		SchemaVersion: 2,
-		AppVersion:    "v2-quantum",
+		AppVersion:    "v3",
 		ExportedAt:    time.Now().UTC().Format(time.RFC3339),
 		Source:        "skillvault",
 	}

@@ -225,7 +225,7 @@ CREATE INDEX IF NOT EXISTS idx_workflow_steps_entry_step ON workflow_steps(entry
 CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow_order ON workflow_steps(workflow_id, order_index);
 CREATE INDEX IF NOT EXISTS idx_entry_links_from ON entry_links(from_entry_id);
 CREATE INDEX IF NOT EXISTS idx_entry_links_to ON entry_links(to_entry_id);
-CREATE INDEX IF NOT EXISTS idx_entry_links_active ON entry_links(active);
+CREATE INDEX IF NOT EXISTS idx_entry_links_active ON entry_links(active) WHERE active = 1;
 CREATE INDEX IF NOT EXISTS idx_tags_slug ON tags(slug);
 CREATE INDEX IF NOT EXISTS idx_artifacts_project_id ON artifacts(project_id);
 CREATE INDEX IF NOT EXISTS idx_artifacts_slug ON artifacts(slug);

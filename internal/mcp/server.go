@@ -71,7 +71,7 @@ func (s *Server) handleInitialize(req *JSONRPCRequest) JSONRPCResponse {
 		"protocolVersion": "2024-11-05",
 		"serverInfo": map[string]string{
 			"name":    "skillvault",
-			"version": "v1-alpha",
+			"version": "v3",
 		},
 		"capabilities": map[string]interface{}{
 			"tools": map[string]bool{},

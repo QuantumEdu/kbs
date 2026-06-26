@@ -60,7 +60,7 @@ func TestServerInitialize(t *testing.T) {
 	}
 }
 
-func TestToolsListReturns13Tools(t *testing.T) {
+func TestToolsListReturns15Tools(t *testing.T) {
 	reg := NewToolRegistry(nil)
 	s := NewServer(reg)
 	ctx := context.Background()
@@ -88,13 +88,13 @@ func TestToolsListReturns13Tools(t *testing.T) {
 		if !ok {
 			t.Fatalf("tools is not an array: %T", toolsRaw)
 		}
-		if len(tools) != 13 {
-			t.Errorf("expected 13 tools, got %d", len(tools))
+		if len(tools) != 15 {
+			t.Errorf("expected 15 tools, got %d", len(tools))
 		}
 		return
 	}
-	if len(interfaces) != 13 {
-		t.Errorf("expected 13 tools, got %d", len(interfaces))
+	if len(interfaces) != 15 {
+		t.Errorf("expected 15 tools, got %d", len(interfaces))
 	}
 }
 
@@ -295,6 +295,8 @@ func TestToolNamesAreCorrect(t *testing.T) {
 		"save_entry_ref",
 		"list_entry_refs",
 		"get_entry_graph",
+		"search_by_tags",
+		"get_context_bundle",
 	}
 
 	if len(names) != len(expected) {
@@ -673,6 +675,213 @@ func TestGetEntryGraphMCP(t *testing.T) {
 	}
 	if !strings.Contains(result.Content[0].Text, "cycle_detected") {
 		t.Errorf("expected 'cycle_detected' in error, got: %s", result.Content[0].Text)
+	}
+}
+
+func TestSearchByTagsMCP(t *testing.T) {
+	reg, projectSvc, cleanup := setupMCPServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "testproj", Description: "Test project"})
+
+	// Seed entries with specific tags
+	reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "Dual Tag Entry",
+		"type":    "skill",
+		"summary": "Has go and cli tags",
+		"project": "testproj",
+		"tags":    []interface{}{"go", "cli"},
+	})
+	reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "Go Only Entry",
+		"type":    "skill",
+		"summary": "Only go tag",
+		"project": "testproj",
+		"tags":    []interface{}{"go"},
+	})
+	reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "CLI Only Entry",
+		"type":    "skill",
+		"summary": "Only cli tag",
+		"project": "testproj",
+		"tags":    []interface{}{"cli"},
+	})
+
+	// Test all match (intersection)
+	result, err := reg.Call(ctx, "search_by_tags", map[string]interface{}{
+		"tags":  []interface{}{"go", "cli"},
+		"match": "all",
+		"limit": float64(20),
+	})
+	if err != nil {
+		t.Fatalf("search_by_tags (all) failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("search_by_tags (all) returned error: %s", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, "Dual Tag Entry") {
+		t.Errorf("all-match should contain Dual Tag Entry, got: %s", result.Content[0].Text)
+	}
+	if strings.Contains(result.Content[0].Text, "Go Only Entry") {
+		t.Error("all-match should NOT contain Go Only Entry")
+	}
+	if strings.Contains(result.Content[0].Text, "CLI Only Entry") {
+		t.Error("all-match should NOT contain CLI Only Entry")
+	}
+
+	// Test any match (union)
+	result, err = reg.Call(ctx, "search_by_tags", map[string]interface{}{
+		"tags":  []interface{}{"go", "cli"},
+		"match": "any",
+		"limit": float64(20),
+	})
+	if err != nil {
+		t.Fatalf("search_by_tags (any) failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("search_by_tags (any) returned error: %s", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, "Dual Tag Entry") {
+		t.Error("any-match should contain Dual Tag Entry")
+	}
+	if !strings.Contains(result.Content[0].Text, "Go Only Entry") {
+		t.Error("any-match should contain Go Only Entry")
+	}
+	if !strings.Contains(result.Content[0].Text, "CLI Only Entry") {
+		t.Error("any-match should contain CLI Only Entry")
+	}
+	if !strings.Contains(result.Content[0].Text, "Found 3") {
+		t.Errorf("any-match should show 3 results, got: %s", result.Content[0].Text)
+	}
+}
+
+func TestGetContextBundleMCP(t *testing.T) {
+	reg, projectSvc, cleanup := setupMCPServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	proj, err := projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "bundleproj", Description: "Bundle test project"})
+	if err != nil {
+		t.Fatalf("SaveProject failed: %v", err)
+	}
+
+	// Seed entries of different types
+	reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "Use chi router",
+		"type":    "decision",
+		"summary": "Use chi for routing",
+		"project": proj.ID,
+	})
+	reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "Session wrap",
+		"type":    "session",
+		"summary": "End of session",
+		"project": proj.ID,
+	})
+	reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "Go style guide",
+		"type":    "reference",
+		"summary": "Go style conventions",
+		"project": proj.ID,
+	})
+
+	// Save an artifact
+	reg.Call(ctx, "save_artifact", map[string]interface{}{
+		"title":   "Bundle Artifact",
+		"type":    "markdown",
+		"content": "Artifact content",
+		"summary": "Test artifact",
+		"project": proj.ID,
+	})
+
+	result, err := reg.Call(ctx, "get_context_bundle", map[string]interface{}{
+		"project": proj.ID,
+	})
+	if err != nil {
+		t.Fatalf("get_context_bundle failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("get_context_bundle returned error: %s", result.Content[0].Text)
+	}
+
+	// Verify it's valid JSON
+	raw := result.Content[0].Text
+	if !strings.Contains(raw, "{") || !strings.Contains(raw, "}") {
+		t.Fatalf("get_context_bundle did not return JSON: %s", raw)
+	}
+
+	// Verify project info
+	if !strings.Contains(raw, proj.ID) {
+		t.Error("bundle should contain project ID")
+	}
+	if !strings.Contains(raw, "bundleproj") {
+		t.Error("bundle should contain project name")
+	}
+
+	// Verify entries by type (decision, session, reference)
+	if !strings.Contains(raw, "decision") {
+		t.Error("bundle should contain decision entries")
+	}
+	if !strings.Contains(raw, "session") {
+		t.Error("bundle should contain session entries")
+	}
+	if !strings.Contains(raw, "reference") {
+		t.Error("bundle should contain reference entries")
+	}
+
+	// Verify artifact refs
+	if !strings.Contains(raw, "Bundle Artifact") {
+		t.Error("bundle should contain artifact references")
+	}
+}
+
+func TestSearchByTagsRequiresTags(t *testing.T) {
+	reg, _, cleanup := setupMCPServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	result, err := reg.Call(ctx, "search_by_tags", map[string]interface{}{
+		"tags": []interface{}{},
+	})
+	if err != nil {
+		t.Fatalf("search_by_tags should not return dispatch error: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for empty tags")
+	}
+	if !strings.Contains(result.Content[0].Text, "tags is required") {
+		t.Errorf("expected 'tags is required', got: %s", result.Content[0].Text)
+	}
+}
+
+func TestGetContextBundleWithoutProject(t *testing.T) {
+	reg, projectSvc, cleanup := setupMCPServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "noproj"})
+
+	reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "Global decision",
+		"type":    "decision",
+		"summary": "A global decision",
+	})
+
+	result, err := reg.Call(ctx, "get_context_bundle", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("get_context_bundle (no project) failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("get_context_bundle (no project) returned error: %s", result.Content[0].Text)
+	}
+
+	raw := result.Content[0].Text
+	if !strings.Contains(raw, "decision") {
+		t.Error("bundle should contain decision entries even without project")
+	}
+	if !strings.Contains(raw, "Global decision") {
+		t.Error("bundle should contain the global entry")
 	}
 }
 

@@ -102,6 +102,22 @@ skillvault session-wrap \
   --pending "Agregar refresh token rotation"
 ```
 
+### 7. Ejecutá un pipeline de workflow
+
+```bash
+# Creá un workflow con entry_slug en los pasos
+skillvault add-workflow pipeline.json
+
+# Ejecutalo: cada paso renderiza el prompt, espera input del agente
+skillvault run research-article article.md --save resultado.md
+```
+
+Cada paso del pipeline:
+1. Toma la entry vinculada y le inyecta `{{input}}` y `{{previous_output}}`
+2. Muestra el prompt por stdout
+3. Espera que el agente responda por stdin
+4. Pasa la respuesta al siguiente paso
+
 ## Qué sigue?
 
 - [`docs/commands.md`](commands.md) — referencia completa de comandos

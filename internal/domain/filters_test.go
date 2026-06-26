@@ -140,7 +140,7 @@ func TestSeriesRefStruct(t *testing.T) {
 func TestVaultExportStruct(t *testing.T) {
 	e := VaultExport{
 		SchemaVersion: 2,
-		AppVersion:    "v2-quantum",
+		AppVersion:    "v3",
 		ExportedAt:    "2026-06-10T18:30:00Z",
 		Source:        "skillvault",
 		Data:          VaultData{},
@@ -149,23 +149,25 @@ func TestVaultExportStruct(t *testing.T) {
 	if e.SchemaVersion != 2 {
 		t.Errorf("SchemaVersion = %d, want 2", e.SchemaVersion)
 	}
-	if e.AppVersion != "v2-quantum" {
-		t.Errorf("AppVersion = %q, want 'v2-quantum'", e.AppVersion)
+	if e.AppVersion != "v3" {
+		t.Errorf("AppVersion = %q, want 'v3'", e.AppVersion)
 	}
 }
 
 func TestVaultDataStruct(t *testing.T) {
 	d := VaultData{
-		Projects:      []Project{},
-		Entries:       []Entry{},
-		EntryTags:     []EntryTag{},
-		Tags:          []Tag{},
-		Series:        []Series{},
-		SeriesEntries: []SeriesEntry{},
-		Workflows:     []Workflow{},
-		WorkflowSteps: []WorkflowStep{},
-		Artifacts:     []Artifact{},
-		EntryLinks:    []EntryLink{},
+		Projects:       []Project{},
+		Entries:        []Entry{},
+		EntryTags:      []EntryTag{},
+		Tags:           []Tag{},
+		Series:         []Series{},
+		SeriesEntries:  []SeriesEntry{},
+		Workflows:      []Workflow{},
+		WorkflowSteps:  []WorkflowStep{},
+		WorkflowRuns:   []WorkflowRun{},
+		WorkflowRunSteps: []WorkflowRunStep{},
+		Artifacts:      []Artifact{},
+		EntryLinks:     []EntryLink{},
 	}
 
 	if d.Projects == nil {
@@ -173,6 +175,31 @@ func TestVaultDataStruct(t *testing.T) {
 	}
 	if d.Entries == nil {
 		t.Errorf("Entries should not be nil")
+	}
+}
+
+func TestVaultDataPipelineFields(t *testing.T) {
+	d := VaultData{
+		WorkflowRuns: []WorkflowRun{
+			{ID: "run-001", WorkflowID: "wf-abc", Status: RunStatusCompleted, Input: "in", Output: "out"},
+		},
+		WorkflowRunSteps: []WorkflowRunStep{
+			{ID: "rst-001", RunID: "run-001", StepID: 1, EntryID: "entry-abc", Status: RunStatusCompleted, Input: "in", Output: "out"},
+		},
+	}
+
+	if len(d.WorkflowRuns) != 1 {
+		t.Errorf("WorkflowRuns length = %d, want 1", len(d.WorkflowRuns))
+	}
+	if d.WorkflowRuns[0].ID != "run-001" {
+		t.Errorf("WorkflowRuns[0].ID = %q, want 'run-001'", d.WorkflowRuns[0].ID)
+	}
+
+	if len(d.WorkflowRunSteps) != 1 {
+		t.Errorf("WorkflowRunSteps length = %d, want 1", len(d.WorkflowRunSteps))
+	}
+	if d.WorkflowRunSteps[0].ID != "rst-001" {
+		t.Errorf("WorkflowRunSteps[0].ID = %q, want 'rst-001'", d.WorkflowRunSteps[0].ID)
 	}
 }
 

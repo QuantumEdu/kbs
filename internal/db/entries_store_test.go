@@ -194,6 +194,87 @@ func TestListEntries(t *testing.T) {
 	}
 }
 
+func TestSearchByTags(t *testing.T) {
+	store, cleanup := setupEntryStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Seed: entry with ["go","cli"], one with ["go"], one with ["cli"]
+	entries := []struct {
+		entry domain.Entry
+		tags  []string
+	}{
+		{domain.Entry{ID: "dual", Title: "Dual", Slug: "dual", Type: domain.EntryTypeSkill, BodyOptional: "D", Status: domain.StatusActive}, []string{"go", "cli"}},
+		{domain.Entry{ID: "gotag", Title: "Go Only", Slug: "gotag", Type: domain.EntryTypeSkill, BodyOptional: "G", Status: domain.StatusActive}, []string{"go"}},
+		{domain.Entry{ID: "clitag", Title: "CLI Only", Slug: "clitag", Type: domain.EntryTypeSkill, BodyOptional: "C", Status: domain.StatusActive}, []string{"cli"}},
+	}
+	for _, e := range entries {
+		if err := store.Save(ctx, e.entry, e.tags); err != nil {
+			t.Fatalf("Save %s failed: %v", e.entry.ID, err)
+		}
+	}
+
+	tests := []struct {
+		name     string
+		tags     []string
+		matchAll bool
+		want     int
+	}{
+		{"all-match intersection", []string{"go", "cli"}, true, 1},
+		{"any-match union", []string{"go", "cli"}, false, 3},
+		{"single tag all", []string{"go"}, true, 2},
+		{"single tag any", []string{"go"}, false, 2},
+		{"no match", []string{"python"}, false, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, err := store.SearchByTags(ctx, tt.tags, tt.matchAll, nil, nil, 20)
+			if err != nil {
+				t.Fatalf("SearchByTags failed: %v", err)
+			}
+			if len(results) != tt.want {
+				t.Errorf("SearchByTags(%s, matchAll=%v) = %d results, want %d", tt.tags, tt.matchAll, len(results), tt.want)
+			}
+		})
+	}
+
+	// Verify intersection result has both tags
+	t.Run("intersection has both tags", func(t *testing.T) {
+		results, _ := store.SearchByTags(ctx, []string{"go", "cli"}, true, nil, nil, 20)
+		if len(results) != 1 {
+			t.Fatalf("expected 1 intersection result, got %d", len(results))
+		}
+		if results[0].Entry.ID != "dual" {
+			t.Errorf("expected 'dual', got %s", results[0].Entry.ID)
+		}
+		tagNames := make(map[string]bool)
+		for _, tag := range results[0].Tags {
+			tagNames[tag.Name] = true
+		}
+		if !tagNames["go"] || !tagNames["cli"] {
+			t.Errorf("intersection result missing tags: %v", results[0].Tags)
+		}
+	})
+
+	// Verify filter by type
+	t.Run("filter by type", func(t *testing.T) {
+		// Add a prompt entry with tag "go"
+		promptEntry := domain.Entry{ID: "go-prompt", Title: "Go Prompt", Slug: "go-prompt", Type: domain.EntryTypePrompt, BodyOptional: "P", Status: domain.StatusActive}
+		if err := store.Save(ctx, promptEntry, []string{"go"}); err != nil {
+			t.Fatalf("Save prompt entry failed: %v", err)
+		}
+		skillType := "skill"
+		results, err := store.SearchByTags(ctx, []string{"go"}, true, &skillType, nil, 20)
+		if err != nil {
+			t.Fatalf("SearchByTags by type failed: %v", err)
+		}
+		if len(results) != 2 {
+			t.Errorf("expected 2 skill+go results, got %d", len(results))
+		}
+	})
+}
+
 func TestSaveEntryRemovesOldTags(t *testing.T) {
 	store, cleanup := setupEntryStore(t)
 	defer cleanup()

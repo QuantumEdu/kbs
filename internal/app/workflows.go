@@ -14,6 +14,7 @@ type SaveWorkflowStep struct {
 	Instruction    string
 	Required       bool
 	ExpectedOutput string
+	EntrySlug      string
 }
 
 type SaveWorkflowInput struct {
@@ -64,6 +65,7 @@ func (s *WorkflowService) SaveWorkflow(ctx context.Context, input SaveWorkflowIn
 			Instruction:    s.Instruction,
 			Required:       s.Required,
 			ExpectedOutput: s.ExpectedOutput,
+			EntrySlug:      s.EntrySlug,
 		})
 	}
 

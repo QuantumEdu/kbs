@@ -43,6 +43,9 @@ func TestNewStoreCreation(t *testing.T) {
 	if s.Workflows == nil {
 		t.Error("Workflows store is nil")
 	}
+	if s.WorkflowRuns == nil {
+		t.Error("WorkflowRuns store is nil")
+	}
 	if s.Series == nil {
 		t.Error("Series store is nil")
 	}
@@ -71,6 +74,7 @@ func TestStoreInterfacesCompile(t *testing.T) {
 	var _ ProjectStore = (*sqliteProjectStore)(nil)
 	var _ SeriesStore = (*sqliteSeriesStore)(nil)
 	var _ WorkflowStore = (*sqliteWorkflowStore)(nil)
+	var _ WorkflowRunStore = (*sqliteWorkflowRunStore)(nil)
 	var _ ArtifactStore = (*sqliteArtifactStore)(nil)
 	var _ TagStore = (*sqliteTagStore)(nil)
 	var _ EntryLinkStore = (*sqliteEntryLinkStore)(nil)

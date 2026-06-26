@@ -11,6 +11,7 @@ type EntryStore interface {
 	Save(ctx context.Context, entry domain.Entry, tags []string) error
 	Get(ctx context.Context, id string, includeArchived bool) (domain.EntryResult, error)
 	Search(ctx context.Context, q domain.SearchQuery) ([]domain.EntrySearchResult, error)
+	SearchByTags(ctx context.Context, tags []string, matchAll bool, typePtr, projectPtr *string, limit int) ([]domain.EntrySearchResult, error)
 	Archive(ctx context.Context, id string) error
 	List(ctx context.Context, filter domain.EntryFilter) ([]domain.EntryListResult, error)
 }
@@ -27,6 +28,14 @@ type WorkflowStore interface {
 	GetSteps(ctx context.Context, workflowID string) ([]domain.WorkflowStep, error)
 	Render(ctx context.Context, id string) ([]domain.WorkflowStep, error)
 	List(ctx context.Context, includeArchived bool) ([]domain.Workflow, error)
+}
+
+type WorkflowRunStore interface {
+	CreateRun(ctx context.Context, run domain.WorkflowRun, steps []domain.WorkflowRunStep) error
+	GetRun(ctx context.Context, id string) (domain.WorkflowRun, []domain.WorkflowRunStep, error)
+	ListRuns(ctx context.Context, workflowID string, limit int) ([]domain.WorkflowRun, error)
+	UpdateStepStatus(ctx context.Context, stepID string, status domain.RunStatus, output string) error
+	UpdateRunStatus(ctx context.Context, runID string, status domain.RunStatus, output string) error
 }
 
 type SeriesStore interface {
@@ -86,6 +95,7 @@ type Store struct {
 	Entries      EntryStore
 	Artifacts    ArtifactStore
 	Workflows    WorkflowStore
+	WorkflowRuns WorkflowRunStore
 	Series       SeriesStore
 	Tags         TagStore
 	EntryLinks   EntryLinkStore
@@ -101,6 +111,7 @@ func NewStore(db *sql.DB) *Store {
 		Entries:      &sqliteEntryStore{db: db},
 		Artifacts:    &sqliteArtifactStore{db: db},
 		Workflows:    &sqliteWorkflowStore{db: db},
+		WorkflowRuns: &sqliteWorkflowRunStore{db: db},
 		Series:       &sqliteSeriesStore{db: db},
 		Tags:         &sqliteTagStore{db: db},
 		EntryLinks:   &sqliteEntryLinkStore{db: db},
@@ -125,6 +136,7 @@ func (s *Store) Close() error {
 type sqliteEntryStore struct{ db *sql.DB }
 type sqliteArtifactStore struct{ db *sql.DB }
 type sqliteWorkflowStore struct{ db *sql.DB }
+type sqliteWorkflowRunStore struct{ db *sql.DB }
 type sqliteSeriesStore struct{ db *sql.DB }
 type sqliteTagStore struct{ db *sql.DB }
 type sqliteEntryLinkStore struct{ db *sql.DB }
