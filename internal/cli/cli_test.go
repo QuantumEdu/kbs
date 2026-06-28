@@ -61,6 +61,9 @@ func TestParseSubcommand(t *testing.T) {
 		{"sync no subcommand", []string{"skillvault", "sync"}, "", true},
 		{"sync invalid subcommand", []string{"skillvault", "sync", "unknown"}, "", true},
 
+		// TUI command
+		{"tui", []string{"skillvault", "tui"}, "tui", false},
+
 		// Errors
 		{"no args", []string{"skillvault"}, "", true},
 		{"invalid subcommand", []string{"skillvault", "invalid"}, "", true},
