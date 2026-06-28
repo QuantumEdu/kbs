@@ -31,6 +31,7 @@ type EntryService struct {
 	store         db.EntryStore
 	projectStore  db.ProjectStore
 	artifactStore db.ArtifactStore
+	vector        *VectorService
 }
 
 func NewEntryService(store db.EntryStore, projectStore db.ProjectStore, artifactStore db.ArtifactStore) *EntryService {
@@ -39,6 +40,12 @@ func NewEntryService(store db.EntryStore, projectStore db.ProjectStore, artifact
 		projectStore:  projectStore,
 		artifactStore: artifactStore,
 	}
+}
+
+// SetVectorService injects a VectorService for auto-embedding on SaveEntry.
+// When nil or not set, auto-embed is silently skipped.
+func (s *EntryService) SetVectorService(svc *VectorService) {
+	s.vector = svc
 }
 
 func (s *EntryService) Save(ctx context.Context, entry domain.Entry, tags []string) error {
@@ -106,6 +113,12 @@ func (s *EntryService) SaveEntry(ctx context.Context, input SaveEntryInput) (*Ge
 
 	if err := s.store.Save(ctx, entry, tags); err != nil {
 		return nil, fmt.Errorf("save entry: %w", err)
+	}
+
+	// Auto-embed if VectorService is configured and GloVe is loaded.
+	// Silently skips when no VectorService or GloVe not loaded.
+	if s.vector != nil {
+		_ = s.vector.EnsureEmbedded(ctx, entry.ID)
 	}
 
 	result, err := s.store.Get(ctx, entry.ID, true)

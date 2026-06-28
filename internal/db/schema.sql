@@ -171,3 +171,11 @@ CREATE INDEX IF NOT EXISTS idx_entry_links_to ON entry_links(to_entry_id);
 CREATE INDEX IF NOT EXISTS idx_entry_links_active ON entry_links(active) WHERE active = 1;
 CREATE INDEX IF NOT EXISTS idx_runs_workflow ON runs(workflow_id);
 CREATE INDEX IF NOT EXISTS idx_run_steps_run ON run_steps(run_id);
+
+CREATE TABLE IF NOT EXISTS entry_embeddings (
+    entry_id    TEXT PRIMARY KEY REFERENCES entries(id),
+    embedding   BLOB NOT NULL,
+    dims        INTEGER NOT NULL,
+    model       TEXT NOT NULL DEFAULT 'glove',
+    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);

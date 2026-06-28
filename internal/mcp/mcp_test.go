@@ -60,7 +60,7 @@ func TestServerInitialize(t *testing.T) {
 	}
 }
 
-func TestToolsListReturns15Tools(t *testing.T) {
+func TestToolsListReturns16Tools(t *testing.T) {
 	reg := NewToolRegistry(nil)
 	s := NewServer(reg)
 	ctx := context.Background()
@@ -88,13 +88,13 @@ func TestToolsListReturns15Tools(t *testing.T) {
 		if !ok {
 			t.Fatalf("tools is not an array: %T", toolsRaw)
 		}
-		if len(tools) != 15 {
-			t.Errorf("expected 15 tools, got %d", len(tools))
+		if len(tools) != 16 {
+			t.Errorf("expected 16 tools, got %d", len(tools))
 		}
 		return
 	}
-	if len(interfaces) != 15 {
-		t.Errorf("expected 15 tools, got %d", len(interfaces))
+	if len(interfaces) != 16 {
+		t.Errorf("expected 16 tools, got %d", len(interfaces))
 	}
 }
 
@@ -297,6 +297,7 @@ func TestToolNamesAreCorrect(t *testing.T) {
 		"get_entry_graph",
 		"search_by_tags",
 		"get_context_bundle",
+		"compare_entries",
 	}
 
 	if len(names) != len(expected) {

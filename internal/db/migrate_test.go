@@ -282,8 +282,8 @@ func TestMigrationIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to count migrations: %v", err)
 	}
-	if count != 4 {
-		t.Errorf("expected 4 migration records (v1 + v2 + v3 + v4), got %d", count)
+	if count != 5 {
+		t.Errorf("expected 5 migration records (v1..v5), got %d", count)
 	}
 }
 
@@ -307,5 +307,59 @@ func TestPartialIndexEntryLinksActive(t *testing.T) {
 	}
 	if !strings.Contains(sqlDef, "WHERE active = 1") {
 		t.Errorf("idx_entry_links_active should be a partial index with WHERE active = 1, got: %s", sqlDef)
+	}
+}
+
+func TestMigration005EntryEmbeddings(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open in-memory DB: %v", err)
+	}
+	defer db.Close()
+
+	if err := RunMigrations(db); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	// Verify entry_embeddings table exists.
+	var count int
+	err = db.QueryRow(
+		"SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='entry_embeddings'",
+	).Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to check entry_embeddings: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("entry_embeddings table does not exist — migration 005 missing?")
+	}
+
+	// Verify columns: entry_id (PK), embedding (BLOB), dims (INTEGER), model (TEXT), updated_at.
+	cols := []struct{ name, typ string }{
+		{"entry_id", "TEXT"},
+		{"embedding", "BLOB"},
+		{"dims", "INTEGER"},
+		{"model", "TEXT"},
+		{"updated_at", "DATETIME"},
+	}
+	for _, c := range cols {
+		var colCount int
+		err := db.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info('entry_embeddings') WHERE name=? AND upper(type)=?",
+			c.name, c.typ,
+		).Scan(&colCount)
+		if err != nil {
+			t.Errorf("failed to check column entry_embeddings.%s: %v", c.name, err)
+			continue
+		}
+		if colCount != 1 {
+			t.Errorf("entry_embeddings.%s %s column missing", c.name, c.typ)
+		}
+	}
+
+	// Verify migration version 5 was recorded.
+	var version int
+	err = db.QueryRow("SELECT version FROM schema_migrations WHERE version = 5").Scan(&version)
+	if err != nil {
+		t.Errorf("migration version 5 not recorded: %v", err)
 	}
 }

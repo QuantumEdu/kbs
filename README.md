@@ -414,7 +414,10 @@ Test pyramid:
 | v3 Qu@ntum (Workflow Pipelines) | ✅ Active |
 | Cloud sync | 🔲 Future |
 | TUI | 🔲 Future |
-| Vector search | 🔲 Future |
+| Vector search (GloVe, pure Go) | ✅ Active |
+| Entry diff (compare-entries) | ✅ Active |
+| Entry versioning | 🔲 Future |
+| HTTP auth layer | 🔲 Future |
 
 ---
 

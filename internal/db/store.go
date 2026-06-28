@@ -91,6 +91,13 @@ type ImportExportStore interface {
 	ImportAll(ctx context.Context, data domain.VaultExport) error
 }
 
+type VectorStore interface {
+	SaveEmbedding(ctx context.Context, entryID string, embedding []byte, dims int, model string) error
+	GetEmbedding(ctx context.Context, entryID string) ([]byte, error)
+	SearchSimilar(ctx context.Context, queryVec []float32, limit int) ([]SimilarityResult, error)
+	DeleteEmbedding(ctx context.Context, entryID string) error
+}
+
 type Store struct {
 	Entries      EntryStore
 	Artifacts    ArtifactStore
@@ -102,6 +109,7 @@ type Store struct {
 	Projects     ProjectStore
 	Search       SearchStore
 	ImportExport ImportExportStore
+	Embeddings   VectorStore
 
 	db *sql.DB
 }
@@ -118,6 +126,7 @@ func NewStore(db *sql.DB) *Store {
 		Projects:     &sqliteProjectStore{db: db},
 		Search:       &sqliteSearchStore{db: db},
 		ImportExport: &sqliteImportExportStore{db: db},
+		Embeddings:   &sqliteVectorStore{db: db},
 		db:           db,
 	}
 }
