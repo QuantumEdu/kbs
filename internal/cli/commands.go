@@ -17,7 +17,7 @@ func ParseCommand(args []string) (string, error) {
 	switch sub {
 	case "graph":
 		return sub, nil
-	case "init", "version", "mcp", "http", "list-projects", "export":
+	case "init", "version", "mcp", "http", "list-projects", "export", "tui":
 		return sub, nil
 	case "add-entry", "search", "save-artifact", "get-context", "add-project", "session-wrap":
 		return sub, nil
@@ -88,6 +88,19 @@ func ParseCommand(args []string) (string, error) {
 		return sub, nil
 	case "save-result":
 		return sub, nil
+	case "sync":
+		if len(args) < 3 {
+			return "", fmt.Errorf("sync requires a subcommand (push, pull)")
+		}
+		sub2 := args[2]
+		switch sub2 {
+		case "push":
+			return "sync-push", nil
+		case "pull":
+			return "sync-pull", nil
+		default:
+			return "", fmt.Errorf("unknown sync subcommand: %s", sub2)
+		}
 	default:
 		return "", fmt.Errorf("unknown command: %s", sub)
 	}
@@ -627,4 +640,44 @@ func SplitLines(raw string) []string {
 		}
 	}
 	return result
+}
+
+// SyncFlags holds parsed sync push/pull command flags.
+type SyncFlags struct {
+	Transport  string
+	RemotePath string
+	DryRun     bool
+}
+
+// ParseSyncFlags parses sync-specific flags from args.
+// Usage: skillvault sync push|pull --transport s3|github --remote-path <path> [--dry-run]
+func ParseSyncFlags(args []string) (*SyncFlags, error) {
+	flags := &SyncFlags{}
+
+	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
+	fs.StringVar(&flags.Transport, "transport", "", "Transport backend: s3 or github (required)")
+	fs.StringVar(&flags.RemotePath, "remote-path", "", "Remote object key or asset name")
+	fs.BoolVar(&flags.DryRun, "dry-run", false, "Show what would be transferred without actually doing it")
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 3 {
+		if err := fs.Parse(args[3:]); err != nil {
+			return nil, fmt.Errorf("parse sync flags: %w", err)
+		}
+	}
+
+	if flags.Transport == "" {
+		return nil, fmt.Errorf("--transport is required (s3 or github)")
+	}
+	switch flags.Transport {
+	case "s3", "github":
+	default:
+		return nil, fmt.Errorf("invalid transport %q: must be s3 or github", flags.Transport)
+	}
+	// remote-path is required unless it's a dry-run (the user might just want to check)
+	if flags.RemotePath == "" && !flags.DryRun {
+		return nil, fmt.Errorf("--remote-path is required")
+	}
+
+	return flags, nil
 }

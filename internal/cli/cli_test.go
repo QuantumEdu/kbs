@@ -54,6 +54,16 @@ func TestParseSubcommand(t *testing.T) {
 		{"run with save", []string{"skillvault", "run", "wf", "input.md", "--save", "out.md"}, "run", false},
 		{"run with stdin", []string{"skillvault", "run", "wf", "-"}, "run", false},
 
+		// Sync commands (push/pull subcommands)
+		{"sync push", []string{"skillvault", "sync", "push", "--transport", "s3", "--remote-path", "vault.gz"}, "sync-push", false},
+		{"sync pull", []string{"skillvault", "sync", "pull", "--transport", "github", "--remote-path", "vault.gz"}, "sync-pull", false},
+		{"sync push dry-run", []string{"skillvault", "sync", "push", "--transport", "s3", "--remote-path", "vault.gz", "--dry-run"}, "sync-push", false},
+		{"sync no subcommand", []string{"skillvault", "sync"}, "", true},
+		{"sync invalid subcommand", []string{"skillvault", "sync", "unknown"}, "", true},
+
+		// TUI command
+		{"tui", []string{"skillvault", "tui"}, "tui", false},
+
 		// Errors
 		{"no args", []string{"skillvault"}, "", true},
 		{"invalid subcommand", []string{"skillvault", "invalid"}, "", true},
@@ -589,6 +599,75 @@ func TestOutputFormat(t *testing.T) {
 			t.Errorf("expected empty, got %q", out)
 		}
 	})
+}
+
+func TestParseSyncFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    SyncFlags
+		wantErr bool
+	}{
+		{
+			name: "sync push with s3 transport",
+			args: []string{"skillvault", "sync", "push", "--transport", "s3", "--remote-path", "vault.json.gz"},
+			want: SyncFlags{Transport: "s3", RemotePath: "vault.json.gz", DryRun: false},
+		},
+		{
+			name: "sync pull with github transport",
+			args: []string{"skillvault", "sync", "pull", "--transport", "github", "--remote-path", "snapshot.gz"},
+			want: SyncFlags{Transport: "github", RemotePath: "snapshot.gz", DryRun: false},
+		},
+		{
+			name: "sync push with dry-run",
+			args: []string{"skillvault", "sync", "push", "--transport", "s3", "--remote-path", "vault.gz", "--dry-run"},
+			want: SyncFlags{Transport: "s3", RemotePath: "vault.gz", DryRun: true},
+		},
+		{
+			name: "sync pull with dry-run (github)",
+			args: []string{"skillvault", "sync", "pull", "--transport", "github", "--dry-run"},
+			want: SyncFlags{Transport: "github", RemotePath: "", DryRun: true},
+		},
+		{
+			name:    "missing transport flag",
+			args:    []string{"skillvault", "sync", "push", "--remote-path", "vault.gz"},
+			wantErr: true,
+		},
+		{
+			name:    "unknown transport value",
+			args:    []string{"skillvault", "sync", "push", "--transport", "ftp", "--remote-path", "vault.gz"},
+			wantErr: true,
+		},
+		{
+			name:    "missing remote-path (non-dry-run pull)",
+			args:    []string{"skillvault", "sync", "pull", "--transport", "github"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flags, err := ParseSyncFlags(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseSyncFlags failed: %v", err)
+			}
+			if flags.Transport != tt.want.Transport {
+				t.Errorf("Transport = %q, want %q", flags.Transport, tt.want.Transport)
+			}
+			if flags.RemotePath != tt.want.RemotePath {
+				t.Errorf("RemotePath = %q, want %q", flags.RemotePath, tt.want.RemotePath)
+			}
+			if flags.DryRun != tt.want.DryRun {
+				t.Errorf("DryRun = %v, want %v", flags.DryRun, tt.want.DryRun)
+			}
+		})
+	}
 }
 
 func TestParseCommand_SetupVectors(t *testing.T) {

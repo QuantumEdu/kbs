@@ -19,10 +19,11 @@ See spec §5 (§5.1–§5.4).
 | REQ-HYB-04 | Content stored in DB directly only when small and frequently retrieved | SHOULD |
 | REQ-HYB-05 | Content stored as artifact file when: long, final document, AI output, PDF analysis, generated spec/report, or may overload context | MUST |
 | REQ-HYB-06 | `objects/` directory uses year/month subdirectories for filesystem organization | MUST |
-| REQ-HYB-07 | No cloud sync, no daemon, no vector DB in v2 — local-first only | MUST |
+| REQ-HYB-07 | The vault MUST remain local-first by default. Cloud sync via pluggable transports is OPTIONAL and user-initiated — no daemon, background sync, or automatic network calls. | MUST |
 
 **Scenarios**:
-- GIVEN no vault exists, WHEN `skillvault init` runs, THEN `~/.skillvault/vault.db` is created alongside `objects/`, `exports/`, and `cache/` subdirectories.
+- GIVEN no vault exists, WHEN `skillvault init` runs, THEN `~/.skillvault/vault.db` is created alongside `objects/`, `exports/`, and `cache/` subdirectories — no network calls.
+- GIVEN running vault, WHEN no `sync` command issued, THEN zero network calls occur.
 - GIVEN a long PDF analysis is saved, WHEN `save_artifact` is called, THEN content is stored as a file under `objects/YYYY/MM/` and DB stores metadata, summary, content hash, and file path.
 - GIVEN small frequently retrieved content, WHEN `add-entry` with inline body is called, THEN body stored in DB directly without creating an artifact file.
 
@@ -215,14 +216,14 @@ See spec §8 (§8.1–§8.5).
 
 ---
 
-## Capability 11: CLI Commands (18)
+## Capability 11: CLI Commands (20)
 
 See spec §9 (§9.1–§9.2).
 
 | ID | Requirement | Strength |
 |----|-------------|----------|
 | REQ-CLI-01 | Binary name: `skillvault` | MUST |
-| REQ-CLI-02 | Required commands: `init`, `add-entry`, `search`, `get`, `save-artifact`, `get-context`, `add-project`, `list-projects`, `archive`, `add-workflow`, `render-workflow`, `session-wrap`, `export`, `import`, `run`, `setup-vectors`, `reindex-embeddings`, `compare-entries` | MUST |
+| REQ-CLI-02 | Required commands: `init`, `add-entry`, `search`, `get`, `save-artifact`, `save-result`, `get-context`, `add-project`, `list-projects`, `archive`, `add-workflow`, `render-workflow`, `run`, `session-wrap`, `export`, `import`, `sync`, `tui`, `version`, `compare-entries`, `setup-vectors`, `reindex-embeddings` | MUST |
 | REQ-CLI-03 | `init` creates `~/.skillvault/vault.db`, `objects/`, `exports/`, `cache/` | MUST |
 | REQ-CLI-04 | `add-entry` accepts `--title`, `--type`, `--summary` (required), `--body`, `--project`, `--tags`, `--status` (optional) | MUST |
 | REQ-CLI-05 | `save-artifact` accepts `--title`, `--type`, `--file` (required), `--project`, `--summary`, `--tags`, `--source` (optional) | MUST |
@@ -241,6 +242,8 @@ See spec §9 (§9.1–§9.2).
 - GIVEN file `article.md` exists, WHEN `skillvault run research_article article.md` executes, THEN final composed output is printed to stdout.
 - GIVEN input piped via stdin, WHEN `echo "test" | skillvault run my_workflow - --save out.md` runs successfully, THEN `out.md` contains `{{final_output}}` content.
 - GIVEN workflow `missing_wf` does not exist, WHEN `skillvault run missing_wf file.md` is invoked, THEN command exits with error indicating workflow not found.
+- GIVEN vault configured, WHEN `skillvault sync push` runs, THEN snapshot uploaded via transport.
+- GIVEN non-tui build, WHEN `skillvault tui` runs, THEN rebuild message printed to stderr.
 - GIVEN GloVe loaded, WHEN `skillvault search "machine learning" --vector`, THEN vector search executes instead of FTS5.
 
 ---
@@ -285,7 +288,7 @@ See spec §12 (§12.1–§12.4).
 | REQ-SEC-02 | Minimum regex patterns: OpenAI key (`sk-[A-Za-z0-9_-]{20,}`), private key (`-----BEGIN (RSA |EC |OPENSSH |)?PRIVATE KEY-----`), GitHub PAT (`ghp_[A-Za-z0-9_]{20,}`), Slack token (`xox[baprs]-[A-Za-z0-9-]{20,}`) | MUST |
 | REQ-SEC-03 | On secret detection: do NOT save secret value; return warning to caller | MUST |
 | REQ-SEC-04 | Allow saving a redacted note if the user chooses | SHOULD |
-| REQ-SEC-05 | No network calls in core v2 — local-first only | MUST |
+| REQ-SEC-05 | The system MUST NOT make network calls except during explicit `sync push` or `sync pull`. All other operations remain local-only. | MUST |
 | REQ-SEC-06 | Archive is preferred over hard delete | MUST |
 | REQ-SEC-07 | Hard delete requires explicit confirmation if implemented | SHOULD |
 
@@ -293,6 +296,8 @@ See spec §12 (§12.1–§12.4).
 - GIVEN content contains `sk-proj-AbCdEf1234567890123456789012345678901234567890`, WHEN `save_entry` or `save_artifact` is called, THEN save is rejected with a secret-detected warning.
 - GIVEN content contains `-----BEGIN RSA PRIVATE KEY-----`, WHEN validation runs, THEN secret scanner detects the pattern and rejects the save.
 - GIVEN safe content without any secret pattern, WHEN validation runs, THEN save proceeds normally.
+- GIVEN any operation other than sync (search, get-context, save-entry, etc.), WHEN invoked, THEN only local SQLite/filesystem accessed.
+- GIVEN configured transport, WHEN `sync push` executes, THEN network calls transfer snapshot.
 
 ---
 
@@ -436,7 +441,36 @@ See delta spec `skillvault-v3-workflow-pipelines`.
 
 ---
 
-## Capability 21: Vector Search (GloVe 300d)
+## Capability 21: Cloud Sync
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-SYNC-01 | The system MUST define a pluggable `Transport` interface (`Push`/`Pull` byte streams) in `internal/sync/`. Implementations: S3-compatible (minio-go v7, supporting AWS S3, MinIO, Cloudflare R2, Backblaze B2) and GitHub Releases. Gzip MUST compress payload before wire transfer; decompress on pull. Sync service SHALL reuse `ExportAll()`/`ImportAll()` unchanged. Snapshot semantics: last-write-wins via timestamp comparison. | MUST |
+| REQ-SYNC-02 | The CLI MUST support `skillvault sync push` and `skillvault sync pull`. Credentials MUST load from env vars (`AWS_ACCESS_KEY_ID`, `GITHUB_TOKEN`, etc.) and `~/.skillvault/config.yaml`. Transport logs MUST sanitize credentials. | MUST |
+
+**Scenarios**:
+- GIVEN vault with entries and configured S3 credentials, WHEN `sync push --transport s3` then `sync pull --transport s3`, THEN all entries, projects, workflows, and tags are preserved identically.
+- GIVEN `--dry-run` flag, WHEN `sync push` runs, THEN timestamp diff and payload size shown, no transfer.
+- GIVEN invalid credentials, WHEN push executes, THEN error reported with sanitized logs (no raw keys).
+- GIVEN configured transport, WHEN `sync push` runs, THEN vault exported, compressed, uploaded as dated snapshot.
+- GIVEN remote newer than local, WHEN `sync pull` runs, THEN downloaded, decompressed, imported.
+
+---
+
+## Capability 22: TUI (Build-Tag Gated)
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-TUI-01 | All `internal/tui/` files MUST be gated by `//go:build tui`. CLI SHALL register `tui` via build-tag-gated `main_tui.go`. Without tag, `main_notui.go` SHALL print: "TUI not available. Rebuild with: go build -tags tui ./cmd/skillvault" to stderr, exit 1. TUI MUST provide browse (entry list), FTS5 search, and entry detail views. TUI SHALL be read-only — no creation, editing, or mutation. A `make build-tui` target SHOULD build with `-tags tui`. Default binary (no tag) SHOULD grow <500KB over baseline. | MUST |
+
+**Scenarios**:
+- GIVEN `go build -tags tui`, WHEN `skillvault tui` runs, THEN Bubble Tea TUI launches with browse/search/detail views.
+- GIVEN build without tag, WHEN `skillvault tui` runs, THEN stderr prints rebuild message, exit code 1.
+- GIVEN TUI launched with populated vault, WHEN user browses or searches, THEN entries display title/type/status.
+- GIVEN user selects entry, WHEN detail view opens, THEN metadata/tags/body shown without edit capability.
+- GIVEN project root, WHEN `make build-tui` runs, THEN binary includes TUI and passes existing tests.
+
+## Capability 23: Vector Search (GloVe 300d)
 
 | ID | Requirement | Strength |
 |----|-------------|----------|
@@ -456,7 +490,7 @@ See delta spec `skillvault-v3-workflow-pipelines`.
 
 ---
 
-## Capability 22: Entry Diff
+## Capability 24: Entry Diff
 
 | ID | Requirement | Strength |
 |----|-------------|----------|
@@ -476,7 +510,7 @@ See delta spec `skillvault-v3-workflow-pipelines`.
 
 | Capability | Requirements | Scenarios |
 |-----------|-------------|-----------|
-| Hybrid Storage Model | 7 | 3 |
+| Hybrid Storage Model | 7 | 4 |
 | Entry Entity + 10 Types | 6 | 3 |
 | Project Entity | 5 | 3 |
 | Artifact Entity + File-Backed Storage | 8 | 3 |
@@ -486,9 +520,9 @@ See delta spec `skillvault-v3-workflow-pipelines`.
 | EntryLink + Relation Types | 5 | 3 |
 | Multi-Status Model | 7 | 3 |
 | Hermes Context Layer (7 Modes) | 11 | 3 |
-| CLI Commands (18) | 12 | 7 |
-| MCP Tools (16) | 13 | 6 |
-| Secret Detection | 7 | 3 |
+| CLI Commands | 12 | 8 |
+| MCP Tools | 13 | 6 |
+| Secret Detection | 7 | 5 |
 | Search (FTS5 + Vector) | 5 | 3 |
 | Workflow Rendering | 4 | 4 |
 | Import/Export | 7 | 3 |
@@ -496,10 +530,10 @@ See delta spec `skillvault-v3-workflow-pipelines`.
 | Code Integrity | 6 | 5 |
 | Tag Query Support | 3 | 2 |
 | Pipeline Execution Engine | 7 | 6 |
+| Cloud Sync | 2 | 5 |
+| TUI (Build-Tag Gated) | 1 | 5 |
 | Vector Search (GloVe 300d) | 7 | 4 |
 | Entry Diff | 4 | 3 |
-| **Total** | **146** | **77** |
-
-**Happy paths**: entry/project/artifact CRUD, search with filters, context compilation, workflow rendering, session wrap, import/export round-trip.
-**Edge cases**: secret detection rejection, duplicate slug import conflict, archived exclusion in context and search, empty tag rejection, self-referencing link rejection, missing content/file_path on artifact save, max_chars truncation.
-**Error states**: invalid entry type, invalid relation type, invalid schema version on import, secret detected warning, missing required fields on CLI.
+| **Total** | **146** | **100** |
+**Edge cases**: secret detection rejection, duplicate slug import conflict, archived exclusion in context and search, empty tag rejection, self-referencing link rejection, missing content/file_path on artifact save, max_chars truncation, TUI rebuild message on non-tagged build, sanitized credential logging on sync errors.
+**Error states**: invalid entry type, invalid relation type, invalid schema version on import, secret detected warning, missing required fields on CLI, unknown sync subcommand, TUI startup with no terminal (TTY check).

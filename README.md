@@ -419,8 +419,8 @@ Test pyramid:
 | v2 Qu@ntum (Hybrid + Context) | ✅ Archived |
 | v3 Qu@ntum (Workflow Pipelines) | ✅ Active |
 | v3 Service hardening (auth, shutdown, MCP tools) | ✅ Active |
-| Cloud sync | 🔲 Future |
-| TUI | 🔲 Future |
+| Cloud sync (S3 + GitHub transports) | ✅ Active |
+| TUI (Bubble Tea, build-tag gated) | ✅ Active |
 | Vector search (GloVe, pure Go) | ✅ Active |
 | Entry diff / compare-entries | ✅ Active |
 | Entry versioning (history, restore, diff API) | ✅ Active |
