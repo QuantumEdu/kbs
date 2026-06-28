@@ -27,12 +27,12 @@ Total: ~1360 lines.
 
 ## Phase 2: Vector Math (PR 2)
 
-- [ ] 2.1 `internal/vector/glove.go` — `LoadGlove(path)` → `map[string][]float32`
-- [ ] 2.2 `internal/vector/glove_test.go` — 5-word fixture, dims + values
-- [ ] 2.3 `internal/vector/tokenizer.go` — `Tokenize()` lowercase, whitespace, non-alpha
-- [ ] 2.4 `internal/vector/tokenizer_test.go` — table-driven, punctuation, OOV
-- [ ] 2.5 `internal/vector/embedding.go` — `Embed()` avg → `[]float32`, `Serialize/Deserialize`
-- [ ] 2.6 `internal/vector/embedding_test.go` — 300d output, serde roundtrip
+- [x] 2.1 `internal/vector/glove.go` — `LoadGlove(path)` → `map[string][]float32`
+- [x] 2.2 `internal/vector/glove_test.go` — 5-word fixture, dims + values
+- [x] 2.3 `internal/vector/tokenizer.go` — `Tokenize()` lowercase, whitespace, non-alpha
+- [x] 2.4 `internal/vector/tokenizer_test.go` — table-driven, punctuation, OOV
+- [x] 2.5 `internal/vector/embedding.go` — `Embed()` avg → `[]float32`, `Serialize/Deserialize`
+- [x] 2.6 `internal/vector/embedding_test.go` — 300d output, serde roundtrip
 
 ## Phase 3: Similarity + DB (PR 3)
 
