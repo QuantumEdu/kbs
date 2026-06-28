@@ -37,19 +37,19 @@ Chain strategy: feature-branch-chain
 
 ## Phase 2: Cloud Backends — PR 2 (S3 + GitHub Transports)
 
-- [ ] 2.1 Create `internal/sync/s3.go` — `S3Transport`: bucket config, minio client init from env/config; `Push` uploads object, `Pull` downloads object
-- [ ] 2.2 Create `internal/sync/github.go` — `GitHubTransport`: owner/repo, release asset upload/download via go-github; `Push` creates/updates release, `Pull` downloads asset
-- [ ] 2.3 Write `internal/sync/s3_test.go` — mock minio client (interface-based) or skip if SDK requires network
-- [ ] 2.4 Write `internal/sync/github_test.go` — mock GitHub client (interface-based); verify upload/download calls
-- [ ] 2.5 Update `go.mod` — add `minio/minio-go/v7`, `google/go-github/v69`, `golang.org/x/oauth2`
+- [x] 2.1 Create `internal/sync/s3.go` — `S3Transport`: bucket config, minio client init from env/config; `Push` uploads object, `Pull` downloads object
+- [x] 2.2 Create `internal/sync/github.go` — `GitHubTransport`: owner/repo, release asset upload/download via go-github; `Push` creates/updates release, `Pull` downloads asset
+- [x] 2.3 Write `internal/sync/s3_test.go` — mock minio client (interface-based) or skip if SDK requires network
+- [x] 2.4 Write `internal/sync/github_test.go` — mock GitHub client (interface-based); verify upload/download calls
+- [x] 2.5 Update `go.mod` — add `minio/minio-go/v7`, `google/go-github/v69`, `golang.org/x/oauth2`
 
 ## Phase 3: SyncService + CLI — PR 3 (App Service + Wiring)
 
-- [ ] 3.1 Create `internal/app/sync.go` — `SyncService{Push, Pull}`: wires `ExportJSON()` → gzip → transport push; transport pull → decompress → `ImportVault()`. Add `--dry-run` (export+compress, print size+timestamp diff, skip transfer). Add timestamp compare (last-write-wins).
-- [ ] 3.2 Modify `internal/cli/commands.go` — add `"sync"`→subcommand dispatch (return `"sync-push"`/`"sync-pull"`, same pattern as `"memory"`→`"memory-index"`); add `ParseSyncFlags()` with `--transport`, `--remote-path`, `--dry-run`
-- [ ] 3.3 Modify `cmd/skillvault/main.go` — add `syncSvc` to `vaultServices`; wire `NewSyncService(exportSvc, importSvc, transport)` in `openVault()`; add `case "sync-push"`, `case "sync-pull"` in `runCLI`
-- [ ] 3.4 Write `internal/app/sync_test.go` — in-memory SQLite + mock Transport; round-trip (push→pull preserves all data), dry-run (no transfer, correct size), timestamp comparison
-- [ ] 3.5 Write `internal/cli/commands_test.go` — table-driven `TestParseSyncFlags` matching existing pattern
+- [x] 3.1 Create `internal/app/sync.go` — `SyncService{Push, Pull}`: wires `ExportJSON()` → gzip → transport push; transport pull → decompress → `ImportVault()`. Add `--dry-run` (export+compress, print size+timestamp diff, skip transfer). Add timestamp compare (last-write-wins).
+- [x] 3.2 Modify `internal/cli/commands.go` — add `"sync"`→subcommand dispatch (return `"sync-push"`/`"sync-pull"`, same pattern as `"memory"`→`"memory-index"`); add `ParseSyncFlags()` with `--transport`, `--remote-path`, `--dry-run`
+- [x] 3.3 Modify `cmd/skillvault/main.go` — add `syncSvc` to `vaultServices`; wire `NewSyncService(exportSvc, importSvc, transport)` in `openVault()`; add `case "sync-push"`, `case "sync-pull"` in `runCLI`
+- [x] 3.4 Write `internal/app/sync_test.go` — in-memory SQLite + mock Transport; round-trip (push→pull preserves all data), dry-run (no transfer, correct size), timestamp comparison
+- [x] 3.5 Write `internal/cli/commands_test.go` — table-driven `TestParseSyncFlags` matching existing pattern
 
 ## Phase 4: TUI — PR 4 (Bubble Tea Build-Tag Gated)
 
