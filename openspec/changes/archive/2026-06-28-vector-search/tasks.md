@@ -55,8 +55,8 @@ Total: ~1360 lines.
 
 ## Verification
 
-- [ ] V.1 Unit tests: `internal/vector/*`, `internal/diff/*`, `internal/db/vector_store*`
-- [ ] V.2 Existing tests: `app_test.go`, `acceptance_test.go` — no regressions
-- [ ] V.3 `setup-vectors <glove>` → `search --vector "MCP"` → ranked results
-- [ ] V.4 `compare-entries <idA> <idB>` → unified diff; identity → "No changes"
-- [ ] V.5 `reindex-embeddings` → all embedded, no data loss, FTS5 unchanged
+- [x] V.1 Unit tests: `internal/vector/*`, `internal/diff/*`, `internal/db/vector_store*`
+- [x] V.2 Existing tests: `app_test.go`, `acceptance_test.go` — no regressions
+- [x] V.3 `setup-vectors <glove>` → `search --vector "MCP"` → ranked results
+- [x] V.4 `compare-entries <idA> <idB>` → unified diff; identity → "No changes"
+- [x] V.5 `reindex-embeddings` → all embedded, no data loss, FTS5 unchanged
