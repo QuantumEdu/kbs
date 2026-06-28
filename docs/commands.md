@@ -1,4 +1,4 @@
-# CLI Reference — 19 comandos
+# CLI Reference — 21 comandos
 
 Todas las entradas usan **slugs** como identificadores. Un slug es el título en kebab-case: `"Clean Architecture Review"` → `clean-architecture-review`.
 
@@ -25,7 +25,7 @@ skillvault add-entry \
   --title "CSS Grid Layout" \
   --type skill \
   --summary "Guía rápida de CSS Grid" \
-  --content "grid-template-columns: repeat(...)" \
+  --body "grid-template-columns: repeat(...)" \
   --project web \
   --tags "css,frontend" \
   --status active
@@ -34,9 +34,9 @@ skillvault add-entry \
 | Flag | Requerido | Descripción |
 |------|-----------|-------------|
 | `--title` | ✅ | Título de la entrada (genera slug automático) |
-| `--type` | ✅ | Tipo: `prompt`, `skill`, `workflow_note`, `reference`, `user`, `feedback`, `project_state`, `session`, `decision`, `artifact_summary` |
+| `--type` | ❌ | Tipo (default: `reference`): `prompt`, `skill`, `workflow_note`, `reference`, `user`, `feedback`, `project_state`, `session`, `decision`, `artifact_summary` |
 | `--summary` | ✅ | Resumen corto (indexado en FTS5) |
-| `--content` | ❌ | Contenido largo (opcional si solo querés el resumen) |
+| `--body` | ❌ | Contenido largo (opcional si solo querés el resumen) |
 | `--project` | ❌ | Slug del proyecto al que pertenece |
 | `--tags` | ❌ | Tags separados por coma |
 | `--status` | ❌ | `draft`, `active` (default), `archived`, `deprecated`, `canonical` |
@@ -57,11 +57,14 @@ skillvault search "grid css" --type skill --project web --status active --limit 
 |------|-------------|
 | `--type` | Filtrar por tipo de entrada |
 | `--project` | Filtrar por proyecto |
-| `--tags` | Filtrar por tags (separados por coma) |
-| `--status` | Filtrar por estado |
+| `--tag` | Filtrar por tag individual |
+| `--include-archived` | Incluir entradas archivadas |
 | `--limit` | Máximo de resultados (default: 20) |
+| `--vector` | Usar búsqueda por similitud coseno (requiere vectores cargados) |
 
 La búsqueda usa FTS5 con tokenizer `porter unicode61`. Busca en título, summary, content y tags.
+
+El flag `--vector` activa búsqueda semántica con vectores GloVe (si están configurados vía `SKILLVAULT_GLOVE_PATH`).
 
 ---
 
@@ -129,8 +132,9 @@ skillvault get-context \
 |------|-----------|-------------|
 | `--mode` | ✅ | Modo: `profile`, `project`, `workflow`, `skill`, `planning`, `session_recall`, `full_brief` |
 | `--project` | ✅ | Proyecto |
-| `--max-chars` | ❌ | Máximo de caracteres (default: 10000) |
-| `--include` | ❌ | Filtrar secciones específicas |
+| `--max-chars` | ❌ | Máximo de caracteres (default: 12000) |
+| `--include` | ❌ | Filtrar secciones específicas (separadas por coma) |
+| `--query` | ❌ | Query adicional para filtrar entradas |
 
 ### Modos de contexto
 
@@ -285,6 +289,8 @@ skillvault graph --entry clean-architecture-review --format dot
 | `--format` | ❌ | `mermaid`, `json` o `dot` (default: mermaid) |
 | `--direction` | ❌ | `outgoing`, `incoming` o `both` (default: both) |
 
+---
+
 El formato `mermaid` genera `graph TD` que se renderiza nativamente en GitHub.
 
 ---
@@ -307,6 +313,8 @@ skillvault entry ref remove <source> <target> <type>
 Tipos de relación: `references`, `supersedes`, `related_to`, `part_of`, `derived_from`, `implements`, `uses`, `extends`, `handoff_of`, `generated_from`, `depends_on`.
 
 Las relaciones `depends_on`, `part_of` y `supersedes` tienen detección de ciclos.
+
+> 💡 El subcomando `ref` también se puede invocar directamente como `skillvault ref ...` (alias).
 
 ---
 
@@ -339,7 +347,12 @@ Exporta todo el vault a un archivo JSON.
 
 ```bash
 skillvault export backup.json
+skillvault export --output export.json   # explícito
 ```
+
+| Flag | Requerido | Descripción |
+|------|-----------|-------------|
+| `--output` | ❌ | Ruta de salida (default: `skillvault-export.json`) |
 
 Incluye todos los tipos de entrada, proyectos, workflows, series, tags, entry_links y metadata de artefactos.
 
@@ -357,6 +370,40 @@ Resuelve conflictos de slug automáticamente (agrega sufijo numérico a duplicad
 
 ---
 
+## `save-result`
+
+Guarda un resultado de AI prompt como entrada en el vault.
+
+```bash
+skillvault save-result --name "Mi resultado" --content "Respuesta del modelo..." [flags]
+```
+
+| Flag | Requerido | Descripción |
+|------|-----------|-------------|
+| `--name` | ✅ | Nombre del resultado (genera slug) |
+| `--content` | ✅ | Contenido del resultado |
+| `--type` | ❌ | Tipo (default: `ai_output`) |
+| `--category` | ❌ | Categoría opcional |
+| `--tags` | ❌ | Tags separados por coma |
+| `--project` | ❌ | Slug del proyecto |
+| `--source-prompt` | ❌ | ID de la entry prompt que generó este resultado |
+| `--model` | ❌ | Modelo que generó el resultado |
+
+**MCP tool equivalente:** `save_result` (disponible en modo MCP).
+
+---
+
+## `version`
+
+Muestra la versión del vault.
+
+```bash
+skillvault version
+# SkillVault v3
+```
+
+---
+
 ## `http`
 
 Inicia el servidor HTTP REST API.
@@ -366,4 +413,10 @@ skillvault http
 # Sirve en http://127.0.0.1:7438
 ```
 
+| Flag | Requerido | Descripción |
+|------|-----------|-------------|
+| `--api-key` | ❌ | API key para autenticación HTTP Basic |
+
 Endpoints disponibles: health, entries CRUD, artifacts, context, projects, sessions, workflows, export/import. Ver [`docs/quickstart.md`](quickstart.md) o [`docs/architecture.md`](architecture.md) para detalles.
+
+---

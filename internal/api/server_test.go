@@ -639,3 +639,88 @@ func TestServerGracefulShutdown(t *testing.T) {
 		t.Error("expected connection to be refused after shutdown")
 	}
 }
+
+func TestAuthSkippedWhenNoKey(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	ts := httptest.NewServer(srv.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})))
+	defer ts.Close()
+
+	// POST without any auth header should work when no key configured.
+	resp, err := http.Post(ts.URL, "application/json", bytes.NewReader([]byte(`{}`)))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 without auth when key unset, got %d", resp.StatusCode)
+	}
+}
+
+func TestAuthRequiredWhenKeySet(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	srv.WithAPIKey("test-key-123")
+	ts := httptest.NewServer(srv.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})))
+	defer ts.Close()
+
+	// POST without key → 401.
+	resp, err := http.Post(ts.URL, "application/json", bytes.NewReader([]byte(`{}`)))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 without key, got %d", resp.StatusCode)
+	}
+
+	// POST with wrong key → 401.
+	req, _ := http.NewRequest(http.MethodPost, ts.URL, bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Authorization", "Bearer wrong-key")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 with wrong key, got %d", resp.StatusCode)
+	}
+
+	// POST with correct key → 200.
+	req, _ = http.NewRequest(http.MethodPost, ts.URL, bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("Authorization", "Bearer test-key-123")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 with correct key, got %d", resp.StatusCode)
+	}
+}
+
+func TestHealthAlwaysOpen(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	srv.WithAPIKey("secret")
+	ts := httptest.NewServer(srv.authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})))
+	defer ts.Close()
+
+	// GET /health should always work regardless of auth.
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/health", nil)
+	req.Header.Set("Authorization", "Bearer wrong-key")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 for /health even with wrong key, got %d", resp.StatusCode)
+	}
+}

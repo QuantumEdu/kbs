@@ -60,7 +60,7 @@ func TestServerInitialize(t *testing.T) {
 	}
 }
 
-func TestToolsListReturns16Tools(t *testing.T) {
+func TestToolsListReturns17Tools(t *testing.T) {
 	reg := NewToolRegistry(nil)
 	s := NewServer(reg)
 	ctx := context.Background()
@@ -88,13 +88,13 @@ func TestToolsListReturns16Tools(t *testing.T) {
 		if !ok {
 			t.Fatalf("tools is not an array: %T", toolsRaw)
 		}
-		if len(tools) != 16 {
-			t.Errorf("expected 16 tools, got %d", len(tools))
+		if len(tools) != 17 {
+			t.Errorf("expected 17 tools, got %d", len(tools))
 		}
 		return
 	}
-	if len(interfaces) != 16 {
-		t.Errorf("expected 16 tools, got %d", len(interfaces))
+	if len(interfaces) != 17 {
+		t.Errorf("expected 17 tools, got %d", len(interfaces))
 	}
 }
 
@@ -298,6 +298,7 @@ func TestToolNamesAreCorrect(t *testing.T) {
 		"search_by_tags",
 		"get_context_bundle",
 		"compare_entries",
+		"save_result",
 	}
 
 	if len(names) != len(expected) {
@@ -504,6 +505,76 @@ func TestSaveEntryRejectsMissingTitle(t *testing.T) {
 	if !strings.Contains(result.Content[0].Text, "title is required") {
 		t.Errorf("expected 'title is required', got: %s", result.Content[0].Text)
 	}
+}
+
+func TestSaveResultMCP(t *testing.T) {
+	ctx := context.Background()
+
+	sqlDB, err := db.OpenDB(":memory:")
+	if err != nil {
+		t.Fatalf("OpenDB failed: %v", err)
+	}
+	defer sqlDB.Close()
+	if err := db.RunMigrations(sqlDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+	store := db.NewStore(sqlDB)
+
+	entrySvc := app.NewEntryService(store.Entries, store.Projects, store.Artifacts)
+	projectSvc := app.NewProjectService(store.Projects)
+	saveResultSvc := app.NewSavePromptResultService(store.Entries, store.Projects, store.Artifacts)
+
+	reg := &ToolRegistry{entrySvc: entrySvc}
+	reg.saveResultSvc = saveResultSvc
+	reg.registerV2Tools()
+
+	proj, err := projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "testproj"})
+	if err != nil {
+		t.Fatalf("SaveProject failed: %v", err)
+	}
+
+	// Valid save_result.
+	result, err2 := reg.Call(ctx, "save_result", map[string]interface{}{
+		"name":       "Test Result",
+		"content":    "This is a test result from AI analysis.",
+		"type":       "reference",
+		"category":   "test category",
+		"tags":       []interface{}{"test", "ai"},
+		"project_id": proj.ID,
+		"model":      "gpt-4",
+	})
+	if err2 != nil {
+		t.Fatalf("save_result failed: %v", err2)
+	}
+	if err != nil {
+		t.Fatalf("save_result failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("save_result returned error: %s", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, "entry_id") {
+		t.Errorf("result should contain entry_id, got: %s", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, "Test Result") {
+		t.Errorf("result should contain name, got: %s", result.Content[0].Text)
+	}
+
+	// Missing name should fail.
+	result2, err3 := reg.Call(ctx, "save_result", map[string]interface{}{
+		"name":    "",
+		"content": "Content without name",
+	})
+	if err3 != nil {
+		t.Fatalf("save_result should not return dispatch error: %v", err3)
+	}
+	if !result2.IsError {
+		t.Fatalf("expected error for missing name, got: %s", result2.Content[0].Text)
+	}
+	if !strings.Contains(result2.Content[0].Text, "required") {
+		t.Errorf("expected 'required' in error, got: %s", result2.Content[0].Text)
+	}
+	_ = proj
+	_ = result
 }
 
 func TestSaveEntryRefMCP(t *testing.T) {
