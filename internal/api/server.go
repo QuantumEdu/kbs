@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/quantum-6/skillvault/internal/app"
@@ -26,6 +29,7 @@ type Server struct {
 	importSvc   *app.VaultImportService
 	host        string
 	port        int
+	apiKey      string
 	srv         *http.Server
 }
 
@@ -55,6 +59,33 @@ func NewServer(
 	}
 }
 
+// WithAPIKey sets the API key for bearer token authentication.
+// When set, all write endpoints require Authorization: Bearer <key>.
+func (s *Server) WithAPIKey(key string) *Server {
+	s.apiKey = key
+	return s
+}
+
+// authMiddleware wraps a handler to require a valid API key on write operations.
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	if s.apiKey == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Health and GET requests are always allowed.
+		if r.URL.Path == "/health" || r.Method == http.MethodGet {
+			next.ServeHTTP(w, r)
+			return
+		}
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != s.apiKey {
+			writeError(w, http.StatusUnauthorized, "invalid or missing API key")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Start begins listening. Returns error if unable to start.
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
@@ -72,10 +103,22 @@ func (s *Server) Start() error {
 
 	s.srv = &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", s.host, s.port),
-		Handler: mux,
+		Handler: s.authMiddleware(mux),
 	}
 
-	return s.srv.ListenAndServe()
+	// Graceful shutdown on SIGINT/SIGTERM.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		<-ctx.Done()
+		s.Stop()
+	}()
+
+	if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
 }
 
 // Stop gracefully shuts down the server, draining active connections.

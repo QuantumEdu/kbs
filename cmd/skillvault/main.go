@@ -72,13 +72,22 @@ func main() {
 		runMCP()
 	case "http":
 		svc := openVault()
+		apiKey := ""
+		for i, a := range os.Args[2:] {
+			if a == "--api-key" && i+1 < len(os.Args[2:]) {
+				apiKey = os.Args[2+i+1]
+			}
+		}
 		srv := api.NewServer("127.0.0.1", 7438,
 			svc.entrySvc, svc.artifactSvc, svc.contextSvc,
 			svc.projectSvc, svc.sessionSvc, svc.workflowSvc,
 			svc.exportSvc, svc.importSvc,
-		)
+		).WithAPIKey(apiKey)
 		fmt.Fprintf(os.Stderr, "HTTP API server starting on 127.0.0.1:7438\n")
-		log.Fatal(srv.Start())
+		if err := srv.Start(); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Fprintln(os.Stderr, "HTTP API server shut down.")
 	default:
 		runCLI(cmd)
 	}
@@ -896,7 +905,7 @@ func runMCP() {
 		svc.workflowSvc,
 		svc.sessionSvc,
 		svc.projectSvc,
-		).WithEntryRefService(svc.entryRefSvc).WithCompareService(svc.compareSvc)
+		).WithEntryRefService(svc.entryRefSvc).WithCompareService(svc.compareSvc).WithSaveResultService(svc.saveResultSvc)
 	server := mcp.NewServer(reg)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

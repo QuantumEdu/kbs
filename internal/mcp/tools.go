@@ -18,15 +18,16 @@ type ToolRegistry struct {
 	tools   []Tool
 	handler ToolHandler
 
-	entrySvc    *app.EntryService
-	entryRefSvc *app.EntryRefService
-	compareSvc  *app.VectorService
-	artifactSvc *app.ArtifactService
-	contextSvc  *app.ContextService
-	seriesSvc   *app.SeriesService
-	workflowSvc *app.WorkflowService
-	sessionSvc  *app.SessionService
-	projectSvc  *app.ProjectService
+	entrySvc       *app.EntryService
+	entryRefSvc    *app.EntryRefService
+	compareSvc     *app.VectorService
+	artifactSvc    *app.ArtifactService
+	contextSvc     *app.ContextService
+	seriesSvc      *app.SeriesService
+	workflowSvc    *app.WorkflowService
+	sessionSvc     *app.SessionService
+	projectSvc     *app.ProjectService
+	saveResultSvc  *app.SavePromptResultService
 }
 
 // NewToolRegistry creates a registry with a generic handler (for testing).
@@ -45,6 +46,12 @@ func (r *ToolRegistry) WithEntryRefService(svc *app.EntryRefService) *ToolRegist
 // WithCompareService sets the vector compare service for entry comparison.
 func (r *ToolRegistry) WithCompareService(svc *app.VectorService) *ToolRegistry {
 	r.compareSvc = svc
+	return r
+}
+
+// WithSaveResultService sets the save-result service.
+func (r *ToolRegistry) WithSaveResultService(svc *app.SavePromptResultService) *ToolRegistry {
+	r.saveResultSvc = svc
 	return r
 }
 
@@ -161,6 +168,16 @@ func (r *ToolRegistry) registerV2Tools() {
 			"id1": map[string]interface{}{"type": "string", "description": "First entry ID"},
 			"id2": map[string]interface{}{"type": "string", "description": "Second entry ID"},
 		})},
+		{Name: "save_result", Description: "Save an AI prompt result as a vault entry", InputSchema: schemaObj(map[string]interface{}{
+			"name":             map[string]interface{}{"type": "string", "description": "Result name (required)"},
+			"content":          map[string]interface{}{"type": "string", "description": "Result content (required)"},
+			"type":             map[string]interface{}{"type": "string", "description": "Entry type override"},
+			"category":         map[string]interface{}{"type": "string", "description": "Summary/category"},
+			"tags":             map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+			"project_id":       map[string]interface{}{"type": "string", "description": "Project ID or name"},
+			"source_prompt_id": map[string]interface{}{"type": "string", "description": "Source prompt entry ID"},
+			"model":            map[string]interface{}{"type": "string", "description": "Model identifier"},
+		})},
 	}
 }
 
@@ -214,6 +231,8 @@ func (r *ToolRegistry) dispatch(ctx context.Context, name string, args map[strin
 		return r.handleGetContextBundle(ctx, args)
 	case "compare_entries":
 		return r.handleCompareEntries(ctx, args)
+	case "save_result":
+		return r.handleSaveResult(ctx, args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -601,6 +620,13 @@ func textResult(text string) *ToolCallResult {
 	}
 }
 
+func jsonResult(v any) *ToolCallResult {
+	data, _ := json.Marshal(v)
+	return &ToolCallResult{
+		Content: []ToolContent{{Type: "text", Text: string(data)}},
+	}
+}
+
 func (r *ToolRegistry) handleSaveEntryRef(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
 	sourceID := strArg(args, "source_id")
 	targetID := strArg(args, "target_id")
@@ -903,6 +929,41 @@ func (r *ToolRegistry) handleCompareEntries(ctx context.Context, args map[string
 	}
 
 	return textResult(result), nil
+}
+
+func (r *ToolRegistry) handleSaveResult(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.saveResultSvc == nil {
+		return errResult("Error: save result service not available"), nil
+	}
+
+	input := app.SavePromptResultInput{
+		Name:           strArg(args, "name"),
+		Content:        strArg(args, "content"),
+		Type:           strArg(args, "type"),
+		Category:       strArg(args, "category"),
+		Tags:           parseStrings(args["tags"]),
+		ProjectID:      strArg(args, "project_id"),
+		SourcePromptID: strArg(args, "source_prompt_id"),
+		Model:          strArg(args, "model"),
+	}
+
+	output, err := r.saveResultSvc.Save(ctx, input)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+
+	proj := "global"
+	if output.ProjectID != "" {
+		proj = output.ProjectID
+	}
+
+	result := map[string]interface{}{
+		"entry_id":   output.EntryID,
+		"name":       output.Name,
+		"type":       output.Type,
+		"project_id": proj,
+	}
+	return jsonResult(result), nil
 }
 
 func errResult(text string) *ToolCallResult {
