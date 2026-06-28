@@ -412,9 +412,11 @@ Test pyramid:
 | v1-alpha (SQLite vault) | ✅ Archived |
 | v2 Qu@ntum (Hybrid + Context) | ✅ Archived |
 | v3 Qu@ntum (Workflow Pipelines) | ✅ Active |
-| Cloud sync | 🔲 Future |
-| TUI | 🔲 Future |
+| Cloud sync (S3 + GitHub) | ✅ Active |
+| TUI (Bubble Tea, build-tag gated) | ✅ Active |
 | Vector search | 🔲 Future |
+| Entry versioning | 🔲 Future |
+| HTTP auth layer | 🔲 Future |
 
 ---
 
