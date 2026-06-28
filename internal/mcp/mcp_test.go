@@ -33,7 +33,9 @@ func setupMCPServices(t *testing.T) (*ToolRegistry, *app.ProjectService, func())
 	contextSvc := app.NewContextService(store.Entries, store.Projects, store.Series, store.Workflows, store.Artifacts, entrySvc)
 	sessionSvc := app.NewSessionService(entrySvc, artifactSvc, projectSvc, store.Entries, store.Artifacts, store.Projects)
 
-	reg := NewServiceToolRegistry(entrySvc, artifactSvc, contextSvc, seriesSvc, workflowSvc, sessionSvc, projectSvc).WithEntryRefService(entryRefSvc)
+	entryVersionSvc := app.NewEntryVersionService(store.EntryVersions, store.Entries)
+
+	reg := NewServiceToolRegistry(entrySvc, artifactSvc, contextSvc, seriesSvc, workflowSvc, sessionSvc, projectSvc).WithEntryRefService(entryRefSvc).WithEntryVersionService(entryVersionSvc)
 	cleanup := func() { sqlDB.Close() }
 	return reg, projectSvc, cleanup
 }
@@ -60,7 +62,7 @@ func TestServerInitialize(t *testing.T) {
 	}
 }
 
-func TestToolsListReturns16Tools(t *testing.T) {
+func TestToolsListReturns18Tools(t *testing.T) {
 	reg := NewToolRegistry(nil)
 	s := NewServer(reg)
 	ctx := context.Background()
@@ -88,13 +90,13 @@ func TestToolsListReturns16Tools(t *testing.T) {
 		if !ok {
 			t.Fatalf("tools is not an array: %T", toolsRaw)
 		}
-		if len(tools) != 16 {
-			t.Errorf("expected 16 tools, got %d", len(tools))
+		if len(tools) != 18 {
+			t.Errorf("expected 18 tools, got %d", len(tools))
 		}
 		return
 	}
-	if len(interfaces) != 16 {
-		t.Errorf("expected 16 tools, got %d", len(interfaces))
+	if len(interfaces) != 18 {
+		t.Errorf("expected 18 tools, got %d", len(interfaces))
 	}
 }
 
@@ -298,6 +300,8 @@ func TestToolNamesAreCorrect(t *testing.T) {
 		"search_by_tags",
 		"get_context_bundle",
 		"compare_entries",
+		"list_entry_versions",
+		"restore_entry_version",
 	}
 
 	if len(names) != len(expected) {
@@ -883,6 +887,220 @@ func TestGetContextBundleWithoutProject(t *testing.T) {
 	}
 	if !strings.Contains(raw, "Global decision") {
 		t.Error("bundle should contain the global entry")
+	}
+}
+
+func TestListEntryVersionsMCP(t *testing.T) {
+	reg, projectSvc, cleanup := setupMCPServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "testproj"})
+
+	// Create an entry.
+	eid := saveTestEntry(t, reg, "Versioned Entry", "skill")
+
+	// List versions for this entry (should be empty initially).
+	versionsResult, err := reg.Call(ctx, "list_entry_versions", map[string]interface{}{
+		"entry_id": eid,
+	})
+	if err != nil {
+		t.Fatalf("list_entry_versions failed: %v", err)
+	}
+	if versionsResult.IsError {
+		t.Fatalf("list_entry_versions error: %s", versionsResult.Content[0].Text)
+	}
+
+	// Should return empty JSON array.
+	text := versionsResult.Content[0].Text
+	if !strings.Contains(text, "[") || !strings.Contains(text, "]") {
+		t.Errorf("expected JSON array, got: %s", text)
+	}
+}
+
+func TestListEntryVersionsWithVersionsMCP(t *testing.T) {
+	// Use setup that returns store for direct entry update to trigger versioning.
+	reg, store, projectSvc, cleanup := setupMCPWithStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "testproj"})
+
+	// Create an entry via MCP.
+	result, _ := reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "Entry With History",
+		"type":    "skill",
+		"summary": "First version text",
+		"body":    "Original body",
+		"project": "testproj",
+	})
+	entryID := extractEntryID(t, result)
+
+	// Update the SAME entry via store to trigger auto-archive.
+	entryResult, err := store.Entries.Get(ctx, entryID, false)
+	if err != nil {
+		t.Fatalf("Get entry failed: %v", err)
+	}
+	e := entryResult.Entry
+	e.Title = "Updated Title"
+	e.Summary = "Updated summary"
+	e.BodyOptional = "Updated body"
+	tags := make([]string, len(entryResult.Tags))
+	for i, tag := range entryResult.Tags {
+		tags[i] = tag.Name
+	}
+	if err := store.Entries.Save(ctx, e, tags); err != nil {
+		t.Fatalf("Save updated entry failed: %v", err)
+	}
+
+	// Now list versions — should have 1 version.
+	versionsResult, err := reg.Call(ctx, "list_entry_versions", map[string]interface{}{
+		"entry_id": entryID,
+	})
+	if err != nil {
+		t.Fatalf("list_entry_versions failed: %v", err)
+	}
+	if versionsResult.IsError {
+		t.Fatalf("list_entry_versions error: %s", versionsResult.Content[0].Text)
+	}
+
+	text := versionsResult.Content[0].Text
+	if !strings.Contains(text, "VersionID") {
+		t.Errorf("expected JSON with VersionID, got: %s", text)
+	}
+	if !strings.Contains(text, "Entry With History") {
+		t.Errorf("expected original title in versions, got: %s", text)
+	}
+}
+
+func TestRestoreEntryVersionMCP(t *testing.T) {
+	reg, store, projectSvc, cleanup := setupMCPWithStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "testproj"})
+
+	// Create entry via MCP.
+	result, _ := reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "V1 Entry",
+		"type":    "skill",
+		"summary": "V1 summary",
+		"body":    "V1 body",
+		"project": "testproj",
+	})
+	entryID := extractEntryID(t, result)
+
+	// Update to create version 1 (auto-archive V1 content).
+	entryResult, err := store.Entries.Get(ctx, entryID, false)
+	if err != nil {
+		t.Fatalf("Get entry failed: %v", err)
+	}
+	e := entryResult.Entry
+	e.Title = "V2 Entry"
+	e.Summary = "V2 summary"
+	e.BodyOptional = "V2 body"
+	tags := make([]string, len(entryResult.Tags))
+	for i, tag := range entryResult.Tags {
+		tags[i] = tag.Name
+	}
+	if err := store.Entries.Save(ctx, e, tags); err != nil {
+		t.Fatalf("Save V2 entry failed: %v", err)
+	}
+
+	// Restore to version 1 ("V1 Entry").
+	restoreResult, err := reg.Call(ctx, "restore_entry_version", map[string]interface{}{
+		"entry_id": entryID,
+		"version":  float64(1),
+	})
+	if err != nil {
+		t.Fatalf("restore_entry_version failed: %v", err)
+	}
+	if restoreResult.IsError {
+		t.Fatalf("restore_entry_version error: %s", restoreResult.Content[0].Text)
+	}
+
+	text := restoreResult.Content[0].Text
+	if !strings.Contains(text, "restored_from_version") {
+		t.Errorf("expected restored_from_version in response: %s", text)
+	}
+	if !strings.Contains(text, "V1 Entry") {
+		t.Errorf("expected 'V1 Entry' in restored content: %s", text)
+	}
+
+	// Verify a new version was created (pre-restore V2 state).
+	versionsResult, _ := reg.Call(ctx, "list_entry_versions", map[string]interface{}{
+		"entry_id": entryID,
+	})
+	if !strings.Contains(versionsResult.Content[0].Text, "V2 Entry") {
+		t.Errorf("expected V2 (pre-restore) in versions: %s", versionsResult.Content[0].Text)
+	}
+}
+
+// setupMCPWithStore returns the store alongside the registry for tests
+// that need direct store access (e.g., triggering auto-archive).
+func setupMCPWithStore(t *testing.T) (*ToolRegistry, *db.Store, *app.ProjectService, func()) {
+	t.Helper()
+	sqlDB, err := db.OpenDB(":memory:")
+	if err != nil {
+		t.Fatalf("OpenDB failed: %v", err)
+	}
+	if err := db.RunMigrations(sqlDB); err != nil {
+		sqlDB.Close()
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+	store := db.NewStore(sqlDB)
+
+	entrySvc := app.NewEntryService(store.Entries, store.Projects, store.Artifacts)
+	artifactSvc := app.NewArtifactService(store.Artifacts, store.Entries, store.Projects)
+	workflowSvc := app.NewWorkflowService(store.Workflows)
+	seriesSvc := app.NewSeriesService(store.Series, store.Entries)
+	projectSvc := app.NewProjectService(store.Projects)
+	entryRefSvc := app.NewEntryRefService(store.EntryLinks, store.Entries)
+	contextSvc := app.NewContextService(store.Entries, store.Projects, store.Series, store.Workflows, store.Artifacts, entrySvc)
+	sessionSvc := app.NewSessionService(entrySvc, artifactSvc, projectSvc, store.Entries, store.Artifacts, store.Projects)
+	entryVersionSvc := app.NewEntryVersionService(store.EntryVersions, store.Entries)
+
+	reg := NewServiceToolRegistry(entrySvc, artifactSvc, contextSvc, seriesSvc, workflowSvc, sessionSvc, projectSvc).
+		WithEntryRefService(entryRefSvc).WithEntryVersionService(entryVersionSvc)
+	cleanup := func() { sqlDB.Close() }
+	return reg, store, projectSvc, cleanup
+}
+
+func TestRestoreEntryVersionMissingEntryIDMCP(t *testing.T) {
+	reg, _, cleanup := setupMCPServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	result, err := reg.Call(ctx, "restore_entry_version", map[string]interface{}{
+		"version": float64(1),
+	})
+	if err != nil {
+		t.Fatalf("restore_entry_version dispatch failed: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for missing entry_id")
+	}
+	if !strings.Contains(result.Content[0].Text, "entry_id is required") {
+		t.Errorf("expected 'entry_id is required', got: %s", result.Content[0].Text)
+	}
+}
+
+func TestRestoreEntryVersionMissingVersionMCP(t *testing.T) {
+	reg, _, cleanup := setupMCPServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	result, err := reg.Call(ctx, "restore_entry_version", map[string]interface{}{
+		"entry_id": "some-id",
+	})
+	if err != nil {
+		t.Fatalf("restore_entry_version dispatch failed: %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("expected error for missing version")
+	}
+	if !strings.Contains(result.Content[0].Text, "version is required") {
+		t.Errorf("expected 'version is required', got: %s", result.Content[0].Text)
 	}
 }
 

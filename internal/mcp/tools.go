@@ -18,15 +18,16 @@ type ToolRegistry struct {
 	tools   []Tool
 	handler ToolHandler
 
-	entrySvc    *app.EntryService
-	entryRefSvc *app.EntryRefService
-	compareSvc  *app.VectorService
-	artifactSvc *app.ArtifactService
-	contextSvc  *app.ContextService
-	seriesSvc   *app.SeriesService
-	workflowSvc *app.WorkflowService
-	sessionSvc  *app.SessionService
-	projectSvc  *app.ProjectService
+	entrySvc        *app.EntryService
+	entryRefSvc     *app.EntryRefService
+	compareSvc      *app.VectorService
+	artifactSvc     *app.ArtifactService
+	contextSvc      *app.ContextService
+	seriesSvc       *app.SeriesService
+	workflowSvc     *app.WorkflowService
+	sessionSvc      *app.SessionService
+	projectSvc      *app.ProjectService
+	entryVersionSvc *app.EntryVersionService
 }
 
 // NewToolRegistry creates a registry with a generic handler (for testing).
@@ -45,6 +46,12 @@ func (r *ToolRegistry) WithEntryRefService(svc *app.EntryRefService) *ToolRegist
 // WithCompareService sets the vector compare service for entry comparison.
 func (r *ToolRegistry) WithCompareService(svc *app.VectorService) *ToolRegistry {
 	r.compareSvc = svc
+	return r
+}
+
+// WithEntryVersionService sets the entry version service for version history operations.
+func (r *ToolRegistry) WithEntryVersionService(svc *app.EntryVersionService) *ToolRegistry {
+	r.entryVersionSvc = svc
 	return r
 }
 
@@ -161,6 +168,13 @@ func (r *ToolRegistry) registerV2Tools() {
 			"id1": map[string]interface{}{"type": "string", "description": "First entry ID"},
 			"id2": map[string]interface{}{"type": "string", "description": "Second entry ID"},
 		})},
+		{Name: "list_entry_versions", Description: "List all historical versions of an entry", InputSchema: schemaObj(map[string]interface{}{
+			"entry_id": map[string]interface{}{"type": "string", "description": "Entry ID (required)"},
+		})},
+		{Name: "restore_entry_version", Description: "Restore an entry to a previous historical version", InputSchema: schemaObj(map[string]interface{}{
+			"entry_id": map[string]interface{}{"type": "string", "description": "Entry ID (required)"},
+			"version":  map[string]interface{}{"type": "number", "description": "Version number to restore (required)"},
+		})},
 	}
 }
 
@@ -212,9 +226,13 @@ func (r *ToolRegistry) dispatch(ctx context.Context, name string, args map[strin
 		return r.handleSearchByTags(ctx, args)
 	case "get_context_bundle":
 		return r.handleGetContextBundle(ctx, args)
-	case "compare_entries":
-		return r.handleCompareEntries(ctx, args)
-	default:
+		case "compare_entries":
+			return r.handleCompareEntries(ctx, args)
+		case "list_entry_versions":
+			return r.handleListEntryVersions(ctx, args)
+		case "restore_entry_version":
+			return r.handleRestoreEntryVersion(ctx, args)
+		default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
 }
@@ -903,6 +921,67 @@ func (r *ToolRegistry) handleCompareEntries(ctx context.Context, args map[string
 	}
 
 	return textResult(result), nil
+}
+
+func (r *ToolRegistry) handleListEntryVersions(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.entryVersionSvc == nil {
+		return errResult("Error: entry version service not available"), nil
+	}
+
+	entryID := strArg(args, "entry_id")
+	if entryID == "" {
+		return errResult("Error: entry_id is required"), nil
+	}
+
+	versions, err := r.entryVersionSvc.ListVersions(ctx, entryID)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+
+	data, err := json.Marshal(versions)
+	if err != nil {
+		return errResult("Error: marshal versions: " + err.Error()), nil
+	}
+	return textResult(string(data)), nil
+}
+
+func (r *ToolRegistry) handleRestoreEntryVersion(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.entryVersionSvc == nil {
+		return errResult("Error: entry version service not available"), nil
+	}
+
+	entryID := strArg(args, "entry_id")
+	if entryID == "" {
+		return errResult("Error: entry_id is required"), nil
+	}
+
+	version := intArg(args, "version")
+	if version <= 0 {
+		return errResult("Error: version is required"), nil
+	}
+
+	entry, err := r.entryVersionSvc.RestoreVersion(ctx, entryID, version)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+
+	// Retrieve the new version number (auto-archived pre-restore state).
+	versions, _ := r.entryVersionSvc.ListVersions(ctx, entryID)
+	newVersion := 0
+	if len(versions) > 0 {
+		newVersion = versions[0].VersionNumber
+	}
+
+	result := map[string]interface{}{
+		"entry":                entry,
+		"restored_from_version": version,
+		"new_version_created":  newVersion,
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		return errResult("Error: marshal result: " + err.Error()), nil
+	}
+	return textResult(string(data)), nil
 }
 
 func errResult(text string) *ToolCallResult {

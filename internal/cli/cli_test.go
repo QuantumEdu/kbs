@@ -50,6 +50,10 @@ func TestParseSubcommand(t *testing.T) {
 		{"memory reindex", []string{"skillvault", "memory", "reindex", "--path", "/tmp/mem", "--project", "p"}, "memory-reindex", false},
 		{"memory list-external", []string{"skillvault", "memory", "list-external", "--project", "p"}, "memory-list-external", false},
 		{"entry ref add", []string{"skillvault", "entry", "ref", "add", "s", "t", "depends_on"}, "entry-ref", false},
+		{"entry history", []string{"skillvault", "entry", "history", "entry-id"}, "entry-history", false},
+		{"entry restore", []string{"skillvault", "entry", "restore", "entry-id", "--version", "1"}, "entry-restore", false},
+		{"entry history no id", []string{"skillvault", "entry", "history"}, "", true},
+		{"entry restore no id", []string{"skillvault", "entry", "restore"}, "", true},
 		{"run", []string{"skillvault", "run", "wf", "input.md"}, "run", false},
 		{"run with save", []string{"skillvault", "run", "wf", "input.md", "--save", "out.md"}, "run", false},
 		{"run with stdin", []string{"skillvault", "run", "wf", "-"}, "run", false},
@@ -668,5 +672,45 @@ func TestParseSearchFlags_Vector(t *testing.T) {
 	}
 	if flags.Limit != 5 {
 		t.Errorf("Limit = %d, want 5", flags.Limit)
+	}
+}
+
+func TestParseEntryHistoryFlags(t *testing.T) {
+	flags, err := ParseEntryHistoryFlags([]string{"skillvault", "entry", "history", "my-entry-id"})
+	if err != nil {
+		t.Fatalf("ParseEntryHistoryFlags failed: %v", err)
+	}
+	if flags.ID != "my-entry-id" {
+		t.Errorf("ID = %q, want 'my-entry-id'", flags.ID)
+	}
+
+	_, err = ParseEntryHistoryFlags([]string{"skillvault", "entry", "history"})
+	if err == nil {
+		t.Fatal("expected error for missing entry ID")
+	}
+}
+
+func TestParseEntryRestoreFlags(t *testing.T) {
+	flags, err := ParseEntryRestoreFlags([]string{"skillvault", "entry", "restore", "my-entry", "--version", "3"})
+	if err != nil {
+		t.Fatalf("ParseEntryRestoreFlags failed: %v", err)
+	}
+	if flags.ID != "my-entry" {
+		t.Errorf("ID = %q, want 'my-entry'", flags.ID)
+	}
+	if flags.Version != 3 {
+		t.Errorf("Version = %d, want 3", flags.Version)
+	}
+
+	// Missing version flag.
+	_, err = ParseEntryRestoreFlags([]string{"skillvault", "entry", "restore", "my-entry"})
+	if err == nil {
+		t.Fatal("expected error for missing --version")
+	}
+
+	// Missing entry ID.
+	_, err = ParseEntryRestoreFlags([]string{"skillvault", "entry", "restore"})
+	if err == nil {
+		t.Fatal("expected error for missing entry ID")
 	}
 }
