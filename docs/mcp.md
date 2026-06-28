@@ -1,4 +1,4 @@
-# MCP Server — 15 herramientas para agentes AI
+# MCP Server — 16 herramientas para agentes AI
 
 SkillVault funciona como servidor MCP (Model Context Protocol) sobre stdio JSON-RPC 2.0. Esto permite que agentes como Claude Code, OpenCode, o cualquier cliente MCP lean y escriban directamente en tu vault.
 
@@ -97,7 +97,9 @@ Búsqueda full-text con filtros.
 - `project` (string, opcional) — Filtrar por proyecto
 - `tags` (string[], opcional) — Filtrar por tags
 - `status` (string, opcional) — Filtrar por estado
+- `include_archived` (bool, opcional) — Incluir archivados (default: false)
 - `limit` (int, opcional) — Máximo de resultados
+- `vector` (bool, opcional) — Usar búsqueda semántica por coseno (default: false)
 
 ---
 
@@ -122,6 +124,22 @@ Guarda un artefacto largo respaldado por filesystem.
 - `tags` (string[], opcional) — Tags
 
 **Cómo funciona:** el contenido se escribe en `~/.skillvault/objects/YYYY/MM/<slug>.<ext>` con hash SHA256. La metadata (título, tipo, slug, fecha) va a SQLite. Ideal para outputs largos de AI, análisis de PDFs, reportes, etc.
+
+---
+
+### `save_result`
+
+Guarda un resultado de AI prompt como entrada en el vault.
+
+**Parámetros:**
+- `name` (string, requerido) — Nombre del resultado (genera slug)
+- `content` (string, requerido) — Contenido del resultado
+- `type` (string, opcional) — Tipo de entrada (default: `ai_output`)
+- `category` (string, opcional) — Categoría opcional
+- `tags` (string[], opcional) — Tags
+- `project` (string, opcional) — Slug del proyecto
+- `source_prompt_id` (string, opcional) — ID de la entry prompt que generó este resultado
+- `model` (string, opcional) — Modelo que generó el resultado
 
 ---
 
