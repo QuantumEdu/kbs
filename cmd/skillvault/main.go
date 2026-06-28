@@ -40,6 +40,7 @@ type vaultServices struct {
 	sessionSvc     *app.SessionService
 	exportSvc      *app.VaultExportService
 	importSvc      *app.VaultImportService
+	packExportSvc  *app.VaultPackExportService
 	saveResultSvc  *app.SavePromptResultService
 	compareSvc     *app.VectorService
 	fileSvc        *files.ArtifactFileService
@@ -152,6 +153,7 @@ func openVault() *vaultServices {
 	sessionSvc := app.NewSessionService(entrySvc, artifactSvc, projectSvc, store.Entries, store.Artifacts, store.Projects)
 	exportSvc := app.NewVaultExportService(store.ImportExport, store.Artifacts, store.Entries, store.Projects, store.Workflows)
 	importSvc := app.NewVaultImportService(store.ImportExport, store.Entries, store.Projects, store.Artifacts)
+	packExportSvc := app.NewVaultPackExportService(store.ImportExport, store.Artifacts, store.Entries, store.Projects, store.Workflows)
 	saveResultSvc := app.NewSavePromptResultService(store.Entries, store.Projects, store.Artifacts)
 	workflowRunSvc := app.NewWorkflowRunService(store.Workflows, store.WorkflowRuns, store.Entries)
 	compareSvc := app.NewVectorService(store.Entries, store.Embeddings)
@@ -183,6 +185,7 @@ func openVault() *vaultServices {
 		sessionSvc:     sessionSvc,
 		exportSvc:      exportSvc,
 		importSvc:      importSvc,
+		packExportSvc:  packExportSvc,
 		saveResultSvc:  saveResultSvc,
 		compareSvc:     compareSvc,
 		fileSvc:        fileSvc,
@@ -554,6 +557,36 @@ func runCLI(cmd string) {
 		fmt.Printf("  Learnings: %d\n", len(input.Learnings))
 
 	case "export":
+		// Detect --pack flag for pack export mode.
+		hasPack := false
+		for _, a := range os.Args {
+			if a == "--pack" {
+				hasPack = true
+				break
+			}
+		}
+
+		if hasPack {
+			packFlags, err := cli.ParseExportPackFlags(os.Args)
+			if err != nil {
+				cli.PrintError(err)
+				os.Exit(1)
+			}
+
+			if err := svc.packExportSvc.ExportPack(ctx, app.PackExportInput{
+				Pack:        packFlags.Pack,
+				Author:      packFlags.Author,
+				Version:     packFlags.Version,
+				Description: packFlags.Description,
+				OutputPath:  packFlags.OutputPath,
+			}); err != nil {
+				cli.PrintError(err)
+				os.Exit(1)
+			}
+			fmt.Printf("Pack exported to %s\n", packFlags.OutputPath)
+			return
+		}
+
 		flags, err := cli.ParseExportFlags(os.Args)
 		if err != nil {
 			cli.PrintError(err)
@@ -573,7 +606,7 @@ func runCLI(cmd string) {
 			os.Exit(1)
 		}
 
-		if err := svc.importSvc.Import(ctx, flags.FilePath); err != nil {
+		if err := svc.importSvc.Import(ctx, flags.FilePath, flags.Prefix); err != nil {
 			cli.PrintError(err)
 			os.Exit(1)
 		}

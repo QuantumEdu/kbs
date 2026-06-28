@@ -19,6 +19,22 @@ type VaultExport struct {
 	Data          VaultData `json:"data"`
 }
 
+// VaultPackExport wraps a VaultExport with pack-level metadata for portable sharing.
+type VaultPackExport struct {
+	Pack PackMetadata `json:"pack"`
+	Data VaultExport  `json:"data"`
+}
+
+// PackMetadata carries authorship and versioning information for a skill pack.
+type PackMetadata struct {
+	PackID      string `json:"pack_id"`
+	Author      string `json:"author"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+	ExportedAt  string `json:"exported_at"`
+	Source      string `json:"source"`
+}
+
 type VaultData struct {
 	Projects         []Project         `json:"projects"`
 	Entries          []Entry           `json:"entries"`
