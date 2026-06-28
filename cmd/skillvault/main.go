@@ -43,6 +43,7 @@ type vaultServices struct {
 	importSvc      *app.VaultImportService
 	saveResultSvc  *app.SavePromptResultService
 	compareSvc     *app.VectorService
+	statsSvc       *app.StatsService
 	fileSvc        *files.ArtifactFileService
 	scanner        *security.SecretScanner
 	syncSvc        *app.SyncService
@@ -163,6 +164,7 @@ func openVault() *vaultServices {
 	sessionSvc := app.NewSessionService(entrySvc, artifactSvc, projectSvc, store.Entries, store.Artifacts, store.Projects)
 	exportSvc := app.NewVaultExportService(store.ImportExport, store.Artifacts, store.Entries, store.Projects, store.Workflows)
 	importSvc := app.NewVaultImportService(store.ImportExport, store.Entries, store.Projects, store.Artifacts)
+	statsSvc := app.NewStatsService(store.Entries, store.Artifacts, store.Projects)
 	saveResultSvc := app.NewSavePromptResultService(store.Entries, store.Projects, store.Artifacts)
 	workflowRunSvc := app.NewWorkflowRunService(store.Workflows, store.WorkflowRuns, store.Entries)
 	compareSvc := app.NewVectorService(store.Entries, store.Embeddings)
@@ -204,6 +206,7 @@ func openVault() *vaultServices {
 		importSvc:      importSvc,
 		saveResultSvc:  saveResultSvc,
 		compareSvc:     compareSvc,
+		statsSvc:       statsSvc,
 		fileSvc:        fileSvc,
 		scanner:        scanner,
 		syncSvc:        syncSvc,
@@ -627,6 +630,14 @@ func runCLI(cmd string) {
 			Type:      output.Type,
 			ProjectID: output.ProjectID,
 		}))
+
+	case "stats":
+		stats, err := svc.statsSvc.GetStats(ctx)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+		fmt.Println(app.FormatStats(stats))
 
 	case "memory-index", "memory-reindex", "memory-list-external":
 		flags, err := cli.ParseMemoryIndexFlags(os.Args)
