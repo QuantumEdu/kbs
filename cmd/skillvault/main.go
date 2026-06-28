@@ -845,6 +845,9 @@ func runCLI(cmd string) {
 			cli.PrintError(fmt.Errorf("unknown entry ref subcommand: %s", sub))
 			os.Exit(1)
 		}
+
+	case "tui":
+		runTUI(svc)
 	}
 }
 
