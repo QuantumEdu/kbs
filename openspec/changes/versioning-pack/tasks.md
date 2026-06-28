@@ -82,29 +82,29 @@
 
 ### Phase 8: Domain + App
 
-- [ ] 8.1 Add `VaultPackExport` and `PackMetadata` structs — `internal/domain/filters.go`
-- [ ] 8.2 Implement `VaultPackExportService` — wraps `VaultExportService.ExportAll()`, adds `PackMetadata`, marshals to JSON — `internal/app/pack_export.go` (new)
-- [ ] 8.3 Modify `VaultImportService.Import()` to detect pack format (`pack` key) vs bare `VaultExport`. On pack detection: apply prefix to all IDs in `VaultData`; then delegate to `ImportVault` — `internal/app/import_export.go`
+- [x] 8.1 Add `VaultPackExport` and `PackMetadata` structs — `internal/domain/filters.go`
+- [x] 8.2 Implement `VaultPackExportService` — wraps `VaultExportService.ExportAll()`, adds `PackMetadata`, marshals to JSON — `internal/app/pack_export.go` (new)
+- [x] 8.3 Modify `VaultImportService.Import()` to detect pack format (`pack` key) vs bare `VaultExport`. On pack detection: apply prefix to all IDs in `VaultData`; then delegate to `ImportVault` — `internal/app/import_export.go`
 
 ### Phase 9: Prefix Application
 
-- [ ] 9.1 Implement `applyPrefix(prefix string, data *VaultData)` — iterates all slices, prepends prefix to every ID field: `Entries[].ID`, `Entries[].ProjectID`, `Entries[].ArtifactID`, `Projects[].ID`, `Artifacts[].ID`, `Artifacts[].ProjectID`, `Artifacts[].SourceEntryID`, `Workflows[].ID`, `WorkflowSteps[].WorkflowID`, `WorkflowSteps[].ID`, `Series[].ID`, `SeriesEntries[].SeriesID`, `SeriesEntries[].EntryID`, `EntryTags[].EntryID`, `EntryLinks[].FromEntryID`, `EntryLinks[].ToEntryID`, `WorkflowRuns[].WorkflowID`, `WorkflowRunSteps[].RunID`, `WorkflowRunSteps[].EntryID` — `internal/app/import_export.go`
+- [x] 9.1 Implement `applyPrefix(prefix string, data *VaultData)` — iterates all slices, prepends prefix to every ID field: `Entries[].ID`, `Entries[].ProjectID`, `Entries[].ArtifactID`, `Projects[].ID`, `Artifacts[].ID`, `Artifacts[].ProjectID`, `Artifacts[].SourceEntryID`, `Workflows[].ID`, `WorkflowSteps[].WorkflowID`, `WorkflowSteps[].ID`, `Series[].ID`, `SeriesEntries[].SeriesID`, `SeriesEntries[].EntryID`, `EntryTags[].EntryID`, `EntryLinks[].FromEntryID`, `EntryLinks[].ToEntryID`, `WorkflowRuns[].WorkflowID`, `WorkflowRunSteps[].RunID`, `WorkflowRunSteps[].EntryID` — `internal/app/import_export.go`
 
 ### Phase 10: CLI
 
-- [ ] 10.1 Extend `ParseCommand` in `export` path: detect `--pack` flag for pack export mode; extend `entry` subcommand is already handled in PR #2 — `internal/cli/commands.go`
-- [ ] 10.2 Add `ExportPackFlags` struct (`Pack` string, `Author` string, `Version` string, `Description` string, `OutputPath` string) and `ParseExportPackFlags` function — `internal/cli/commands.go`
-- [ ] 10.3 Add `ImportPackFlags` struct (`FilePath` string, `Prefix` string) — extend existing `ImportFlags` — `internal/cli/commands.go`
-- [ ] 10.4 Extend `runCLI` dispatch: `export` case detects `--pack` flag, calls `VaultPackExportService.ExportPack`; `import` case passes `--prefix` to `VaultImportService.Import` — `cmd/skillvault/main.go`
+- [x] 10.1 Extend `ParseCommand` in `export` path: detect `--pack` flag for pack export mode; extend `entry` subcommand is already handled in PR #2 — `internal/cli/commands.go`
+- [x] 10.2 Add `ExportPackFlags` struct (`Pack` string, `Author` string, `Version` string, `Description` string, `OutputPath` string) and `ParseExportPackFlags` function — `internal/cli/commands.go`
+- [x] 10.3 Add `ImportPackFlags` struct (`FilePath` string, `Prefix` string) — extend existing `ImportFlags` — `internal/cli/commands.go`
+- [x] 10.4 Extend `runCLI` dispatch: `export` case detects `--pack` flag, calls `VaultPackExportService.ExportPack`; `import` case passes `--prefix` to `VaultImportService.Import` — `cmd/skillvault/main.go`
 
 ### Phase 11: Tests
 
-- [ ] 11.1 Write `pack_export_test.go`: test pack export round-trip (export then import with prefix, verify IDs have prefix); test bare export still works; test pack detection on import; test empty prefix imports as-is — `internal/app/pack_export_test.go` (new)
-- [ ] 11.2 Extend `cli_test.go`: test `export --pack` and `import --pack --prefix` flag parsing — `internal/cli/cli_test.go`
+- [x] 11.1 Write `pack_export_test.go`: test pack export round-trip (export then import with prefix, verify IDs have prefix); test bare export still works; test pack detection on import; test empty prefix imports as-is — `internal/app/pack_export_test.go` (new)
+- [x] 11.2 Extend `cli_test.go`: test `export --pack` and `import --pack --prefix` flag parsing — `internal/cli/cli_test.go`
 
 ### Phase 12: Service Wiring
 
-- [ ] 12.1 Instantiate `VaultPackExportService` in `openVault()`, add to `vaultServices` — `cmd/skillvault/main.go`
+- [x] 12.1 Instantiate `VaultPackExportService` in `openVault()`, add to `vaultServices` — `cmd/skillvault/main.go`
 
 **Verification**: `go test ./...` — all tests pass; `skillvault export --pack "Test" --author "me" --version "1.0" --output t.svpack` produces valid pack; `skillvault import --pack t.svpack --prefix "p/"` imports with prefix; bare import still works
 

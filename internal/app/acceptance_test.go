@@ -537,7 +537,7 @@ func TestAC9_ExportImportPreservesAllEntities(t *testing.T) {
 	}
 	store2 := db.NewStore(sqlDB2)
 	importSvc2 := NewVaultImportService(store2.ImportExport, store2.Entries, store2.Projects, store2.Artifacts)
-	if err := importSvc2.Import(ctx, exportPath); err != nil {
+	if err := importSvc2.Import(ctx, exportPath, ""); err != nil {
 		t.Fatalf("AC9 FAIL: Import failed: %v", err)
 	}
 

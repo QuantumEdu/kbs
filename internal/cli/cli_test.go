@@ -714,3 +714,90 @@ func TestParseEntryRestoreFlags(t *testing.T) {
 		t.Fatal("expected error for missing entry ID")
 	}
 }
+
+func TestParseExportPackFlags(t *testing.T) {
+	flags, err := ParseExportPackFlags([]string{"skillvault", "export", "--pack", "My Pack", "--author", "tester", "--version", "1.0"})
+	if err != nil {
+		t.Fatalf("ParseExportPackFlags failed: %v", err)
+	}
+	if flags.Pack != "My Pack" {
+		t.Errorf("Pack = %q, want 'My Pack'", flags.Pack)
+	}
+	if flags.Author != "tester" {
+		t.Errorf("Author = %q, want 'tester'", flags.Author)
+	}
+	if flags.Version != "1.0" {
+		t.Errorf("Version = %q, want '1.0'", flags.Version)
+	}
+	if flags.OutputPath != "skillvault-pack.svpack" {
+		t.Errorf("OutputPath default = %q, want 'skillvault-pack.svpack'", flags.OutputPath)
+	}
+
+	// With custom output.
+	flags, err = ParseExportPackFlags([]string{"skillvault", "export", "--pack", "P", "--author", "A", "--version", "v1", "--output", "out.svpack", "--description", "desc"})
+	if err != nil {
+		t.Fatalf("ParseExportPackFlags with output failed: %v", err)
+	}
+	if flags.OutputPath != "out.svpack" {
+		t.Errorf("OutputPath = %q, want 'out.svpack'", flags.OutputPath)
+	}
+	if flags.Description != "desc" {
+		t.Errorf("Description = %q, want 'desc'", flags.Description)
+	}
+
+	// Missing required flags.
+	_, err = ParseExportPackFlags([]string{"skillvault", "export", "--pack", "P"})
+	if err == nil {
+		t.Fatal("expected error for missing --author")
+	}
+	_, err = ParseExportPackFlags([]string{"skillvault", "export", "--pack", "P", "--author", "A"})
+	if err == nil {
+		t.Fatal("expected error for missing --version")
+	}
+	_, err = ParseExportPackFlags([]string{"skillvault", "export"})
+	if err == nil {
+		t.Fatal("expected error for missing --pack")
+	}
+}
+
+func TestParseImportFlagsWithPrefix(t *testing.T) {
+	// Backward compat: positional arg.
+	flags, err := ParseImportFlags([]string{"skillvault", "import", "data.json"})
+	if err != nil {
+		t.Fatalf("ParseImportFlags positional failed: %v", err)
+	}
+	if flags.FilePath != "data.json" {
+		t.Errorf("FilePath = %q, want 'data.json'", flags.FilePath)
+	}
+	if flags.Prefix != "" {
+		t.Errorf("Prefix = %q, want empty", flags.Prefix)
+	}
+
+	// --pack flag.
+	flags, err = ParseImportFlags([]string{"skillvault", "import", "ignored", "--pack", "pack.svpack"})
+	if err != nil {
+		t.Fatalf("ParseImportFlags --pack failed: %v", err)
+	}
+	if flags.FilePath != "pack.svpack" {
+		t.Errorf("FilePath = %q, want 'pack.svpack'", flags.FilePath)
+	}
+
+	// --pack with --prefix.
+	flags, err = ParseImportFlags([]string{"skillvault", "import", "ignored", "--pack", "p.svpack", "--prefix", "ns/"})
+	if err != nil {
+		t.Fatalf("ParseImportFlags --pack --prefix failed: %v", err)
+	}
+	if flags.FilePath != "p.svpack" {
+		t.Errorf("FilePath = %q, want 'p.svpack'", flags.FilePath)
+	}
+	if flags.Prefix != "ns/" {
+		t.Errorf("Prefix = %q, want 'ns/'", flags.Prefix)
+	}
+
+	// Missing file path.
+	_, err = ParseImportFlags([]string{"skillvault", "import"})
+	if err == nil {
+		t.Fatal("expected error for missing path")
+	}
+	}
+}

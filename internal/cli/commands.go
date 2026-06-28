@@ -419,9 +419,51 @@ func ParseExportFlags(args []string) (*ExportFlags, error) {
 	return flags, nil
 }
 
+// ExportPackFlags holds parsed export --pack command flags.
+type ExportPackFlags struct {
+	Pack        string
+	Author      string
+	Version     string
+	Description string
+	OutputPath  string
+}
+
+// ParseExportPackFlags parses export-pack-specific flags from args.
+func ParseExportPackFlags(args []string) (*ExportPackFlags, error) {
+	flags := &ExportPackFlags{OutputPath: "skillvault-pack.svpack"}
+
+	fs := flag.NewFlagSet("export", flag.ContinueOnError)
+	fs.StringVar(&flags.Pack, "pack", "", "Pack name (required for pack mode)")
+	fs.StringVar(&flags.Author, "author", "", "Author name (required)")
+	fs.StringVar(&flags.Version, "version", "", "Version string (required)")
+	fs.StringVar(&flags.Description, "description", "", "Pack description")
+	fs.StringVar(&flags.OutputPath, "output", "skillvault-pack.svpack", "Output file path")
+
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 2 {
+		if err := fs.Parse(args[2:]); err != nil {
+			return nil, fmt.Errorf("parse export-pack flags: %w", err)
+		}
+	}
+
+	if flags.Pack == "" {
+		return nil, fmt.Errorf("--pack is required")
+	}
+	if flags.Author == "" {
+		return nil, fmt.Errorf("--author is required")
+	}
+	if flags.Version == "" {
+		return nil, fmt.Errorf("--version is required")
+	}
+
+	return flags, nil
+}
+
 // ImportFlags holds parsed import command flags.
 type ImportFlags struct {
 	FilePath string
+	Prefix   string
 }
 
 // RunFlags holds parsed run command flags.
@@ -545,10 +587,29 @@ func ParseMemoryIndexFlags(args []string) (*MemoryIndexFlags, error) {
 }
 
 func ParseImportFlags(args []string) (*ImportFlags, error) {
-	if len(args) < 3 {
-		return nil, fmt.Errorf("import requires a file path")
+	flags := &ImportFlags{}
+
+	fs := flag.NewFlagSet("import", flag.ContinueOnError)
+	fs.StringVar(&flags.FilePath, "pack", "", "Pack file path (for pack import)")
+	fs.StringVar(&flags.Prefix, "prefix", "", "Prefix to prepend to all imported IDs")
+	fs.SetOutput(&nullWriter{})
+
+	// Parse args after positional (args[3:]) — flags like --pack, --prefix.
+	if len(args) > 3 {
+		if err := fs.Parse(args[3:]); err != nil {
+			return nil, fmt.Errorf("parse import flags: %w", err)
+		}
 	}
-	return &ImportFlags{FilePath: args[2]}, nil
+
+	// If --pack not provided, use positional arg (backward compat).
+	if flags.FilePath == "" {
+		if len(args) < 3 {
+			return nil, fmt.Errorf("import requires a file path")
+		}
+		flags.FilePath = args[2]
+	}
+
+	return flags, nil
 }
 
 // nullWriter discards writes (used to suppress flag package errors).
