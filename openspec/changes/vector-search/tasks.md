@@ -36,14 +36,14 @@ Total: ~1360 lines.
 
 ## Phase 3: Similarity + DB (PR 3)
 
-- [ ] 3.1 `internal/vector/similarity.go` — `Cosine()`, `Search()` brute-force ranked
-- [ ] 3.2 `internal/vector/similarity_test.go` — identity=1.0, orthogonal≈0, ranking
-- [ ] 3.3 `internal/db/migrations/005_vector_search.sql` — `entry_embeddings` table
-- [ ] 3.4 `internal/db/schema.sql` — append `entry_embeddings` definition
-- [ ] 3.5 `internal/db/vector_store.go` — `VectorStore` interface + `sqliteVectorStore`
-- [ ] 3.6 `internal/db/vector_store_test.go` — BLOB save/load, GetAll, empty
-- [ ] 3.7 `internal/db/store.go` — `VectorStore` interface + `Embeddings` field on `Store`
-- [ ] 3.8 `internal/domain/filters.go` — `Vector bool` on `SearchQuery`
+- [x] 3.1 `internal/vector/similarity.go` — `Cosine()`, `Search()` brute-force ranked
+- [x] 3.2 `internal/vector/similarity_test.go` — identity=1.0, orthogonal≈0, ranking
+- [x] 3.3 `internal/db/migrations/005_vector_search.sql` — `entry_embeddings` table
+- [x] 3.4 `internal/db/schema.sql` — append `entry_embeddings` definition
+- [x] 3.5 `internal/db/vector_store.go` — `VectorStore` interface + `sqliteVectorStore`
+- [x] 3.6 `internal/db/vector_store_test.go` — BLOB save/load, GetAll, empty
+- [x] 3.7 `internal/db/store.go` — `VectorStore` interface + `Embeddings` field on `Store`
+- [x] 3.8 `internal/domain/filters.go` — `Vector bool` on `SearchQuery`
 
 ## Phase 4: Integration (PR 4)
 
