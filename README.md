@@ -183,7 +183,7 @@ cmd/skillvault/
 
 ---
 
-## CLI Commands (19)
+## CLI Commands (21)
 
 | Command | Description | Example |
 |---------|-------------|---------|
@@ -203,12 +203,14 @@ cmd/skillvault/
 | `graph` | Visualize entry graph | `skillvault graph --entry e1 --format mermaid` |
 | `entry ref add/list/remove` | Manage graph edges | `skillvault entry ref add e1 e2 depends_on` |
 | `memory index/reindex/list-external` | Index pi-memory.md files | `skillvault memory index --path ~/memory --project myapp` |
-| `export` | Export vault to JSON | `skillvault export vault.json` |
-| `import` | Import vault from JSON | `skillvault import vault.json` |
+| `export` | Export vault to JSON (or pack with `--pack`) | `skillvault export vault.json` |
+| `import` | Import vault from JSON (or pack with `--pack --prefix`) | `skillvault import vault.json` |
+| `entry history` | List version history for an entry | `skillvault entry history my-entry` |
+| `entry restore` | Restore entry to a previous version | `skillvault entry restore my-entry --version 1` |
 
 ---
 
-## MCP Tools (15)
+## MCP Tools (18)
 
 For AI agents (Claude Code, OpenCode, etc.):
 
@@ -229,6 +231,8 @@ For AI agents (Claude Code, OpenCode, etc.):
 | `get_entry_graph` | Traverse entry graph from a starting entry |
 | `search_by_tags` | Search entries by tag intersection (all) or union (any) |
 | `get_context_bundle` | Get structured project context bundle with entries grouped by type |
+| `list_entry_versions` | List entry version history (descending) |
+| `restore_entry_version` | Restore entry to a specified version |
 
 ### MCP Setup (Claude Code / OpenCode)
 
@@ -412,11 +416,12 @@ Test pyramid:
 | v1-alpha (SQLite vault) | ✅ Archived |
 | v2 Qu@ntum (Hybrid + Context) | ✅ Archived |
 | v3 Qu@ntum (Workflow Pipelines) | ✅ Active |
-| Cloud sync | 🔲 Future |
-| TUI | 🔲 Future |
+| Cloud sync | ✅ Active |
+| TUI | ✅ Active |
 | Vector search (GloVe, pure Go) | ✅ Active |
 | Entry diff (compare-entries) | ✅ Active |
-| Entry versioning | 🔲 Future |
+| Entry versioning + restore | ✅ Active |
+| Skill pack export + import | ✅ Active |
 | HTTP auth layer | 🔲 Future |
 
 ---
