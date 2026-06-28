@@ -47,27 +47,27 @@
 
 ### Phase 4: App Service
 
-- [ ] 4.1 Implement `EntryVersionService` with `ListVersions` and `RestoreVersion`. `RestoreVersion` retrieves version content, gets current entry, calls `SaveEntry` with restored fields (the `Save()` call auto-archives pre-restore state) — `internal/app/entry_versions.go` (new)
-- [ ] 4.2 Write `entry_versions_test.go`: test ListVersions returns versions in descending order; test RestoreVersion creates new version with pre-restore content; test restore of nonexistent version returns error — `internal/app/entry_versions_test.go` (new)
+- [x] 4.1 Implement `EntryVersionService` with `ListVersions` and `RestoreVersion`. `RestoreVersion` retrieves version content, gets current entry, calls `SaveEntry` with restored fields (the `Save()` call auto-archives pre-restore state) — `internal/app/entry_versions.go` (new)
+- [x] 4.2 Write `entry_versions_test.go`: test ListVersions returns versions in descending order; test RestoreVersion creates new version with pre-restore content; test restore of nonexistent version returns error — `internal/app/entry_versions_test.go` (new)
 
 ### Phase 5: CLI
 
-- [ ] 5.1 Extend `ParseCommand` in `entry` subcommand block: add `history` (requires entry ID, returns `"entry-history"`) and `restore` (requires entry ID, parses `--version` flag, returns `"entry-restore"`) — `internal/cli/commands.go`
-- [ ] 5.2 Add `EntryHistoryFlags` and `EntryRestoreFlags` structs with parsing functions (`ParseEntryHistoryFlags`, `ParseEntryRestoreFlags`). `EntryRestoreFlags` accepts `--version` (int, required) — `internal/cli/commands.go`
-- [ ] 5.3 Add `entry-history` and `entry-restore` cases to `runCLI` dispatch: history prints table (version_number, title, saved_at); restore prints restored version and new version created — `cmd/skillvault/main.go`
+- [x] 5.1 Extend `ParseCommand` in `entry` subcommand block: add `history` (requires entry ID, returns `"entry-history"`) and `restore` (requires entry ID, parses `--version` flag, returns `"entry-restore"`) — `internal/cli/commands.go`
+- [x] 5.2 Add `EntryHistoryFlags` and `EntryRestoreFlags` structs with parsing functions (`ParseEntryHistoryFlags`, `ParseEntryRestoreFlags`). `EntryRestoreFlags` accepts `--version` (int, required) — `internal/cli/commands.go`
+- [x] 5.3 Add `entry-history` and `entry-restore` cases to `runCLI` dispatch: history prints table (version_number, title, saved_at); restore prints restored version and new version created — `cmd/skillvault/main.go`
 
 ### Phase 6: MCP Tools
 
-- [ ] 6.1 Register `list_entry_versions` (input: `entry_id` string) and `restore_entry_version` (input: `entry_id` string, `version` number) tools in `registerV2Tools` — `internal/mcp/tools.go`
-- [ ] 6.2 Add dispatch cases for `list_entry_versions` and `restore_entry_version` in `ToolRegistry.dispatch` — `internal/mcp/tools.go`
-- [ ] 6.3 Implement `handleListEntryVersions` and `handleRestoreEntryVersion` handlers. `list_entry_versions` outputs JSON array of versions. `restore_entry_version` returns restored entry with metadata — `internal/mcp/tools.go`
-- [ ] 6.4 Extend `mcp_test.go`: test `list_entry_versions` returns correct count; test `restore_entry_version` restores correct content — `internal/mcp/mcp_test.go`
+- [x] 6.1 Register `list_entry_versions` (input: `entry_id` string) and `restore_entry_version` (input: `entry_id` string, `version` number) tools in `registerV2Tools` — `internal/mcp/tools.go`
+- [x] 6.2 Add dispatch cases for `list_entry_versions` and `restore_entry_version` in `ToolRegistry.dispatch` — `internal/mcp/tools.go`
+- [x] 6.3 Implement `handleListEntryVersions` and `handleRestoreEntryVersion` handlers. `list_entry_versions` outputs JSON array of versions. `restore_entry_version` returns restored entry with metadata — `internal/mcp/tools.go`
+- [x] 6.4 Extend `mcp_test.go`: test `list_entry_versions` returns correct count; test `restore_entry_version` restores correct content — `internal/mcp/mcp_test.go`
 
 ### Phase 7: Service Wiring
 
-- [ ] 7.1 Instantiate `EntryVersionService` in `openVault()` and add to `vaultServices` struct — `cmd/skillvault/main.go`
-- [ ] 7.2 Wire `EntryVersionService` into `ToolRegistry` via `WithEntryVersionService` builder method — `internal/mcp/tools.go`
-- [ ] 7.3 Extend `cli_test.go` for `entry history` and `entry restore` command parsing — `internal/cli/cli_test.go`
+- [x] 7.1 Instantiate `EntryVersionService` in `openVault()` and add to `vaultServices` struct — `cmd/skillvault/main.go`
+- [x] 7.2 Wire `EntryVersionService` into `ToolRegistry` via `WithEntryVersionService` builder method — `internal/mcp/tools.go`
+- [x] 7.3 Extend `cli_test.go` for `entry history` and `entry restore` command parsing — `internal/cli/cli_test.go`
 
 **Verification**: `go test ./...` — all tests pass; `skillvault entry history <id>` lists versions; `skillvault entry restore <id> --version 1` restores content
 

@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -27,23 +28,24 @@ import (
 const version = "v3"
 
 type vaultServices struct {
-	store          *db.Store
-	entrySvc       *app.EntryService
-	entryRefSvc    *app.EntryRefService
-	memoryIndexSvc *app.MemoryIndexService
-	artifactSvc    *app.ArtifactService
-	workflowSvc    *app.WorkflowService
-	workflowRunSvc *app.WorkflowRunService
-	seriesSvc      *app.SeriesService
-	projectSvc     *app.ProjectService
-	contextSvc     *app.ContextService
-	sessionSvc     *app.SessionService
-	exportSvc      *app.VaultExportService
-	importSvc      *app.VaultImportService
-	saveResultSvc  *app.SavePromptResultService
-	compareSvc     *app.VectorService
-	fileSvc        *files.ArtifactFileService
-	scanner        *security.SecretScanner
+	store           *db.Store
+	entrySvc        *app.EntryService
+	entryRefSvc     *app.EntryRefService
+	memoryIndexSvc  *app.MemoryIndexService
+	artifactSvc     *app.ArtifactService
+	workflowSvc     *app.WorkflowService
+	workflowRunSvc  *app.WorkflowRunService
+	seriesSvc       *app.SeriesService
+	projectSvc      *app.ProjectService
+	contextSvc      *app.ContextService
+	sessionSvc      *app.SessionService
+	exportSvc       *app.VaultExportService
+	importSvc       *app.VaultImportService
+	saveResultSvc   *app.SavePromptResultService
+	compareSvc      *app.VectorService
+	entryVersionSvc *app.EntryVersionService
+	fileSvc         *files.ArtifactFileService
+	scanner         *security.SecretScanner
 }
 
 func main() {
@@ -155,6 +157,7 @@ func openVault() *vaultServices {
 	saveResultSvc := app.NewSavePromptResultService(store.Entries, store.Projects, store.Artifacts)
 	workflowRunSvc := app.NewWorkflowRunService(store.Workflows, store.WorkflowRuns, store.Entries)
 	compareSvc := app.NewVectorService(store.Entries, store.Embeddings)
+	entryVersionSvc := app.NewEntryVersionService(store.EntryVersions, store.Entries)
 
 	// Load GloVe vectors from environment if configured.
 	if glovePath := os.Getenv("SKILLVAULT_GLOVE_PATH"); glovePath != "" {
@@ -170,23 +173,24 @@ func openVault() *vaultServices {
 	entrySvc.SetVectorService(compareSvc)
 
 	return &vaultServices{
-		store:          store,
-		entrySvc:       entrySvc,
-		entryRefSvc:    entryRefSvc,
-		memoryIndexSvc: memoryIndexSvc,
-		artifactSvc:    artifactSvc,
-		workflowSvc:    workflowSvc,
-		workflowRunSvc: workflowRunSvc,
-		seriesSvc:      seriesSvc,
-		projectSvc:     projectSvc,
-		contextSvc:     contextSvc,
-		sessionSvc:     sessionSvc,
-		exportSvc:      exportSvc,
-		importSvc:      importSvc,
-		saveResultSvc:  saveResultSvc,
-		compareSvc:     compareSvc,
-		fileSvc:        fileSvc,
-		scanner:        scanner,
+		store:           store,
+		entrySvc:        entrySvc,
+		entryRefSvc:     entryRefSvc,
+		memoryIndexSvc:  memoryIndexSvc,
+		artifactSvc:     artifactSvc,
+		workflowSvc:     workflowSvc,
+		workflowRunSvc:  workflowRunSvc,
+		seriesSvc:       seriesSvc,
+		projectSvc:      projectSvc,
+		contextSvc:      contextSvc,
+		sessionSvc:      sessionSvc,
+		exportSvc:       exportSvc,
+		importSvc:       importSvc,
+		saveResultSvc:   saveResultSvc,
+		compareSvc:      compareSvc,
+		entryVersionSvc: entryVersionSvc,
+		fileSvc:         fileSvc,
+		scanner:         scanner,
 	}
 }
 
@@ -786,6 +790,69 @@ func runCLI(cmd string) {
 			}
 		}
 
+	case "entry-history":
+		flags, err := cli.ParseEntryHistoryFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		versions, err := svc.entryVersionSvc.ListVersions(ctx, flags.ID)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		if len(versions) == 0 {
+			fmt.Println("No versions found.")
+			return
+		}
+
+		type versionRow struct {
+			Number  int
+			Title   string
+			SavedAt string
+		}
+		rows := make([]versionRow, len(versions))
+		for i, v := range versions {
+			rows[i] = versionRow{
+				Number:  v.VersionNumber,
+				Title:   v.Title,
+				SavedAt: v.SavedAt.Format(time.RFC3339),
+			}
+		}
+		fmt.Print(cli.FormatTable(rows, []string{"Version", "Title", "Saved At"},
+			func(r versionRow) []string {
+				return []string{fmt.Sprintf("%d", r.Number), r.Title, r.SavedAt}
+			}))
+
+	case "entry-restore":
+		flags, err := cli.ParseEntryRestoreFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		entry, err := svc.entryVersionSvc.RestoreVersion(ctx, flags.ID, flags.Version)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		// Retrieve the new version number (auto-archived pre-restore state).
+		versions, err := svc.entryVersionSvc.ListVersions(ctx, flags.ID)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+		newVersion := 0
+		if len(versions) > 0 {
+			newVersion = versions[0].VersionNumber
+		}
+
+		fmt.Printf("Restored entry %s to version %d (previous state saved as version %d)\n",
+			entry.ID, flags.Version, newVersion)
+
 	case "entry-ref":
 		if len(os.Args) < 4 {
 			cli.PrintError(fmt.Errorf("usage: skillvault entry ref <subcommand> [args...]"))
@@ -896,7 +963,7 @@ func runMCP() {
 		svc.workflowSvc,
 		svc.sessionSvc,
 		svc.projectSvc,
-		).WithEntryRefService(svc.entryRefSvc).WithCompareService(svc.compareSvc)
+		).WithEntryRefService(svc.entryRefSvc).WithCompareService(svc.compareSvc).WithEntryVersionService(svc.entryVersionSvc)
 	server := mcp.NewServer(reg)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
