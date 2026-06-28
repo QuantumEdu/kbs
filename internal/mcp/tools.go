@@ -18,14 +18,16 @@ type ToolRegistry struct {
 	tools   []Tool
 	handler ToolHandler
 
-	entrySvc    *app.EntryService
-	entryRefSvc *app.EntryRefService
-	artifactSvc *app.ArtifactService
-	contextSvc  *app.ContextService
-	seriesSvc   *app.SeriesService
-	workflowSvc *app.WorkflowService
-	sessionSvc  *app.SessionService
-	projectSvc  *app.ProjectService
+	entrySvc       *app.EntryService
+	entryRefSvc    *app.EntryRefService
+	compareSvc     *app.VectorService
+	artifactSvc    *app.ArtifactService
+	contextSvc     *app.ContextService
+	seriesSvc      *app.SeriesService
+	workflowSvc    *app.WorkflowService
+	sessionSvc     *app.SessionService
+	projectSvc     *app.ProjectService
+	saveResultSvc  *app.SavePromptResultService
 }
 
 // NewToolRegistry creates a registry with a generic handler (for testing).
@@ -38,6 +40,18 @@ func NewToolRegistry(handler ToolHandler) *ToolRegistry {
 // WithEntryRefService sets the entry ref service for graph operations.
 func (r *ToolRegistry) WithEntryRefService(svc *app.EntryRefService) *ToolRegistry {
 	r.entryRefSvc = svc
+	return r
+}
+
+// WithCompareService sets the vector compare service for entry comparison.
+func (r *ToolRegistry) WithCompareService(svc *app.VectorService) *ToolRegistry {
+	r.compareSvc = svc
+	return r
+}
+
+// WithSaveResultService sets the save-result service.
+func (r *ToolRegistry) WithSaveResultService(svc *app.SavePromptResultService) *ToolRegistry {
+	r.saveResultSvc = svc
 	return r
 }
 
@@ -82,6 +96,7 @@ func (r *ToolRegistry) registerV2Tools() {
 			"tags":             map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
 			"include_archived": map[string]interface{}{"type": "boolean", "description": "Include archived entries"},
 			"limit":            map[string]interface{}{"type": "number", "description": "Max results (default 10)"},
+			"vector":           map[string]interface{}{"type": "boolean", "description": "Use vector/cosine similarity search instead of FTS5"},
 		})},
 		{Name: "get_entry", Description: "Get a vault entry by ID (includes artifact reference if linked)", InputSchema: schemaObj(map[string]interface{}{
 			"id": map[string]interface{}{"type": "string", "description": "Entry ID"},
@@ -149,6 +164,20 @@ func (r *ToolRegistry) registerV2Tools() {
 		{Name: "get_context_bundle", Description: "Return structured JSON bundle: project info, entries grouped by type, and artifact refs", InputSchema: schemaObj(map[string]interface{}{
 			"project": map[string]interface{}{"type": "string", "description": "Project name or ID"},
 		})},
+		{Name: "compare_entries", Description: "Compute line-based LCS unified diff between two entries", InputSchema: schemaObj(map[string]interface{}{
+			"id1": map[string]interface{}{"type": "string", "description": "First entry ID"},
+			"id2": map[string]interface{}{"type": "string", "description": "Second entry ID"},
+		})},
+		{Name: "save_result", Description: "Save an AI prompt result as a vault entry", InputSchema: schemaObj(map[string]interface{}{
+			"name":             map[string]interface{}{"type": "string", "description": "Result name (required)"},
+			"content":          map[string]interface{}{"type": "string", "description": "Result content (required)"},
+			"type":             map[string]interface{}{"type": "string", "description": "Entry type override"},
+			"category":         map[string]interface{}{"type": "string", "description": "Summary/category"},
+			"tags":             map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+			"project_id":       map[string]interface{}{"type": "string", "description": "Project ID or name"},
+			"source_prompt_id": map[string]interface{}{"type": "string", "description": "Source prompt entry ID"},
+			"model":            map[string]interface{}{"type": "string", "description": "Model identifier"},
+		})},
 	}
 }
 
@@ -200,6 +229,10 @@ func (r *ToolRegistry) dispatch(ctx context.Context, name string, args map[strin
 		return r.handleSearchByTags(ctx, args)
 	case "get_context_bundle":
 		return r.handleGetContextBundle(ctx, args)
+	case "compare_entries":
+		return r.handleCompareEntries(ctx, args)
+	case "save_result":
+		return r.handleSaveResult(ctx, args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -254,7 +287,47 @@ func (r *ToolRegistry) handleSearchEntries(ctx context.Context, args map[string]
 	if limit <= 0 {
 		limit = 10
 	}
+	useVector := boolArg(args, "vector")
 
+	// Vector search path — delegate to VectorService.
+	if useVector {
+		if r.compareSvc == nil {
+			return errResult("Error: vector search not available"), nil
+		}
+		if query == "" {
+			return errResult("Error: query is required for vector search"), nil
+		}
+		results, err := r.compareSvc.SearchVectors(ctx, query, limit)
+		if err != nil {
+			return errResult("Error: " + err.Error()), nil
+		}
+		if len(results) == 0 {
+			return textResult("No results found."), nil
+		}
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("Found %d result(s) (vector):\n", len(results)))
+		for _, r := range results {
+			proj := "global"
+			if r.Entry.ProjectID != nil {
+				proj = *r.Entry.ProjectID
+			}
+			b.WriteString(fmt.Sprintf("\n  [%s] %s\n", r.Entry.ID, r.Entry.Title))
+			b.WriteString(fmt.Sprintf("    Type:    %s\n", r.Entry.Type))
+			b.WriteString(fmt.Sprintf("    Summary: %s\n", r.Entry.Summary))
+			b.WriteString(fmt.Sprintf("    Project: %s\n", proj))
+			b.WriteString(fmt.Sprintf("    Status:  %s\n", r.Entry.Status))
+			if len(r.Tags) > 0 {
+				tagNames := make([]string, len(r.Tags))
+				for i, t := range r.Tags {
+					tagNames[i] = t.Name
+				}
+				b.WriteString(fmt.Sprintf("    Tags:    %s\n", strings.Join(tagNames, ", ")))
+			}
+		}
+		return textResult(b.String()), nil
+	}
+
+	// FTS5 search path (existing behavior).
 	var projectID, typePtr *string
 	if project != "" {
 		proj, err := r.projectSvc.GetProject(ctx, project)
@@ -547,6 +620,13 @@ func textResult(text string) *ToolCallResult {
 	}
 }
 
+func jsonResult(v any) *ToolCallResult {
+	data, _ := json.Marshal(v)
+	return &ToolCallResult{
+		Content: []ToolContent{{Type: "text", Text: string(data)}},
+	}
+}
+
 func (r *ToolRegistry) handleSaveEntryRef(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
 	sourceID := strArg(args, "source_id")
 	targetID := strArg(args, "target_id")
@@ -830,6 +910,60 @@ func (r *ToolRegistry) handleGetContextBundle(ctx context.Context, args map[stri
 	}
 
 	return textResult(string(data)), nil
+}
+
+func (r *ToolRegistry) handleCompareEntries(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.compareSvc == nil {
+		return errResult("Error: compare service not available"), nil
+	}
+
+	id1 := strArg(args, "id1")
+	id2 := strArg(args, "id2")
+	if id1 == "" || id2 == "" {
+		return errResult("Error: id1 and id2 are required"), nil
+	}
+
+	result, err := r.compareSvc.CompareEntries(ctx, id1, id2)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+
+	return textResult(result), nil
+}
+
+func (r *ToolRegistry) handleSaveResult(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.saveResultSvc == nil {
+		return errResult("Error: save result service not available"), nil
+	}
+
+	input := app.SavePromptResultInput{
+		Name:           strArg(args, "name"),
+		Content:        strArg(args, "content"),
+		Type:           strArg(args, "type"),
+		Category:       strArg(args, "category"),
+		Tags:           parseStrings(args["tags"]),
+		ProjectID:      strArg(args, "project_id"),
+		SourcePromptID: strArg(args, "source_prompt_id"),
+		Model:          strArg(args, "model"),
+	}
+
+	output, err := r.saveResultSvc.Save(ctx, input)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+
+	proj := "global"
+	if output.ProjectID != "" {
+		proj = output.ProjectID
+	}
+
+	result := map[string]interface{}{
+		"entry_id":   output.EntryID,
+		"name":       output.Name,
+		"type":       output.Type,
+		"project_id": proj,
+	}
+	return jsonResult(result), nil
 }
 
 func errResult(text string) *ToolCallResult {

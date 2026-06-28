@@ -14,7 +14,7 @@ Store, search, and retrieve prompts, skills, workflows, decisions, project memor
 ```
 
 **Codename:** Qu@ntum  
-**Status:** v3 — Pipeline execution  
+**Status:** v3 — Pipeline execution + Service hardening
 **Binary size:** ~7 MB  
 **Dependencies:** Zero frameworks. Only `modernc.org/sqlite`.  
 **Language:** Go 1.25+
@@ -26,7 +26,8 @@ Store, search, and retrieve prompts, skills, workflows, decisions, project memor
 | Guide | Description |
 |-------|-------------|
 | [`docs/quickstart.md`](docs/quickstart.md) | Install, init, and first 6 steps in 5 minutes |
-| [`docs/commands.md`](docs/commands.md) | Full CLI reference — all 19 commands with flags |
+| [`docs/commands.md`](docs/commands.md) | Full CLI reference — all commands with flags |
+| [`docs/vars.md`](docs/vars.md) | Variable detection, frontmatter, and injection guide |
 | [`docs/mcp.md`](docs/mcp.md) | MCP server setup for Claude Code / OpenCode |
 | [`docs/tutorial.md`](docs/tutorial.md) | Real-world workflow: project → skills → context → session |
 | [`docs/architecture.md`](docs/architecture.md) | Clean Architecture deep-dive, data flows, design decisions |
@@ -153,8 +154,8 @@ DB decides. Disk remembers. Qu@ntum delivers.
 
 ```
 cmd/skillvault/
-├── internal/cli/         # 18 CLI commands (stdlib, no Cobra)
-├── internal/mcp/         # 13 MCP tools over stdio JSON-RPC 2.0
+├── internal/cli/         # 21+ CLI commands (stdlib, no Cobra)
+├── internal/mcp/         # 16 MCP tools over stdio JSON-RPC 2.0
 ├── internal/api/         # HTTP API (local only)
 ├── internal/app/         # Use cases: save, search, context, session, refs, memory, pipeline
 ├── internal/domain/      # Pure entities + validators
@@ -183,7 +184,7 @@ cmd/skillvault/
 
 ---
 
-## CLI Commands (19)
+## CLI Commands
 
 | Command | Description | Example |
 |---------|-------------|---------|
@@ -192,6 +193,7 @@ cmd/skillvault/
 | `search` | FTS5 search with filters | `skillvault search "auth" --type skill --project myapp` |
 | `get` | Get entry by ID or slug | `skillvault get clean-architecture-review` |
 | `save-artifact` | Save a long file-backed artifact | `skillvault save-artifact --title "..." --type pdf_analysis --file report.md` |
+| `save-result` | Save an AI result as a vault entry | `skillvault save-result --name "result" --content "..."` |
 | `get-context` | Compile Qu@ntum context pack | `skillvault get-context --mode planning --project myapp` |
 | `add-project` | Create a project | `skillvault add-project --name "MyApp" --description "..."` |
 | `list-projects` | List all projects | `skillvault list-projects` |
@@ -201,14 +203,17 @@ cmd/skillvault/
 | `run` | Execute a workflow pipeline step by step | `skillvault run research-article article.md --save output.md` |
 | `session-wrap` | Save session with decisions | `skillvault session-wrap --project myapp --summary "..." --decisions "d1,d2"` |
 | `graph` | Visualize entry graph | `skillvault graph --entry e1 --format mermaid` |
+| `ref` | Manage graph edges (alias) | `skillvault ref add e1 e2 depends_on` |
 | `entry ref add/list/remove` | Manage graph edges | `skillvault entry ref add e1 e2 depends_on` |
 | `memory index/reindex/list-external` | Index pi-memory.md files | `skillvault memory index --path ~/memory --project myapp` |
 | `export` | Export vault to JSON | `skillvault export vault.json` |
 | `import` | Import vault from JSON | `skillvault import vault.json` |
+| `version` | Show vault version | `skillvault version` |
+| `compare-entries` | Vector similarity between two entries | `skillvault compare-entries e1 e2` |
 
 ---
 
-## MCP Tools (15)
+## MCP Tools (16)
 
 For AI agents (Claude Code, OpenCode, etc.):
 
@@ -218,6 +223,7 @@ For AI agents (Claude Code, OpenCode, etc.):
 | `search_entries` | FTS5 search with filters by type, project, tags, status |
 | `get_entry` | Retrieve entry by ID with artifact reference |
 | `save_artifact` | Save long AI output as file-backed artifact with metadata |
+| `save_result` | Save an AI prompt result as a vault entry |
 | `get_context` | Compile agent-ready context pack (7 modes) |
 | `compose_series` | Get ordered entries in a series |
 | `render_workflow` | Get workflow steps as ordered checklist |
@@ -412,11 +418,16 @@ Test pyramid:
 | v1-alpha (SQLite vault) | ✅ Archived |
 | v2 Qu@ntum (Hybrid + Context) | ✅ Archived |
 | v3 Qu@ntum (Workflow Pipelines) | ✅ Active |
-| Cloud sync (S3 + GitHub) | ✅ Active |
+| v3 Service hardening (auth, shutdown, MCP tools) | ✅ Active |
+| Cloud sync (S3 + GitHub transports) | ✅ Active |
 | TUI (Bubble Tea, build-tag gated) | ✅ Active |
-| Vector search | 🔲 Future |
-| Entry versioning | 🔲 Future |
-| HTTP auth layer | 🔲 Future |
+| Vector search (GloVe, pure Go) | ✅ Active |
+| Entry diff / compare-entries | ✅ Active |
+| Entry versioning (history, restore, diff API) | ✅ Active |
+| Entry skill pack export | ✅ Active |
+| HTTP auth layer | ✅ Active |
+| Graceful shutdown | ✅ Active |
+| save_result MCP tool | ✅ Active |
 
 ---
 

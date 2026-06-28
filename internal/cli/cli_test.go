@@ -669,3 +669,83 @@ func TestParseSyncFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestParseCommand_SetupVectors(t *testing.T) {
+	cmd, err := ParseCommand([]string{"skillvault", "setup-vectors", "/path/to/glove.txt"})
+	if err != nil {
+		t.Fatalf("ParseCommand failed: %v", err)
+	}
+	if cmd != "setup-vectors" {
+		t.Errorf("cmd = %q, want 'setup-vectors'", cmd)
+	}
+
+	_, err = ParseCommand([]string{"skillvault", "setup-vectors"})
+	if err == nil {
+		t.Fatal("expected error for missing glove path")
+	}
+}
+
+func TestParseCommand_ReindexEmbeddings(t *testing.T) {
+	cmd, err := ParseCommand([]string{"skillvault", "reindex-embeddings"})
+	if err != nil {
+		t.Fatalf("ParseCommand failed: %v", err)
+	}
+	if cmd != "reindex-embeddings" {
+		t.Errorf("cmd = %q, want 'reindex-embeddings'", cmd)
+	}
+}
+
+func TestParseSetupVectorsFlags(t *testing.T) {
+	flags, err := ParseSetupVectorsFlags([]string{"skillvault", "setup-vectors", "/tmp/glove.6B.300d.txt"})
+	if err != nil {
+		t.Fatalf("ParseSetupVectorsFlags failed: %v", err)
+	}
+	if flags.Path != "/tmp/glove.6B.300d.txt" {
+		t.Errorf("Path = %q, want '/tmp/glove.6B.300d.txt'", flags.Path)
+	}
+
+	_, err = ParseSetupVectorsFlags([]string{"skillvault", "setup-vectors"})
+	if err == nil {
+		t.Fatal("expected error for missing path")
+	}
+}
+
+func TestParseReindexEmbeddingsFlags(t *testing.T) {
+	flags, err := ParseReindexEmbeddingsFlags([]string{"skillvault", "reindex-embeddings"})
+	if err != nil {
+		t.Fatalf("ParseReindexEmbeddingsFlags failed: %v", err)
+	}
+	_ = flags // struct has no fields currently
+}
+
+func TestParseSearchFlags_Vector(t *testing.T) {
+	// --vector flag should default to false.
+	flags, err := ParseSearchFlags([]string{"skillvault", "search", "ml"})
+	if err != nil {
+		t.Fatalf("ParseSearchFlags failed: %v", err)
+	}
+	if flags.Vector {
+		t.Error("Vector should default to false")
+	}
+
+	// --vector flag explicitly set.
+	flags, err = ParseSearchFlags([]string{"skillvault", "search", "ml", "--vector"})
+	if err != nil {
+		t.Fatalf("ParseSearchFlags with --vector failed: %v", err)
+	}
+	if !flags.Vector {
+		t.Error("Vector should be true when --vector flag is present")
+	}
+
+	// Combined with other flags.
+	flags, err = ParseSearchFlags([]string{"skillvault", "search", "ml", "--vector", "--limit", "5"})
+	if err != nil {
+		t.Fatalf("ParseSearchFlags with --vector and --limit failed: %v", err)
+	}
+	if !flags.Vector {
+		t.Error("Vector should be true")
+	}
+	if flags.Limit != 5 {
+		t.Errorf("Limit = %d, want 5", flags.Limit)
+	}
+}

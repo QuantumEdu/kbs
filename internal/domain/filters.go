@@ -8,6 +8,7 @@ type SearchQuery struct {
 	Tags            []string
 	IncludeArchived bool
 	Limit           int
+	Vector          bool
 }
 
 type VaultExport struct {

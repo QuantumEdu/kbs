@@ -22,6 +22,7 @@ import (
 	"github.com/quantum-6/skillvault/internal/mcp"
 	"github.com/quantum-6/skillvault/internal/security"
 	"github.com/quantum-6/skillvault/internal/sync"
+	"github.com/quantum-6/skillvault/internal/vector"
 )
 
 const version = "v3"
@@ -41,6 +42,7 @@ type vaultServices struct {
 	exportSvc      *app.VaultExportService
 	importSvc      *app.VaultImportService
 	saveResultSvc  *app.SavePromptResultService
+	compareSvc     *app.VectorService
 	fileSvc        *files.ArtifactFileService
 	scanner        *security.SecretScanner
 	syncSvc        *app.SyncService
@@ -72,13 +74,22 @@ func main() {
 		runMCP()
 	case "http":
 		svc := openVault()
+		apiKey := ""
+		for i, a := range os.Args[2:] {
+			if a == "--api-key" && i+1 < len(os.Args[2:]) {
+				apiKey = os.Args[2+i+1]
+			}
+		}
 		srv := api.NewServer("127.0.0.1", 7438,
 			svc.entrySvc, svc.artifactSvc, svc.contextSvc,
 			svc.projectSvc, svc.sessionSvc, svc.workflowSvc,
 			svc.exportSvc, svc.importSvc,
-		)
+		).WithAPIKey(apiKey)
 		fmt.Fprintf(os.Stderr, "HTTP API server starting on 127.0.0.1:7438\n")
-		log.Fatal(srv.Start())
+		if err := srv.Start(); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Fprintln(os.Stderr, "HTTP API server shut down.")
 	default:
 		runCLI(cmd)
 	}
@@ -154,6 +165,20 @@ func openVault() *vaultServices {
 	importSvc := app.NewVaultImportService(store.ImportExport, store.Entries, store.Projects, store.Artifacts)
 	saveResultSvc := app.NewSavePromptResultService(store.Entries, store.Projects, store.Artifacts)
 	workflowRunSvc := app.NewWorkflowRunService(store.Workflows, store.WorkflowRuns, store.Entries)
+	compareSvc := app.NewVectorService(store.Entries, store.Embeddings)
+
+	// Load GloVe vectors from environment if configured.
+	if glovePath := os.Getenv("SKILLVAULT_GLOVE_PATH"); glovePath != "" {
+		gv, err := vector.LoadGlove(glovePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to load GloVe vectors from %s: %v\n", glovePath, err)
+		} else {
+			compareSvc.SetGlove(gv)
+		}
+	}
+
+	// Wire VectorService into EntryService for auto-embed on save.
+	entrySvc.SetVectorService(compareSvc)
 
 	// Sync service: load config, build gzip transport from config defaults.
 	// The transport can be overridden at runtime via CLI flags.
@@ -178,6 +203,7 @@ func openVault() *vaultServices {
 		exportSvc:      exportSvc,
 		importSvc:      importSvc,
 		saveResultSvc:  saveResultSvc,
+		compareSvc:     compareSvc,
 		fileSvc:        fileSvc,
 		scanner:        scanner,
 		syncSvc:        syncSvc,
@@ -227,6 +253,33 @@ func runCLI(cmd string) {
 			os.Exit(1)
 		}
 
+		// Vector search path.
+		if flags.Vector {
+			results, err := svc.compareSvc.SearchVectors(ctx, flags.Query, flags.Limit)
+			if err != nil {
+				cli.PrintError(err)
+				os.Exit(1)
+			}
+			if len(results) == 0 {
+				fmt.Println("No results found.")
+				return
+			}
+			fmt.Printf("Found %d result(s) (vector):\n", len(results))
+			for _, r := range results {
+				proj := "global"
+				if r.Entry.ProjectID != nil {
+					proj = *r.Entry.ProjectID
+				}
+				fmt.Printf("\n  [%s] %s\n", r.Entry.ID, r.Entry.Title)
+				fmt.Printf("    Type:    %s\n", r.Entry.Type)
+				fmt.Printf("    Summary: %s\n", r.Entry.Summary)
+				fmt.Printf("    Project: %s\n", proj)
+				fmt.Printf("    Status:  %s\n", r.Entry.Status)
+			}
+			return
+		}
+
+		// FTS5 search path (existing behavior).
 		var projectID *string
 		if flags.ProjectID != "" {
 			projectID = &flags.ProjectID
@@ -632,6 +685,66 @@ func runCLI(cmd string) {
 			fmt.Printf("  Missing wikilink targets: %d\n", len(result.MissingTargets))
 		}
 
+	case "compare-entries":
+		flags, err := cli.ParseCompareEntriesFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		diff, err := svc.compareSvc.CompareEntries(ctx, flags.ID1, flags.ID2)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		fmt.Print(diff)
+
+	case "setup-vectors":
+		flags, err := cli.ParseSetupVectorsFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		gv, err := vector.LoadGlove(flags.Path)
+		if err != nil {
+			cli.PrintError(fmt.Errorf("load GloVe vectors: %w", err))
+			os.Exit(1)
+		}
+
+		fmt.Printf("Loaded %d word vectors (%d dimensions) from %s\n", gv.Len(), gv.Dims(), flags.Path)
+
+		// Validate with a sample embedding.
+		emb, err := vector.Embed("test query", gv)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: test embedding failed: %v\n", err)
+		} else if emb == nil {
+			fmt.Fprintf(os.Stderr, "warning: test embedding produced no tokens\n")
+		} else {
+			fmt.Println("Test embedding OK.")
+		}
+
+		fmt.Println("\nTo enable vector search for future commands, set the environment variable:")
+		fmt.Printf("  export SKILLVAULT_GLOVE_PATH=%s\n", flags.Path)
+		fmt.Println("Then run: skillvault reindex-embeddings")
+
+	case "reindex-embeddings":
+		flags, err := cli.ParseReindexEmbeddingsFlags(os.Args)
+		_ = flags
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		count, err := svc.compareSvc.ReindexAll(ctx)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Reindex complete: %d entries embedded.\n", count)
+
 	case "graph":
 		flags, err := cli.ParseGraphFlags(os.Args)
 		if err != nil {
@@ -885,7 +998,7 @@ func runMCP() {
 		svc.workflowSvc,
 		svc.sessionSvc,
 		svc.projectSvc,
-	).WithEntryRefService(svc.entryRefSvc)
+		).WithEntryRefService(svc.entryRefSvc).WithCompareService(svc.compareSvc).WithSaveResultService(svc.saveResultSvc)
 	server := mcp.NewServer(reg)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

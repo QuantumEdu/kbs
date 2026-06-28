@@ -69,6 +69,18 @@ func ParseCommand(args []string) (string, error) {
 		}
 	case "ref":
 		return "entry-ref", nil
+	case "compare-entries":
+		if len(args) < 4 {
+			return "", fmt.Errorf("compare-entries requires two entry IDs")
+		}
+		return sub, nil
+	case "setup-vectors":
+		if len(args) < 3 {
+			return "", fmt.Errorf("setup-vectors requires a GloVe file path")
+		}
+		return sub, nil
+	case "reindex-embeddings":
+		return sub, nil
 	case "import":
 		if len(args) < 3 {
 			return "", fmt.Errorf("import requires a file path")
@@ -144,6 +156,7 @@ type SearchFlags struct {
 	Tag             string
 	IncludeArchived bool
 	Limit           int
+	Vector          bool
 }
 
 // ParseSearchFlags parses search-specific flags from args.
@@ -160,6 +173,7 @@ func ParseSearchFlags(args []string) (*SearchFlags, error) {
 	fs.StringVar(&flags.Tag, "tag", "", "Filter by tag")
 	fs.BoolVar(&flags.IncludeArchived, "include-archived", false, "Include archived entries")
 	fs.IntVar(&flags.Limit, "limit", 20, "Max results")
+	fs.BoolVar(&flags.Vector, "vector", false, "Use vector/cosine similarity search")
 
 	fs.SetOutput(&nullWriter{})
 
@@ -183,6 +197,41 @@ func ParseGetEntryFlags(args []string) (*GetEntryFlags, error) {
 		return nil, fmt.Errorf("entry ID or slug is required")
 	}
 	return &GetEntryFlags{ID: args[2]}, nil
+}
+
+// CompareEntriesFlags holds the two entry IDs for compare-entries.
+type CompareEntriesFlags struct {
+	ID1 string
+	ID2 string
+}
+
+// ParseCompareEntriesFlags parses two positional entry IDs from args.
+func ParseCompareEntriesFlags(args []string) (*CompareEntriesFlags, error) {
+	if len(args) < 4 {
+		return nil, fmt.Errorf("compare-entries requires two entry IDs")
+	}
+	return &CompareEntriesFlags{ID1: args[2], ID2: args[3]}, nil
+}
+
+// SetupVectorsFlags holds the GloVe file path for setup-vectors.
+type SetupVectorsFlags struct {
+	Path string
+}
+
+// ParseSetupVectorsFlags parses the GloVe file path from positional args.
+func ParseSetupVectorsFlags(args []string) (*SetupVectorsFlags, error) {
+	if len(args) < 3 {
+		return nil, fmt.Errorf("GloVe file path is required")
+	}
+	return &SetupVectorsFlags{Path: args[2]}, nil
+}
+
+// ReindexEmbeddingsFlags holds optional flags for reindex-embeddings.
+type ReindexEmbeddingsFlags struct{}
+
+// ParseReindexEmbeddingsFlags parses reindex-embeddings flags (currently none).
+func ParseReindexEmbeddingsFlags(args []string) (*ReindexEmbeddingsFlags, error) {
+	return &ReindexEmbeddingsFlags{}, nil
 }
 
 // SaveArtifactFlags holds parsed save-artifact command flags.

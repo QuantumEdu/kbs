@@ -216,14 +216,14 @@ See spec §8 (§8.1–§8.5).
 
 ---
 
-## Capability 11: CLI Commands (16)
+## Capability 11: CLI Commands (20)
 
 See spec §9 (§9.1–§9.2).
 
 | ID | Requirement | Strength |
 |----|-------------|----------|
 | REQ-CLI-01 | Binary name: `skillvault` | MUST |
-| REQ-CLI-02 | Required commands: `init`, `add-entry`, `search`, `get`, `save-artifact`, `get-context`, `add-project`, `list-projects`, `archive`, `add-workflow`, `render-workflow`, `session-wrap`, `export`, `import`, `sync`, `tui` | MUST |
+| REQ-CLI-02 | Required commands: `init`, `add-entry`, `search`, `get`, `save-artifact`, `save-result`, `get-context`, `add-project`, `list-projects`, `archive`, `add-workflow`, `render-workflow`, `run`, `session-wrap`, `export`, `import`, `sync`, `tui`, `version`, `compare-entries`, `setup-vectors`, `reindex-embeddings` | MUST |
 | REQ-CLI-03 | `init` creates `~/.skillvault/vault.db`, `objects/`, `exports/`, `cache/` | MUST |
 | REQ-CLI-04 | `add-entry` accepts `--title`, `--type`, `--summary` (required), `--body`, `--project`, `--tags`, `--status` (optional) | MUST |
 | REQ-CLI-05 | `save-artifact` accepts `--title`, `--type`, `--file` (required), `--project`, `--summary`, `--tags`, `--source` (optional) | MUST |
@@ -232,7 +232,7 @@ See spec §9 (§9.1–§9.2).
 | REQ-CLI-08 | `archive` changes entry status to `archived`; does not delete data | MUST |
 | REQ-CLI-09 | `export` exports DB data and optional artifact metadata manifest | MUST |
 | REQ-CLI-10 | `import` imports valid SkillVault JSON; conflict handling on duplicate slugs | MUST |
-| REQ-CLI-11 | `search` supports `--query`, `--type`, `--project`, `--tags`, `--include-archived`, `--limit` | MUST |
+| REQ-CLI-11 | `search` supports `--query`, `--type`, `--project`, `--tags`, `--include-archived`, `--limit`, `--vector` | MUST |
 | REQ-CLI-12 | `run` executes workflows: `skillvault run <workflow> <file> [--save output.md]`. Input from file or stdin (`-`). Output to stdout or `--save` path. Sequential pipeline execution. Pre-flight validates entry existence and status. | MUST |
 
 **Scenarios**:
@@ -244,18 +244,19 @@ See spec §9 (§9.1–§9.2).
 - GIVEN workflow `missing_wf` does not exist, WHEN `skillvault run missing_wf file.md` is invoked, THEN command exits with error indicating workflow not found.
 - GIVEN vault configured, WHEN `skillvault sync push` runs, THEN snapshot uploaded via transport.
 - GIVEN non-tui build, WHEN `skillvault tui` runs, THEN rebuild message printed to stderr.
+- GIVEN GloVe loaded, WHEN `skillvault search "machine learning" --vector`, THEN vector search executes instead of FTS5.
 
 ---
 
-## Capability 12: MCP Tools (12)
+## Capability 12: MCP Tools (16)
 
 See spec §10 (§10.1–§10.12).
 
 | ID | Requirement | Strength |
 |----|-------------|----------|
-| REQ-MCP-01 | 12 MCP tools: `save_entry`, `search_entries`, `get_entry`, `save_artifact`, `get_context`, `compose_series`, `render_workflow`, `session_wrap`, `archive_entry`, `list_projects`, `search_by_tags`, `get_context_bundle` | MUST |
+| REQ-MCP-01 | 16 MCP tools: `save_entry`, `search_entries`, `get_entry`, `save_artifact`, `get_context`, `compose_series`, `render_workflow`, `session_wrap`, `archive_entry`, `list_projects`, `search_by_tags`, `get_context_bundle`, `save_entry_ref`, `list_entry_refs`, `get_entry_graph`, `compare_entries` | MUST |
 | REQ-MCP-02 | `save_entry`: `title`, `type`, `summary`, `body`(opt), `project`(opt), `tags`, `status`; rejects secrets | MUST |
-| REQ-MCP-03 | `search_entries`: `query`, `type`(opt), `project`(opt), `tags`, `include_archived`(default false), `limit`(default 10) | MUST |
+| REQ-MCP-03 | `search_entries`: `query`, `type`(opt), `project`(opt), `tags`, `include_archived`(default false), `limit`(default 10), `vector`(opt bool, default false) | MUST |
 | REQ-MCP-04 | `get_entry`: returns entry by ID/slug with artifact ref if linked | MUST |
 | REQ-MCP-05 | `save_artifact`: `title`, `type`, `content`(opt), `file_path`(opt), `summary`, `project`(opt), `tags`; at least one of content/file_path required | MUST |
 | REQ-MCP-06 | `get_context`: `mode`, `project`(opt), `query`(opt), `workflow`(opt), `include`, `exclude_archived`, `max_chars` | MUST |
@@ -273,6 +274,7 @@ See spec §10 (§10.1–§10.12).
 - GIVEN `save_entry` with API key content, WHEN secret detected, THEN save rejected with warning.
 - GIVEN entries tagged `["tdd","go"]` and `["tdd"]`, WHEN `search_by_tags(tags=["tdd","go"], match="all")`, THEN only dual-tagged entry returned.
 - GIVEN project X with 2 decisions, 1 session, 1 artifact, WHEN `get_context_bundle(project="X")`, THEN response contains project object, `decisions`(2), `sessions`(1), and artifact refs.
+- GIVEN GloVe loaded, WHEN `search_entries` called with `vector: true` and `query: "authentication"`, THEN results ranked by cosine similarity instead of FTS5.
 
 ---
 
@@ -299,13 +301,13 @@ See spec §12 (§12.1–§12.4).
 
 ---
 
-## Capability 14: Search (FTS5 with Filters)
+## Capability 14: Search (FTS5 + Vector)
 
 See spec §14.
 
 | ID | Requirement | Strength |
 |----|-------------|----------|
-| REQ-SRC-01 | Search uses SQLite FTS5 on entry body, summary, title, and artifact summaries | MUST |
+| REQ-SRC-01 | Search uses SQLite FTS5 (default) OR brute-force cosine similarity over GloVe embeddings (when `vector` flag/param true) | MUST |
 | REQ-SRC-02 | Required filters: `type`, `project`, `tag`, `status`, `include_archived`, `limit` | MUST |
 | REQ-SRC-03 | Search result fields: `id`, `title`, `type`, `summary`, `project`, `status`, `tags`, `artifact_ref` (optional) | MUST |
 | REQ-SRC-04 | Archived entries excluded by default | MUST |
@@ -468,6 +470,40 @@ See delta spec `skillvault-v3-workflow-pipelines`.
 - GIVEN user selects entry, WHEN detail view opens, THEN metadata/tags/body shown without edit capability.
 - GIVEN project root, WHEN `make build-tui` runs, THEN binary includes TUI and passes existing tests.
 
+## Capability 23: Vector Search (GloVe 300d)
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-VS-01 | `setup-vectors <glove-file>` loads GloVe 300d file into `map[string][]float32` | MUST |
+| REQ-VS-02 | Tokenizer lowercases, splits on whitespace, filters non-alpha; OOV words → zero vector | MUST |
+| REQ-VS-03 | `entry_embeddings` table: `entry_id` TEXT PK, `embedding` BLOB, `dims` INT, `model` TEXT | MUST |
+| REQ-VS-04 | `Save()` auto-embeds Title + Summary + Body; persists `[]float32` as BLOB | MUST |
+| REQ-VS-05 | Vector search: query → embedding → brute-force cosine similarity over all entries → ranked | MUST |
+| REQ-VS-06 | `--vector` flag (CLI) / `vector: bool` param (MCP) switches to vector path; default is FTS5 | MUST |
+| REQ-VS-07 | `reindex-embeddings` batch-embeds all existing entries; no data loss | MUST |
+
+**Scenarios**:
+- GIVEN entries "JWT auth" and "login flow" with GloVe loaded, WHEN `search --query "authentication" --vector`, THEN both ranked by cosine similarity.
+- GIVEN GloVe loaded, WHEN `save_entry` saves "OAuth2 Guide", THEN embedding BLOB persists in `entry_embeddings`.
+- GIVEN no GloVe loaded, WHEN `search --vector` runs, THEN error: "vector model not loaded; run setup-vectors first".
+- GIVEN vault has 3 unembedded entries, WHEN `reindex-embeddings` runs, THEN all 3 get embeddings; existing entries unchanged.
+
+---
+
+## Capability 24: Entry Diff
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-DIFF-01 | Line-based LCS unified diff between two entry bodies, pure Go, no deps | MUST |
+| REQ-DIFF-02 | CLI `compare-entries <id1> <id2>` prints unified diff | MUST |
+| REQ-DIFF-03 | MCP `compare_entries(from_id, to_id)` returns entries + diff hunks | MUST |
+| REQ-DIFF-04 | Diff output approximates `diff -u` format with context lines | SHOULD |
+
+**Scenarios**:
+- GIVEN entry A body "line 1\nline 2\nline 3", entry B body "line 1\nline 2 edited\nline 3", WHEN `compare-entries <idA> <idB>`, THEN unified diff shows line 2 change with context.
+- GIVEN entry A exists, WHEN `compare-entries <idA> <idA>`, THEN diff shows no changes.
+- GIVEN entry ID "nonexistent" missing, WHEN `compare-entries <valid-id> nonexistent`, THEN error: entry not found.
+
 ---
 
 ## Coverage Summary
@@ -484,10 +520,10 @@ See delta spec `skillvault-v3-workflow-pipelines`.
 | EntryLink + Relation Types | 5 | 3 |
 | Multi-Status Model | 7 | 3 |
 | Hermes Context Layer (7 Modes) | 11 | 3 |
-| CLI Commands (16) | 12 | 8 |
-| MCP Tools (12) | 13 | 5 |
+| CLI Commands | 12 | 8 |
+| MCP Tools | 13 | 6 |
 | Secret Detection | 7 | 5 |
-| Search (FTS5 with Filters) | 5 | 3 |
+| Search (FTS5 + Vector) | 5 | 3 |
 | Workflow Rendering | 4 | 4 |
 | Import/Export | 7 | 3 |
 | Session Wrap | 5 | 3 |
@@ -496,8 +532,8 @@ See delta spec `skillvault-v3-workflow-pipelines`.
 | Pipeline Execution Engine | 7 | 6 |
 | Cloud Sync | 2 | 5 |
 | TUI (Build-Tag Gated) | 1 | 5 |
-| **Total** | **138** | **85** |
-
-**Happy paths**: entry/project/artifact CRUD, search with filters, context compilation, workflow rendering, session wrap, import/export round-trip, cloud sync push/pull round-trip, TUI browse/search/detail views.
+| Vector Search (GloVe 300d) | 7 | 4 |
+| Entry Diff | 4 | 3 |
+| **Total** | **146** | **100** |
 **Edge cases**: secret detection rejection, duplicate slug import conflict, archived exclusion in context and search, empty tag rejection, self-referencing link rejection, missing content/file_path on artifact save, max_chars truncation, TUI rebuild message on non-tagged build, sanitized credential logging on sync errors.
 **Error states**: invalid entry type, invalid relation type, invalid schema version on import, secret detected warning, missing required fields on CLI, unknown sync subcommand, TUI startup with no terminal (TTY check).
