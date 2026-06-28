@@ -21,6 +21,7 @@ import (
 	"github.com/quantum-6/skillvault/internal/files"
 	"github.com/quantum-6/skillvault/internal/mcp"
 	"github.com/quantum-6/skillvault/internal/security"
+	"github.com/quantum-6/skillvault/internal/vector"
 )
 
 const version = "v3"
@@ -153,7 +154,20 @@ func openVault() *vaultServices {
 	importSvc := app.NewVaultImportService(store.ImportExport, store.Entries, store.Projects, store.Artifacts)
 	saveResultSvc := app.NewSavePromptResultService(store.Entries, store.Projects, store.Artifacts)
 	workflowRunSvc := app.NewWorkflowRunService(store.Workflows, store.WorkflowRuns, store.Entries)
-	compareSvc := app.NewVectorService(store.Entries)
+	compareSvc := app.NewVectorService(store.Entries, store.Embeddings)
+
+	// Load GloVe vectors from environment if configured.
+	if glovePath := os.Getenv("SKILLVAULT_GLOVE_PATH"); glovePath != "" {
+		gv, err := vector.LoadGlove(glovePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to load GloVe vectors from %s: %v\n", glovePath, err)
+		} else {
+			compareSvc.SetGlove(gv)
+		}
+	}
+
+	// Wire VectorService into EntryService for auto-embed on save.
+	entrySvc.SetVectorService(compareSvc)
 
 	return &vaultServices{
 		store:          store,
@@ -219,6 +233,33 @@ func runCLI(cmd string) {
 			os.Exit(1)
 		}
 
+		// Vector search path.
+		if flags.Vector {
+			results, err := svc.compareSvc.SearchVectors(ctx, flags.Query, flags.Limit)
+			if err != nil {
+				cli.PrintError(err)
+				os.Exit(1)
+			}
+			if len(results) == 0 {
+				fmt.Println("No results found.")
+				return
+			}
+			fmt.Printf("Found %d result(s) (vector):\n", len(results))
+			for _, r := range results {
+				proj := "global"
+				if r.Entry.ProjectID != nil {
+					proj = *r.Entry.ProjectID
+				}
+				fmt.Printf("\n  [%s] %s\n", r.Entry.ID, r.Entry.Title)
+				fmt.Printf("    Type:    %s\n", r.Entry.Type)
+				fmt.Printf("    Summary: %s\n", r.Entry.Summary)
+				fmt.Printf("    Project: %s\n", proj)
+				fmt.Printf("    Status:  %s\n", r.Entry.Status)
+			}
+			return
+		}
+
+		// FTS5 search path (existing behavior).
 		var projectID *string
 		if flags.ProjectID != "" {
 			projectID = &flags.ProjectID
@@ -638,6 +679,51 @@ func runCLI(cmd string) {
 		}
 
 		fmt.Print(diff)
+
+	case "setup-vectors":
+		flags, err := cli.ParseSetupVectorsFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		gv, err := vector.LoadGlove(flags.Path)
+		if err != nil {
+			cli.PrintError(fmt.Errorf("load GloVe vectors: %w", err))
+			os.Exit(1)
+		}
+
+		fmt.Printf("Loaded %d word vectors (%d dimensions) from %s\n", gv.Len(), gv.Dims(), flags.Path)
+
+		// Validate with a sample embedding.
+		emb, err := vector.Embed("test query", gv)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: test embedding failed: %v\n", err)
+		} else if emb == nil {
+			fmt.Fprintf(os.Stderr, "warning: test embedding produced no tokens\n")
+		} else {
+			fmt.Println("Test embedding OK.")
+		}
+
+		fmt.Println("\nTo enable vector search for future commands, set the environment variable:")
+		fmt.Printf("  export SKILLVAULT_GLOVE_PATH=%s\n", flags.Path)
+		fmt.Println("Then run: skillvault reindex-embeddings")
+
+	case "reindex-embeddings":
+		flags, err := cli.ParseReindexEmbeddingsFlags(os.Args)
+		_ = flags
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		count, err := svc.compareSvc.ReindexAll(ctx)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Reindex complete: %d entries embedded.\n", count)
 
 	case "graph":
 		flags, err := cli.ParseGraphFlags(os.Args)

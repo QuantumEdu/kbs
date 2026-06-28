@@ -47,11 +47,11 @@ Total: ~1360 lines.
 
 ## Phase 4: Integration (PR 4)
 
-- [ ] 4.1 `internal/app/vector.go` — `Search()`, `EnsureEmbedded()`, `ReindexEmbeddings()`, `SetupVectors()`
-- [ ] 4.2 `internal/app/entries.go` — auto-embed on `Save()` (nil-safe)
-- [ ] 4.3 `internal/mcp/tools.go` — `vector` param on `search_entries`
-- [ ] 4.4 `internal/cli/commands.go` — `--vector` flag, `setup-vectors`, `reindex-embeddings`
-- [ ] 4.5 `cmd/skillvault/main.go` — wire new CLI commands + vector search, pass `VectorService` to MCP
+- [x] 4.1 `internal/app/vector.go` — `Search()`, `EnsureEmbedded()`, `ReindexEmbeddings()`, `SetupVectors()`
+- [x] 4.2 `internal/app/entries.go` — auto-embed on `Save()` (nil-safe)
+- [x] 4.3 `internal/mcp/tools.go` — `vector` param on `search_entries`
+- [x] 4.4 `internal/cli/commands.go` — `--vector` flag, `setup-vectors`, `reindex-embeddings`
+- [x] 4.5 `cmd/skillvault/main.go` — wire new CLI commands + vector search, pass `VectorService` to MCP
 
 ## Verification
 
