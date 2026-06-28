@@ -40,6 +40,7 @@ type vaultServices struct {
 	exportSvc      *app.VaultExportService
 	importSvc      *app.VaultImportService
 	saveResultSvc  *app.SavePromptResultService
+	compareSvc     *app.VectorService
 	fileSvc        *files.ArtifactFileService
 	scanner        *security.SecretScanner
 }
@@ -152,6 +153,7 @@ func openVault() *vaultServices {
 	importSvc := app.NewVaultImportService(store.ImportExport, store.Entries, store.Projects, store.Artifacts)
 	saveResultSvc := app.NewSavePromptResultService(store.Entries, store.Projects, store.Artifacts)
 	workflowRunSvc := app.NewWorkflowRunService(store.Workflows, store.WorkflowRuns, store.Entries)
+	compareSvc := app.NewVectorService(store.Entries)
 
 	return &vaultServices{
 		store:          store,
@@ -168,6 +170,7 @@ func openVault() *vaultServices {
 		exportSvc:      exportSvc,
 		importSvc:      importSvc,
 		saveResultSvc:  saveResultSvc,
+		compareSvc:     compareSvc,
 		fileSvc:        fileSvc,
 		scanner:        scanner,
 	}
@@ -621,6 +624,21 @@ func runCLI(cmd string) {
 			fmt.Printf("  Missing wikilink targets: %d\n", len(result.MissingTargets))
 		}
 
+	case "compare-entries":
+		flags, err := cli.ParseCompareEntriesFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		diff, err := svc.compareSvc.CompareEntries(ctx, flags.ID1, flags.ID2)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		fmt.Print(diff)
+
 	case "graph":
 		flags, err := cli.ParseGraphFlags(os.Args)
 		if err != nil {
@@ -792,7 +810,7 @@ func runMCP() {
 		svc.workflowSvc,
 		svc.sessionSvc,
 		svc.projectSvc,
-	).WithEntryRefService(svc.entryRefSvc)
+		).WithEntryRefService(svc.entryRefSvc).WithCompareService(svc.compareSvc)
 	server := mcp.NewServer(reg)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

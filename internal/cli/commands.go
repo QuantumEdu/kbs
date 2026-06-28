@@ -69,6 +69,11 @@ func ParseCommand(args []string) (string, error) {
 		}
 	case "ref":
 		return "entry-ref", nil
+	case "compare-entries":
+		if len(args) < 4 {
+			return "", fmt.Errorf("compare-entries requires two entry IDs")
+		}
+		return sub, nil
 	case "import":
 		if len(args) < 3 {
 			return "", fmt.Errorf("import requires a file path")
@@ -170,6 +175,20 @@ func ParseGetEntryFlags(args []string) (*GetEntryFlags, error) {
 		return nil, fmt.Errorf("entry ID or slug is required")
 	}
 	return &GetEntryFlags{ID: args[2]}, nil
+}
+
+// CompareEntriesFlags holds the two entry IDs for compare-entries.
+type CompareEntriesFlags struct {
+	ID1 string
+	ID2 string
+}
+
+// ParseCompareEntriesFlags parses two positional entry IDs from args.
+func ParseCompareEntriesFlags(args []string) (*CompareEntriesFlags, error) {
+	if len(args) < 4 {
+		return nil, fmt.Errorf("compare-entries requires two entry IDs")
+	}
+	return &CompareEntriesFlags{ID1: args[2], ID2: args[3]}, nil
 }
 
 // SaveArtifactFlags holds parsed save-artifact command flags.

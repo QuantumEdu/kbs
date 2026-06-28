@@ -20,6 +20,7 @@ type ToolRegistry struct {
 
 	entrySvc    *app.EntryService
 	entryRefSvc *app.EntryRefService
+	compareSvc  *app.VectorService
 	artifactSvc *app.ArtifactService
 	contextSvc  *app.ContextService
 	seriesSvc   *app.SeriesService
@@ -38,6 +39,12 @@ func NewToolRegistry(handler ToolHandler) *ToolRegistry {
 // WithEntryRefService sets the entry ref service for graph operations.
 func (r *ToolRegistry) WithEntryRefService(svc *app.EntryRefService) *ToolRegistry {
 	r.entryRefSvc = svc
+	return r
+}
+
+// WithCompareService sets the vector compare service for entry comparison.
+func (r *ToolRegistry) WithCompareService(svc *app.VectorService) *ToolRegistry {
+	r.compareSvc = svc
 	return r
 }
 
@@ -149,6 +156,10 @@ func (r *ToolRegistry) registerV2Tools() {
 		{Name: "get_context_bundle", Description: "Return structured JSON bundle: project info, entries grouped by type, and artifact refs", InputSchema: schemaObj(map[string]interface{}{
 			"project": map[string]interface{}{"type": "string", "description": "Project name or ID"},
 		})},
+		{Name: "compare_entries", Description: "Compute line-based LCS unified diff between two entries", InputSchema: schemaObj(map[string]interface{}{
+			"id1": map[string]interface{}{"type": "string", "description": "First entry ID"},
+			"id2": map[string]interface{}{"type": "string", "description": "Second entry ID"},
+		})},
 	}
 }
 
@@ -200,6 +211,8 @@ func (r *ToolRegistry) dispatch(ctx context.Context, name string, args map[strin
 		return r.handleSearchByTags(ctx, args)
 	case "get_context_bundle":
 		return r.handleGetContextBundle(ctx, args)
+	case "compare_entries":
+		return r.handleCompareEntries(ctx, args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -830,6 +843,25 @@ func (r *ToolRegistry) handleGetContextBundle(ctx context.Context, args map[stri
 	}
 
 	return textResult(string(data)), nil
+}
+
+func (r *ToolRegistry) handleCompareEntries(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.compareSvc == nil {
+		return errResult("Error: compare service not available"), nil
+	}
+
+	id1 := strArg(args, "id1")
+	id2 := strArg(args, "id2")
+	if id1 == "" || id2 == "" {
+		return errResult("Error: id1 and id2 are required"), nil
+	}
+
+	result, err := r.compareSvc.CompareEntries(ctx, id1, id2)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+
+	return textResult(result), nil
 }
 
 func errResult(text string) *ToolCallResult {
