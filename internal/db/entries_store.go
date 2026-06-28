@@ -39,6 +39,21 @@ func (s *sqliteEntryStore) Save(ctx context.Context, entry domain.Entry, tags []
 			tag, tag, tag)
 	}
 
+	// Archive old version if content changed (only for existing entries).
+	if entry.ID != "" {
+		snapshot, _ := getCurrentForVersioning(ctx, tx, entry.ID)
+		if snapshot != nil && contentChanged(snapshot, &entry) {
+			nextVersion := snapshot.maxVersion + 1
+			_, err = tx.ExecContext(ctx, `
+				INSERT INTO entry_versions (version_id, entry_id, version_number, title, summary, body_optional)
+				VALUES (?, ?, ?, ?, ?, ?)
+			`, newVersionID(), entry.ID, nextVersion, snapshot.title, snapshot.summary, snapshot.bodyOptional)
+			if err != nil {
+				return fmt.Errorf("archive version: %w", err)
+			}
+		}
+	}
+
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO entries (id, name, title, slug, type, content, summary, body_optional, status, project_id, artifact_id, external_ref, tags_denorm, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -468,4 +483,54 @@ func (s *sqliteEntryStore) syncFTS(ctx context.Context, tx *sql.Tx, id, title, s
 		return fmt.Errorf("insert into fts: %w", err)
 	}
 	return nil
+}
+
+// versionSnapshot holds the current content fields and max version number
+// for an entry, used to decide whether to archive before an update.
+type versionSnapshot struct {
+	title        string
+	summary      string
+	bodyOptional string
+	maxVersion   int
+}
+
+// getCurrentForVersioning reads the current title/summary/body_optional
+// from entries and the max version_number from entry_versions for the
+// given entry, all within the transaction.
+func getCurrentForVersioning(ctx context.Context, tx *sql.Tx, entryID string) (*versionSnapshot, error) {
+	var s versionSnapshot
+	var summary, bodyOptional sql.NullString
+	err := tx.QueryRowContext(ctx, `
+		SELECT title, summary, body_optional FROM entries WHERE id = ?
+	`, entryID).Scan(&s.title, &summary, &bodyOptional)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read current entry for versioning: %w", err)
+	}
+	if summary.Valid {
+		s.summary = summary.String
+	}
+	if bodyOptional.Valid {
+		s.bodyOptional = bodyOptional.String
+	}
+
+	var maxVer sql.NullInt64
+	err = tx.QueryRowContext(ctx, `
+		SELECT MAX(version_number) FROM entry_versions WHERE entry_id = ?
+	`, entryID).Scan(&maxVer)
+	if err != nil {
+		return nil, fmt.Errorf("read max version: %w", err)
+	}
+	if maxVer.Valid {
+		s.maxVersion = int(maxVer.Int64)
+	}
+	return &s, nil
+}
+
+// contentChanged returns true if any of the tracked content fields differ
+// between the old snapshot and the new entry.
+func contentChanged(old *versionSnapshot, new *domain.Entry) bool {
+	return old.title != new.Title || old.summary != new.Summary || old.bodyOptional != new.BodyOptional
 }

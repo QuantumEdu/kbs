@@ -98,36 +98,44 @@ type VectorStore interface {
 	DeleteEmbedding(ctx context.Context, entryID string) error
 }
 
+type EntryVersionStore interface {
+	SaveVersion(ctx context.Context, v domain.EntryVersion) error
+	ListVersions(ctx context.Context, entryID string) ([]domain.EntryVersion, error)
+	GetVersion(ctx context.Context, entryID string, versionNumber int) (domain.EntryVersion, error)
+}
+
 type Store struct {
-	Entries      EntryStore
-	Artifacts    ArtifactStore
-	Workflows    WorkflowStore
-	WorkflowRuns WorkflowRunStore
-	Series       SeriesStore
-	Tags         TagStore
-	EntryLinks   EntryLinkStore
-	Projects     ProjectStore
-	Search       SearchStore
-	ImportExport ImportExportStore
-	Embeddings   VectorStore
+	Entries       EntryStore
+	Artifacts     ArtifactStore
+	Workflows     WorkflowStore
+	WorkflowRuns  WorkflowRunStore
+	Series        SeriesStore
+	Tags          TagStore
+	EntryLinks    EntryLinkStore
+	Projects      ProjectStore
+	Search        SearchStore
+	ImportExport  ImportExportStore
+	Embeddings    VectorStore
+	EntryVersions EntryVersionStore
 
 	db *sql.DB
 }
 
 func NewStore(db *sql.DB) *Store {
 	return &Store{
-		Entries:      &sqliteEntryStore{db: db},
-		Artifacts:    &sqliteArtifactStore{db: db},
-		Workflows:    &sqliteWorkflowStore{db: db},
-		WorkflowRuns: &sqliteWorkflowRunStore{db: db},
-		Series:       &sqliteSeriesStore{db: db},
-		Tags:         &sqliteTagStore{db: db},
-		EntryLinks:   &sqliteEntryLinkStore{db: db},
-		Projects:     &sqliteProjectStore{db: db},
-		Search:       &sqliteSearchStore{db: db},
-		ImportExport: &sqliteImportExportStore{db: db},
-		Embeddings:   &sqliteVectorStore{db: db},
-		db:           db,
+		Entries:       &sqliteEntryStore{db: db},
+		Artifacts:     &sqliteArtifactStore{db: db},
+		Workflows:     &sqliteWorkflowStore{db: db},
+		WorkflowRuns:  &sqliteWorkflowRunStore{db: db},
+		Series:        &sqliteSeriesStore{db: db},
+		Tags:          &sqliteTagStore{db: db},
+		EntryLinks:    &sqliteEntryLinkStore{db: db},
+		Projects:      &sqliteProjectStore{db: db},
+		Search:        &sqliteSearchStore{db: db},
+		ImportExport:  &sqliteImportExportStore{db: db},
+		Embeddings:    &sqliteVectorStore{db: db},
+		EntryVersions: &sqliteEntryVersionStore{db: db},
+		db:            db,
 	}
 }
 

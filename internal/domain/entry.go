@@ -97,3 +97,14 @@ type SeriesRef struct {
 	TotalSteps int
 	Label      string
 }
+
+// EntryVersion represents a historical snapshot of an entry's content.
+type EntryVersion struct {
+	VersionID     string
+	EntryID       string
+	VersionNumber int
+	Title         string
+	Summary       string
+	BodyOptional  string
+	SavedAt       time.Time
+}

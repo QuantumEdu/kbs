@@ -172,6 +172,19 @@ CREATE INDEX IF NOT EXISTS idx_entry_links_active ON entry_links(active) WHERE a
 CREATE INDEX IF NOT EXISTS idx_runs_workflow ON runs(workflow_id);
 CREATE INDEX IF NOT EXISTS idx_run_steps_run ON run_steps(run_id);
 
+CREATE TABLE IF NOT EXISTS entry_versions (
+    version_id      TEXT PRIMARY KEY,
+    entry_id        TEXT NOT NULL REFERENCES entries(id),
+    version_number  INTEGER NOT NULL,
+    title           TEXT NOT NULL,
+    summary         TEXT DEFAULT '',
+    body_optional   TEXT DEFAULT '',
+    saved_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(entry_id, version_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entry_versions_entry ON entry_versions(entry_id);
+
 CREATE TABLE IF NOT EXISTS entry_embeddings (
     entry_id    TEXT PRIMARY KEY REFERENCES entries(id),
     embedding   BLOB NOT NULL,

@@ -64,6 +64,9 @@ func TestNewStoreCreation(t *testing.T) {
 	if s.ImportExport == nil {
 		t.Error("ImportExport store is nil")
 	}
+	if s.EntryVersions == nil {
+		t.Error("EntryVersions store is nil")
+	}
 	if s.DB() == nil {
 		t.Error("DB() returns nil")
 	}
@@ -80,6 +83,7 @@ func TestStoreInterfacesCompile(t *testing.T) {
 	var _ EntryLinkStore = (*sqliteEntryLinkStore)(nil)
 	var _ SearchStore = (*sqliteSearchStore)(nil)
 	var _ ImportExportStore = (*sqliteImportExportStore)(nil)
+	var _ EntryVersionStore = (*sqliteEntryVersionStore)(nil)
 
 	s := &Store{}
 	if s == nil {

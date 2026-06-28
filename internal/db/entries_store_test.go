@@ -321,3 +321,173 @@ func TestSaveEntryRemovesOldTags(t *testing.T) {
 		t.Error("tag 'c' should be present")
 	}
 }
+
+func setupVersioningStore(t *testing.T) (*Store, func()) {
+	t.Helper()
+	db, err := OpenDB(":memory:")
+	if err != nil {
+		t.Fatalf("OpenDB failed: %v", err)
+	}
+	if err := RunMigrations(db); err != nil {
+		db.Close()
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+	store := NewStore(db)
+	cleanup := func() { db.Close() }
+	return store, cleanup
+}
+
+func TestSaveEntryArchivesOldContent(t *testing.T) {
+	store, cleanup := setupVersioningStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create an entry with initial content.
+	entry := domain.Entry{
+		ID:           "entry-arc",
+		Title:        "Original Title",
+		Slug:         "original",
+		Type:         domain.EntryTypeSkill,
+		Summary:      "Original summary",
+		BodyOptional: "Original body",
+		Status:       domain.StatusActive,
+	}
+	if err := store.Entries.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// Initially no versions should exist.
+	versions, err := store.EntryVersions.ListVersions(ctx, "entry-arc")
+	if err != nil {
+		t.Fatalf("ListVersions failed: %v", err)
+	}
+	if len(versions) != 0 {
+		t.Errorf("expected 0 versions after create, got %d", len(versions))
+	}
+
+	// Update — change title, summary, and body.
+	entry.Title = "Updated Title"
+	entry.Summary = "Updated summary"
+	entry.BodyOptional = "Updated body"
+	if err := store.Entries.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("update Save failed: %v", err)
+	}
+
+	// Now a version should be archived with the OLD content.
+	versions, err = store.EntryVersions.ListVersions(ctx, "entry-arc")
+	if err != nil {
+		t.Fatalf("ListVersions after update failed: %v", err)
+	}
+	if len(versions) != 1 {
+		t.Fatalf("expected 1 version after update, got %d", len(versions))
+	}
+	v := versions[0]
+	if v.Title != "Original Title" {
+		t.Errorf("archived title = %q, want 'Original Title'", v.Title)
+	}
+	if v.Summary != "Original summary" {
+		t.Errorf("archived summary = %q, want 'Original summary'", v.Summary)
+	}
+	if v.BodyOptional != "Original body" {
+		t.Errorf("archived body = %q, want 'Original body'", v.BodyOptional)
+	}
+	if v.VersionNumber != 1 {
+		t.Errorf("version number = %d, want 1", v.VersionNumber)
+	}
+
+	// Verify current entry has the new content.
+	result, err := store.Entries.Get(ctx, "entry-arc", false)
+	if err != nil {
+		t.Fatalf("Get after update failed: %v", err)
+	}
+	if result.Entry.Title != "Updated Title" {
+		t.Errorf("current title = %q, want 'Updated Title'", result.Entry.Title)
+	}
+}
+
+func TestSaveEntryNoArchiveWhenUnchanged(t *testing.T) {
+	store, cleanup := setupVersioningStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	entry := domain.Entry{
+		ID:           "entry-same",
+		Title:        "Same Title",
+		Slug:         "same",
+		Type:         domain.EntryTypePrompt,
+		Summary:      "Same summary",
+		BodyOptional: "Same body",
+		Status:       domain.StatusActive,
+	}
+	if err := store.Entries.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// Save again with same content.
+	if err := store.Entries.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("second Save failed: %v", err)
+	}
+
+	versions, err := store.EntryVersions.ListVersions(ctx, "entry-same")
+	if err != nil {
+		t.Fatalf("ListVersions failed: %v", err)
+	}
+	if len(versions) != 0 {
+		t.Errorf("expected 0 versions when content unchanged, got %d", len(versions))
+	}
+}
+
+func TestSaveEntryVersionAutoIncrement(t *testing.T) {
+	store, cleanup := setupVersioningStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	entry := domain.Entry{
+		ID:           "entry-incr",
+		Title:        "Title v1",
+		Slug:         "incr",
+		Type:         domain.EntryTypeSkill,
+		BodyOptional: "Body v1",
+		Status:       domain.StatusActive,
+	}
+	if err := store.Entries.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("initial Save failed: %v", err)
+	}
+
+	// Update 1
+	entry.Title = "Title v2"
+	entry.BodyOptional = "Body v2"
+	if err := store.Entries.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("update 1 failed: %v", err)
+	}
+
+	// Update 2
+	entry.Title = "Title v3"
+	entry.BodyOptional = "Body v3"
+	if err := store.Entries.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("update 2 failed: %v", err)
+	}
+
+	versions, err := store.EntryVersions.ListVersions(ctx, "entry-incr")
+	if err != nil {
+		t.Fatalf("ListVersions failed: %v", err)
+	}
+	if len(versions) != 2 {
+		t.Fatalf("expected 2 versions, got %d", len(versions))
+	}
+
+	// Versions should be descending (3, 2, 1 is latest; archived are 2 and 1)
+	// After 3 saves, we have versions for state before v2 (version 1) and before v3 (version 2)
+	if versions[0].VersionNumber != 2 {
+		t.Errorf("first archived version = %d, want 2 (pre-v3 state)", versions[0].VersionNumber)
+	}
+	if versions[1].VersionNumber != 1 {
+		t.Errorf("second archived version = %d, want 1 (pre-v2 state)", versions[1].VersionNumber)
+	}
+	if versions[0].Title != "Title v2" {
+		t.Errorf("version 2 title = %q, want 'Title v2'", versions[0].Title)
+	}
+	if versions[1].Title != "Title v1" {
+		t.Errorf("version 1 title = %q, want 'Title v1'", versions[1].Title)
+	}
+}
