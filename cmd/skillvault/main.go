@@ -21,6 +21,7 @@ import (
 	"github.com/quantum-6/skillvault/internal/files"
 	"github.com/quantum-6/skillvault/internal/mcp"
 	"github.com/quantum-6/skillvault/internal/security"
+	"github.com/quantum-6/skillvault/internal/sync"
 )
 
 const version = "v3"
@@ -42,6 +43,7 @@ type vaultServices struct {
 	saveResultSvc  *app.SavePromptResultService
 	fileSvc        *files.ArtifactFileService
 	scanner        *security.SecretScanner
+	syncSvc        *app.SyncService
 }
 
 func main() {
@@ -153,6 +155,14 @@ func openVault() *vaultServices {
 	saveResultSvc := app.NewSavePromptResultService(store.Entries, store.Projects, store.Artifacts)
 	workflowRunSvc := app.NewWorkflowRunService(store.Workflows, store.WorkflowRuns, store.Entries)
 
+	// Sync service: load config, build gzip transport from config defaults.
+	// The transport can be overridden at runtime via CLI flags.
+	var gzipTransport sync.Transport
+	if cfg, err := sync.LoadConfig(sync.DefaultConfigPath()); err == nil {
+		gzipTransport = buildTransport(cfg)
+	}
+	syncSvc := app.NewSyncService(exportSvc, importSvc, gzipTransport)
+
 	return &vaultServices{
 		store:          store,
 		entrySvc:       entrySvc,
@@ -170,6 +180,7 @@ func openVault() *vaultServices {
 		saveResultSvc:  saveResultSvc,
 		fileSvc:        fileSvc,
 		scanner:        scanner,
+		syncSvc:        syncSvc,
 	}
 }
 
@@ -682,6 +693,62 @@ func runCLI(cmd string) {
 			}
 		}
 
+	case "sync-push", "sync-pull":
+		flags, err := cli.ParseSyncFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		// Build transport from flag (overrides config defaults).
+		var transport sync.Transport
+		switch flags.Transport {
+		case "s3":
+			t, err := sync.NewS3Transport(&sync.S3Config{
+				Bucket:          os.Getenv("S3_BUCKET"),
+				Region:          os.Getenv("AWS_REGION"),
+				Endpoint:        os.Getenv("AWS_ENDPOINT"),
+				AccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
+				SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+			})
+			if err != nil {
+				cli.PrintError(fmt.Errorf("s3 transport: %w", err))
+				os.Exit(1)
+			}
+			transport = sync.NewGzipTransport(t)
+		case "github":
+			t, err := sync.NewGitHubTransport(&sync.GitHubConfig{
+				Token: os.Getenv("GITHUB_TOKEN"),
+				Owner: os.Getenv("GITHUB_OWNER"),
+				Repo:  os.Getenv("GITHUB_REPO"),
+			})
+			if err != nil {
+				cli.PrintError(fmt.Errorf("github transport: %w", err))
+				os.Exit(1)
+			}
+			transport = sync.NewGzipTransport(t)
+		}
+
+		svc.syncSvc.SetTransport(transport)
+
+		if cmd == "sync-push" {
+			if err := svc.syncSvc.Push(ctx, flags.RemotePath, flags.DryRun); err != nil {
+				cli.PrintError(err)
+				os.Exit(1)
+			}
+			if !flags.DryRun {
+				fmt.Printf("Pushed vault snapshot to %s\n", flags.RemotePath)
+			}
+		} else {
+			if err := svc.syncSvc.Pull(ctx, flags.RemotePath, flags.DryRun); err != nil {
+				cli.PrintError(err)
+				os.Exit(1)
+			}
+			if !flags.DryRun {
+				fmt.Printf("Pulled vault snapshot from %s\n", flags.RemotePath)
+			}
+		}
+
 	case "entry-ref":
 		if len(os.Args) < 4 {
 			cli.PrintError(fmt.Errorf("usage: skillvault entry ref <subcommand> [args...]"))
@@ -779,6 +846,29 @@ func runCLI(cmd string) {
 			os.Exit(1)
 		}
 	}
+}
+
+func buildTransport(cfg *sync.Config) sync.Transport {
+	if cfg == nil {
+		return nil
+	}
+	switch cfg.Transport {
+	case "s3":
+		t, err := sync.NewS3Transport(cfg.S3)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "s3 transport: %v\n", err)
+			return nil
+		}
+		return sync.NewGzipTransport(t)
+	case "github":
+		t, err := sync.NewGitHubTransport(cfg.GitHub)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "github transport: %v\n", err)
+			return nil
+		}
+		return sync.NewGzipTransport(t)
+	}
+	return nil
 }
 
 func runMCP() {
