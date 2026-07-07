@@ -70,6 +70,41 @@ func TestEntryServiceRoutingTypeRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRoutingEntrySearchable(t *testing.T) {
+	_, svc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := svc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Workflow Route Map",
+		Summary: "Maps scenarios to workflow slugs",
+		Type:    string(domain.EntryTypeRouting),
+		Body:    "scenario: new-project -> workflow: onboarding",
+		Tags:    []string{"routing"},
+	}); err != nil {
+		t.Fatalf("SaveEntry routing failed: %v", err)
+	}
+
+	results, err := svc.SearchEntries(ctx, "workflow slugs", domain.SearchQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("SearchEntries failed: %v", err)
+	}
+	if len(results) == 0 {
+		t.Errorf("expected routing entry to be searchable by summary, got 0 results")
+	}
+
+	found := false
+	for _, r := range results {
+		if r.Entry.Type == domain.EntryTypeRouting {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("search results did not include routing entry: %+v", results)
+	}
+}
+
 func TestEntryServiceUpsertNormalizesTags(t *testing.T) {
 	_, svc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
 	defer cleanup()
