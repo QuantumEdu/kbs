@@ -1,7 +1,7 @@
--- SkillVault Schema Reference (v3 Workflow Pipelines) + Sprint 1 entry_refs + handoff + external_ref
+-- SkillVault Schema Reference (v3 Workflow Pipelines) + Sprint 1 entry_refs + handoff + external_ref + routing
 -- This file is the consolidated reference schema.
 -- Keep in sync with internal/db/migrations/002_entry_refs_and_handoff.sql, 003_hermes.sql,
--- and 004_workflow_pipelines.sql.
+-- 004_workflow_pipelines.sql, and 006_routing_and_import.sql.
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version     INTEGER PRIMARY KEY,
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS entries (
     title           TEXT NOT NULL,
     slug            TEXT NOT NULL UNIQUE,
     content         TEXT,
-    type            TEXT NOT NULL CHECK(type IN ('prompt','skill','workflow_note','reference','user','feedback','project_state','session','decision','artifact_summary','handoff')),
+            type            TEXT NOT NULL CHECK(type IN ('prompt','skill','workflow_note','reference','user','feedback','project_state','session','decision','artifact_summary','handoff','routing')),
     summary         TEXT DEFAULT '',
     body_optional   TEXT DEFAULT '',
     status          TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('draft','active','archived','deprecated','canonical')),

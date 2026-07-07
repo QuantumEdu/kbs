@@ -16,6 +16,7 @@ const (
 	EntryTypeDecision        EntryType = "decision"
 	EntryTypeArtifactSummary EntryType = "artifact_summary"
 	EntryTypeHandoff         EntryType = "handoff"
+	EntryTypeRouting         EntryType = "routing"
 )
 
 func (et EntryType) IsValid() bool {
@@ -23,7 +24,7 @@ func (et EntryType) IsValid() bool {
 	case EntryTypePrompt, EntryTypeSkill, EntryTypeWorkflowNote,
 		EntryTypeReference, EntryTypeUser, EntryTypeFeedback,
 		EntryTypeProjectState, EntryTypeSession, EntryTypeDecision,
-		EntryTypeArtifactSummary, EntryTypeHandoff:
+		EntryTypeArtifactSummary, EntryTypeHandoff, EntryTypeRouting:
 		return true
 	}
 	return false

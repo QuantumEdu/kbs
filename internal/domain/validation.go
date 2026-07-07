@@ -37,7 +37,7 @@ func NormalizeTags(tags []string) []string {
 func ValidateEntryType(t string) error {
 	et := EntryType(t)
 	if !et.IsValid() {
-		return fmt.Errorf("invalid entry type: %q (expected one of: prompt, skill, workflow_note, reference, user, feedback, project_state, session, decision, artifact_summary)", t)
+		return fmt.Errorf("invalid entry type: %q (expected one of: prompt, skill, workflow_note, reference, user, feedback, project_state, session, decision, artifact_summary, handoff, routing)", t)
 	}
 	return nil
 }

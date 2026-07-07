@@ -39,6 +39,37 @@ func setupAppServices(t *testing.T) (*db.Store, *EntryService, *ArtifactService,
 	return store, entrySvc, artifactSvc, workflowSvc, seriesSvc, projectSvc, contextSvc, sessionSvc, exportSvc, importSvc, cleanup
 }
 
+func TestEntryServiceRoutingTypeRoundTrip(t *testing.T) {
+	_, svc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	result, err := svc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Workflow Route Map",
+		Summary: "Maps scenarios to workflow slugs",
+		Type:    string(domain.EntryTypeRouting),
+		Body:    "scenario: new-project -> workflow: onboarding",
+		Tags:    []string{"routing", "workflow-map"},
+	})
+	if err != nil {
+		t.Fatalf("SaveEntry routing failed: %v", err)
+	}
+	if result.Entry.Entry.Type != domain.EntryTypeRouting {
+		t.Errorf("expected type %q, got %q", domain.EntryTypeRouting, result.Entry.Entry.Type)
+	}
+
+	got, err := svc.GetEntry(ctx, result.Entry.Entry.ID)
+	if err != nil {
+		t.Fatalf("GetEntry routing failed: %v", err)
+	}
+	if got.Entry.Entry.Type != domain.EntryTypeRouting {
+		t.Errorf("retrieved type mismatch: expected %q, got %q", domain.EntryTypeRouting, got.Entry.Entry.Type)
+	}
+	if got.Entry.Entry.Title != "Workflow Route Map" {
+		t.Errorf("retrieved title mismatch: expected %q, got %q", "Workflow Route Map", got.Entry.Entry.Title)
+	}
+}
+
 func TestEntryServiceUpsertNormalizesTags(t *testing.T) {
 	_, svc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
 	defer cleanup()

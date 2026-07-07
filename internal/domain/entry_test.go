@@ -18,6 +18,8 @@ func TestEntryTypeConstants(t *testing.T) {
 		{"session", EntryTypeSession, "session"},
 		{"decision", EntryTypeDecision, "decision"},
 		{"artifact_summary", EntryTypeArtifactSummary, "artifact_summary"},
+		{"handoff", EntryTypeHandoff, "handoff"},
+		{"routing", EntryTypeRouting, "routing"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -62,19 +64,21 @@ func TestEntryStruct(t *testing.T) {
 
 func TestValidEntryTypes(t *testing.T) {
 	valid := map[EntryType]bool{
-		EntryTypePrompt:         true,
-		EntryTypeSkill:          true,
-		EntryTypeWorkflowNote:   true,
-		EntryTypeReference:      true,
-		EntryTypeUser:           true,
-		EntryTypeFeedback:       true,
-		EntryTypeProjectState:   true,
-		EntryTypeSession:        true,
-		EntryTypeDecision:       true,
+		EntryTypePrompt:          true,
+		EntryTypeSkill:           true,
+		EntryTypeWorkflowNote:    true,
+		EntryTypeReference:       true,
+		EntryTypeUser:            true,
+		EntryTypeFeedback:        true,
+		EntryTypeProjectState:    true,
+		EntryTypeSession:         true,
+		EntryTypeDecision:        true,
 		EntryTypeArtifactSummary: true,
+		EntryTypeHandoff:         true,
+		EntryTypeRouting:         true,
 	}
-	if len(valid) != 10 {
-		t.Errorf("Expected 10 valid entry types, got %d", len(valid))
+	if len(valid) != 12 {
+		t.Errorf("Expected 12 valid entry types, got %d", len(valid))
 	}
 	for et := range valid {
 		if !et.IsValid() {

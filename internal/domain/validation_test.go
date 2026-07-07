@@ -2,6 +2,7 @@ package domain
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -47,6 +48,8 @@ func TestValidateEntryType(t *testing.T) {
 		{"valid session", "session", true},
 		{"valid decision", "decision", true},
 		{"valid artifact_summary", "artifact_summary", true},
+		{"valid handoff", "handoff", true},
+		{"valid routing", "routing", true},
 		{"invalid empty", "", false},
 		{"invalid random", "unknown", false},
 		{"invalid old type", "agent", false},
@@ -153,6 +156,20 @@ func TestValidateRelationType(t *testing.T) {
 				t.Errorf("ValidateRelationType(%q) = nil, want error", tt.input)
 			}
 		})
+	}
+}
+
+func TestValidateEntryTypeErrorMessage(t *testing.T) {
+	err := ValidateEntryType("bogus")
+	if err == nil {
+		t.Fatal("expected error for invalid type")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "handoff") {
+		t.Errorf("error message missing 'handoff': %s", msg)
+	}
+	if !strings.Contains(msg, "routing") {
+		t.Errorf("error message missing 'routing': %s", msg)
 	}
 }
 
