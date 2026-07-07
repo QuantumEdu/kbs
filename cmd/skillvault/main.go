@@ -28,37 +28,38 @@ import (
 const version = "v3"
 
 var commandDescs = map[string]string{
-	"version":             "Print version information",
-	"init":                "Initialize vault directory, database, and subdirectories",
-	"mcp":                 "Start MCP JSON-RPC 2.0 server over stdio",
-	"http":                "Start HTTP REST API server on 127.0.0.1:7438",
-	"add-entry":           "Save a new entry to the vault",
-	"search":              "Full-text or vector search across vault entries",
-	"get":                 "Retrieve an entry by ID or slug",
-	"save-artifact":       "Save a file-backed artifact to the vault",
-	"get-context":         "Compile a context pack for AI agent consumption",
-	"add-project":         "Create a new project in the vault",
-	"list-projects":       "List all projects in the vault",
-	"archive":             "Soft-delete an entry (status → archived)",
-	"add-workflow":        "Create a workflow from a JSON definition file",
-	"render-workflow":     "Render a workflow as a human-readable checklist",
-	"run":                 "Execute a workflow pipeline with input",
-	"session-wrap":        "Create a session entry with decisions, pending, learnings",
-	"export":              "Export vault contents to a JSON file",
-	"import":              "Import vault contents from a JSON file",
-	"save-result":         "Save an AI prompt result to the vault",
-	"stats":               "Show vault statistics and entry counts",
-	"memory-index":        "Index pi-memory markdown files into the vault",
-	"memory-reindex":      "Reindex all memory entries from external sources",
+	"version":              "Print version information",
+	"init":                 "Initialize vault directory, database, and subdirectories",
+	"mcp":                  "Start MCP JSON-RPC 2.0 server over stdio",
+	"http":                 "Start HTTP REST API server on 127.0.0.1:7438",
+	"add-entry":            "Save a new entry to the vault",
+	"search":               "Full-text or vector search across vault entries",
+	"get":                  "Retrieve an entry by ID or slug",
+	"save-artifact":        "Save a file-backed artifact to the vault",
+	"get-context":          "Compile a context pack for AI agent consumption",
+	"add-project":          "Create a new project in the vault",
+	"list-projects":        "List all projects in the vault",
+	"archive":              "Soft-delete an entry (status → archived)",
+	"add-workflow":         "Create a workflow from a JSON definition file",
+	"render-workflow":      "Render a workflow as a human-readable checklist",
+	"run":                  "Execute a workflow pipeline with input",
+	"session-wrap":         "Create a session entry with decisions, pending, learnings",
+	"export":               "Export vault contents to a JSON file",
+	"import":               "Import vault contents from a JSON file",
+	"import-workflow":      "Import a workflow-builder YAML file as entries + workflow",
+	"save-result":          "Save an AI prompt result to the vault",
+	"stats":                "Show vault statistics and entry counts",
+	"memory-index":         "Index pi-memory markdown files into the vault",
+	"memory-reindex":       "Reindex all memory entries from external sources",
 	"memory-list-external": "List shadow entries linked to external memory files",
-	"compare-entries":     "Show unified diff between two entries",
-	"setup-vectors":       "Load GloVe word vectors for semantic search",
-	"reindex-embeddings":  "Recompute vector embeddings for all vault entries",
-	"graph":               "Traverse and render the entry reference graph",
-	"sync-push":           "Push vault snapshot to remote storage",
-	"sync-pull":           "Pull vault snapshot from remote storage",
-	"entry-ref":           "Manage entry reference links (add/list/remove)",
-	"tui":                 "Start the interactive Bubble Tea terminal UI",
+	"compare-entries":      "Show unified diff between two entries",
+	"setup-vectors":        "Load GloVe word vectors for semantic search",
+	"reindex-embeddings":   "Recompute vector embeddings for all vault entries",
+	"graph":                "Traverse and render the entry reference graph",
+	"sync-push":            "Push vault snapshot to remote storage",
+	"sync-pull":            "Pull vault snapshot from remote storage",
+	"entry-ref":            "Manage entry reference links (add/list/remove)",
+	"tui":                  "Start the interactive Bubble Tea terminal UI",
 }
 
 func traceCmd(cmd string) {
@@ -649,6 +650,51 @@ func runCLI(cmd string) {
 		}
 		fmt.Println("Import completed.")
 
+	case "import-workflow":
+		flags, err := cli.ParseImportWorkflowFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		filePath, err := filepath.Abs(flags.File)
+		if err != nil {
+			cli.PrintError(fmt.Errorf("resolve workflow file path: %w", err))
+			os.Exit(1)
+		}
+
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			cli.PrintError(fmt.Errorf("read workflow file: %w", err))
+			os.Exit(1)
+		}
+
+		var projectID *string
+		if flags.Project != "" {
+			proj, err := svc.projectSvc.GetProject(ctx, flags.Project)
+			if err != nil {
+				cli.PrintError(fmt.Errorf("project %q not found: %w", flags.Project, err))
+				os.Exit(1)
+			}
+			projectID = &proj.ID
+		}
+
+		wf, slugs, err := svc.store.ImportWorkflowWithEntries(ctx, data, projectID)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Workflow imported: %s\n", wf.ID)
+		fmt.Printf("  Name:     %s\n", wf.Name)
+		if wf.Description != "" {
+			fmt.Printf("  Description: %s\n", wf.Description)
+		}
+		fmt.Printf("  Phases:   %d\n", len(slugs))
+		if flags.Project != "" {
+			fmt.Printf("  Project:  %s\n", flags.Project)
+		}
+
 	case "save-result":
 		flags, err := cli.ParseSaveResultFlags(os.Args)
 		if err != nil {
@@ -1056,7 +1102,7 @@ func runMCP() {
 		svc.workflowSvc,
 		svc.sessionSvc,
 		svc.projectSvc,
-		).WithEntryRefService(svc.entryRefSvc).WithCompareService(svc.compareSvc).WithSaveResultService(svc.saveResultSvc)
+	).WithEntryRefService(svc.entryRefSvc).WithCompareService(svc.compareSvc).WithSaveResultService(svc.saveResultSvc)
 	server := mcp.NewServer(reg)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

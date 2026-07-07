@@ -82,7 +82,7 @@ func (r *ToolRegistry) registerV2Tools() {
 	r.tools = []Tool{
 		{Name: "save_entry", Description: "Save a vault entry (prompt, skill, decision, etc.)", InputSchema: schemaObj(map[string]interface{}{
 			"title":   map[string]interface{}{"type": "string", "description": "Entry title (required)"},
-			"type":    map[string]interface{}{"type": "string", "description": "Entry type: prompt|skill|reference|user|feedback|project_state|session|decision|artifact_summary"},
+			"type":    map[string]interface{}{"type": "string", "description": "Entry type: prompt|skill|reference|user|feedback|project_state|session|decision|artifact_summary|handoff|routing"},
 			"summary": map[string]interface{}{"type": "string", "description": "Short summary"},
 			"body":    map[string]interface{}{"type": "string", "description": "Optional body content"},
 			"project": map[string]interface{}{"type": "string", "description": "Project name or ID"},

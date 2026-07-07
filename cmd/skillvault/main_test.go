@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -150,6 +151,70 @@ func TestVersionCommand(t *testing.T) {
 	expected := "[sk-vault] version — Print version information\nSkillVault v3\n"
 	if string(out) != expected {
 		t.Errorf("unexpected version output: %q", string(out))
+	}
+}
+
+
+
+func TestImportWorkflowCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	binPath := filepath.Join(tmpDir, "skillvault")
+
+	// Build binary once to avoid go run module-cache cleanup issues.
+	buildCmd := exec.Command("go", "build", "-o", binPath, "./cmd/skillvault")
+	buildCmd.Dir = "../.."
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\nOutput: %s", err, string(out))
+	}
+
+	yamlPath := filepath.Join(tmpDir, "workflow.yaml")
+	yamlContent := `workflow:
+  name: Research Workflow
+  type: research
+  created: "2026-07-06"
+phases:
+  - id: extract
+    name: Extract Insights
+    skill: extract_wisdom
+    description: Extract key insights from input
+    outputs:
+      - insights
+    completion_criteria:
+      - insights documented
+`
+	if err := os.WriteFile(yamlPath, []byte(yamlContent), 0644); err != nil {
+		t.Fatalf("failed to write workflow yaml: %v", err)
+	}
+
+	vaultHome := filepath.Join(tmpDir, "vaulthome")
+	if err := os.MkdirAll(vaultHome, 0755); err != nil {
+		t.Fatalf("failed to create vault home: %v", err)
+	}
+	env := append(os.Environ(), "HOME="+vaultHome)
+
+	// Initialize vault in temp home
+	initCmd := exec.Command(binPath, "init")
+	initCmd.Env = env
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		t.Fatalf("init failed: %v\nOutput: %s", err, string(out))
+	}
+
+	// Import workflow
+	cmd := exec.Command(binPath, "import-workflow", "--file", yamlPath)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("import-workflow failed: %v\nOutput: %s", err, string(out))
+	}
+
+	if !strings.Contains(string(out), "Workflow imported:") {
+		t.Errorf("expected output to contain 'Workflow imported:', got: %q", string(out))
+	}
+	if !strings.Contains(string(out), "Research Workflow") {
+		t.Errorf("expected output to contain workflow name, got: %q", string(out))
+	}
+	if !strings.Contains(string(out), "Phases:") {
+		t.Errorf("expected output to show phases, got: %q", string(out))
 	}
 }
 

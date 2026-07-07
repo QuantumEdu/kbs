@@ -86,6 +86,8 @@ func ParseCommand(args []string) (string, error) {
 			return "", fmt.Errorf("import requires a file path")
 		}
 		return sub, nil
+	case "import-workflow":
+		return sub, nil
 	case "save-result":
 		return sub, nil
 	case "sync":
@@ -552,6 +554,35 @@ func ParseImportFlags(args []string) (*ImportFlags, error) {
 		return nil, fmt.Errorf("import requires a file path")
 	}
 	return &ImportFlags{FilePath: args[2]}, nil
+}
+
+// ImportWorkflowFlags holds parsed import-workflow command flags.
+type ImportWorkflowFlags struct {
+	File    string
+	Project string
+}
+
+// ParseImportWorkflowFlags parses import-workflow-specific flags from args.
+func ParseImportWorkflowFlags(args []string) (*ImportWorkflowFlags, error) {
+	flags := &ImportWorkflowFlags{}
+
+	fs := flag.NewFlagSet("import-workflow", flag.ContinueOnError)
+	fs.StringVar(&flags.File, "file", "", "Path to workflow-builder YAML file (required)")
+	fs.StringVar(&flags.Project, "project", "", "Project slug or ID for scoped import")
+
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 2 {
+		if err := fs.Parse(args[2:]); err != nil {
+			return nil, fmt.Errorf("parse import-workflow flags: %w", err)
+		}
+	}
+
+	if flags.File == "" {
+		return nil, fmt.Errorf("--file is required")
+	}
+
+	return flags, nil
 }
 
 // nullWriter discards writes (used to suppress flag package errors).

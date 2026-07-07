@@ -27,6 +27,7 @@ func TestParseSubcommand(t *testing.T) {
 		{"session-wrap", []string{"skillvault", "session-wrap", "--summary", "S"}, "session-wrap", false},
 		{"export", []string{"skillvault", "export"}, "export", false},
 		{"import", []string{"skillvault", "import", "file.json"}, "import", false},
+		{"import-workflow", []string{"skillvault", "import-workflow", "--file", "wf.yaml"}, "import-workflow", false},
 
 		// Legacy commands
 		{"version", []string{"skillvault", "version"}, "version", false},
@@ -488,6 +489,38 @@ func TestParseImportFlags(t *testing.T) {
 	_, err = ParseImportFlags([]string{"skillvault", "import"})
 	if err == nil {
 		t.Fatal("expected error for missing path")
+	}
+}
+
+func TestParseImportWorkflowFlags(t *testing.T) {
+	// Happy path with --file
+	flags, err := ParseImportWorkflowFlags([]string{"skillvault", "import-workflow", "--file", "workflow.yaml"})
+	if err != nil {
+		t.Fatalf("ParseImportWorkflowFlags failed: %v", err)
+	}
+	if flags.File != "workflow.yaml" {
+		t.Errorf("File = %q, want %q", flags.File, "workflow.yaml")
+	}
+	if flags.Project != "" {
+		t.Errorf("Project = %q, want empty", flags.Project)
+	}
+
+	// With --project flag
+	flags, err = ParseImportWorkflowFlags([]string{"skillvault", "import-workflow", "--file", "wf.yaml", "--project", "my-proj"})
+	if err != nil {
+		t.Fatalf("ParseImportWorkflowFlags with project failed: %v", err)
+	}
+	if flags.File != "wf.yaml" {
+		t.Errorf("File = %q, want %q", flags.File, "wf.yaml")
+	}
+	if flags.Project != "my-proj" {
+		t.Errorf("Project = %q, want %q", flags.Project, "my-proj")
+	}
+
+	// Missing --file
+	_, err = ParseImportWorkflowFlags([]string{"skillvault", "import-workflow"})
+	if err == nil {
+		t.Fatal("expected error for missing --file")
 	}
 }
 
