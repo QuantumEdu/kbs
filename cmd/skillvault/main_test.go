@@ -147,7 +147,8 @@ func TestVersionCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("version command failed: %v\nOutput: %s", err, string(out))
 	}
-	if string(out) != "SkillVault v3\n" {
+	expected := "[sk-vault] version — Print version information\nSkillVault v3\n"
+	if string(out) != expected {
 		t.Errorf("unexpected version output: %q", string(out))
 	}
 }

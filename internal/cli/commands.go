@@ -605,9 +605,9 @@ func PrintJSON(v interface{}) error {
 	return fmt.Errorf("not implemented")
 }
 
-// PrintError prints an error message to stderr.
+// PrintError prints an error message to stderr with sk-vault prefix.
 func PrintError(err error) {
-	fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	fmt.Fprintf(os.Stderr, "[sk-vault] error: %v\n", err)
 }
 
 // TagItems splits a comma-separated tag string and trims each item.

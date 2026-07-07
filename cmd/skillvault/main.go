@@ -27,6 +27,48 @@ import (
 
 const version = "v3"
 
+var commandDescs = map[string]string{
+	"version":             "Print version information",
+	"init":                "Initialize vault directory, database, and subdirectories",
+	"mcp":                 "Start MCP JSON-RPC 2.0 server over stdio",
+	"http":                "Start HTTP REST API server on 127.0.0.1:7438",
+	"add-entry":           "Save a new entry to the vault",
+	"search":              "Full-text or vector search across vault entries",
+	"get":                 "Retrieve an entry by ID or slug",
+	"save-artifact":       "Save a file-backed artifact to the vault",
+	"get-context":         "Compile a context pack for AI agent consumption",
+	"add-project":         "Create a new project in the vault",
+	"list-projects":       "List all projects in the vault",
+	"archive":             "Soft-delete an entry (status → archived)",
+	"add-workflow":        "Create a workflow from a JSON definition file",
+	"render-workflow":     "Render a workflow as a human-readable checklist",
+	"run":                 "Execute a workflow pipeline with input",
+	"session-wrap":        "Create a session entry with decisions, pending, learnings",
+	"export":              "Export vault contents to a JSON file",
+	"import":              "Import vault contents from a JSON file",
+	"save-result":         "Save an AI prompt result to the vault",
+	"stats":               "Show vault statistics and entry counts",
+	"memory-index":        "Index pi-memory markdown files into the vault",
+	"memory-reindex":      "Reindex all memory entries from external sources",
+	"memory-list-external": "List shadow entries linked to external memory files",
+	"compare-entries":     "Show unified diff between two entries",
+	"setup-vectors":       "Load GloVe word vectors for semantic search",
+	"reindex-embeddings":  "Recompute vector embeddings for all vault entries",
+	"graph":               "Traverse and render the entry reference graph",
+	"sync-push":           "Push vault snapshot to remote storage",
+	"sync-pull":           "Pull vault snapshot from remote storage",
+	"entry-ref":           "Manage entry reference links (add/list/remove)",
+	"tui":                 "Start the interactive Bubble Tea terminal UI",
+}
+
+func traceCmd(cmd string) {
+	desc, ok := commandDescs[cmd]
+	if !ok {
+		desc = "Execute " + cmd + " command"
+	}
+	fmt.Fprintf(os.Stderr, "[sk-vault] %s — %s\n", cmd, desc)
+}
+
 type vaultServices struct {
 	store          *db.Store
 	entrySvc       *app.EntryService
@@ -56,24 +98,28 @@ func main() {
 	}
 
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "SkillVault %s\nUsage: skillvault <command> [args...]\n", version)
+		fmt.Fprintf(os.Stderr, "SkillVault %s — [sk-vault] prefix on all stderr traces\nUsage: skillvault <command> [args...]\n", version)
 		os.Exit(1)
 	}
 
 	cmd, err := cli.ParseCommand(os.Args)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[sk-vault] error: %v\n", err)
 		os.Exit(1)
 	}
 
 	switch cmd {
 	case "version":
+		traceCmd("version")
 		fmt.Println("SkillVault", version)
 	case "init":
+		traceCmd("init")
 		runInit()
 	case "mcp":
+		traceCmd("mcp")
 		runMCP()
 	case "http":
+		traceCmd("http")
 		svc := openVault()
 		apiKey := ""
 		for i, a := range os.Args[2:] {
@@ -86,12 +132,13 @@ func main() {
 			svc.projectSvc, svc.sessionSvc, svc.workflowSvc,
 			svc.exportSvc, svc.importSvc,
 		).WithAPIKey(apiKey)
-		fmt.Fprintf(os.Stderr, "HTTP API server starting on 127.0.0.1:7438\n")
+		fmt.Fprintf(os.Stderr, "[sk-vault] HTTP API server starting on 127.0.0.1:7438\n")
 		if err := srv.Start(); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Fprintln(os.Stderr, "HTTP API server shut down.")
+		fmt.Fprintln(os.Stderr, "[sk-vault] HTTP API server shut down.")
 	default:
+		traceCmd(cmd)
 		runCLI(cmd)
 	}
 }
@@ -1015,10 +1062,10 @@ func runMCP() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	fmt.Fprintln(os.Stderr, "SkillVault MCP server starting...")
+	fmt.Fprintln(os.Stderr, "[sk-vault] MCP server starting...")
 	if err := server.Run(ctx); err != nil && err != context.Canceled {
-		fmt.Fprintf(os.Stderr, "MCP server error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "[sk-vault] MCP server error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Fprintln(os.Stderr, "SkillVault MCP server shut down.")
+	fmt.Fprintln(os.Stderr, "[sk-vault] MCP server shut down.")
 }
