@@ -225,14 +225,14 @@ See spec §9 (§9.1–§9.2).
 | REQ-CLI-01 | Binary name: `skillvault` | MUST |
 | REQ-CLI-02 | Required commands: `init`, `add-entry`, `search`, `get`, `save-artifact`, `save-result`, `get-context`, `add-project`, `list-projects`, `archive`, `add-workflow`, `render-workflow`, `run`, `session-wrap`, `export`, `import`, `sync`, `tui`, `version`, `compare-entries`, `setup-vectors`, `reindex-embeddings` | MUST |
 | REQ-CLI-03 | `init` creates `~/.skillvault/vault.db`, `objects/`, `exports/`, `cache/` | MUST |
-| REQ-CLI-04 | `add-entry` accepts `--title`, `--type`, `--summary` (required), `--body`, `--project`, `--tags`, `--status` (optional) | MUST |
+| REQ-CLI-04 | `add-entry` accepts `--title`, `--type`, `--summary` (required), `--body`, `--project`, `--tags`, `--status`, `--purpose` (optional) | MUST |
 | REQ-CLI-05 | `save-artifact` accepts `--title`, `--type`, `--file` (required), `--project`, `--summary`, `--tags`, `--source` (optional) | MUST |
 | REQ-CLI-06 | `get-context` accepts `--mode`, `--project`, `--workflow`, `--include`, `--max-chars` | MUST |
 | REQ-CLI-07 | `session-wrap` creates session entry with decisions, pending items, linked project, and optionally an artifact | MUST |
 | REQ-CLI-08 | `archive` changes entry status to `archived`; does not delete data | MUST |
 | REQ-CLI-09 | `export` exports DB data and optional artifact metadata manifest | MUST |
 | REQ-CLI-10 | `import` imports valid SkillVault JSON; conflict handling on duplicate slugs | MUST |
-| REQ-CLI-11 | `search` supports `--query`, `--type`, `--project`, `--tags`, `--include-archived`, `--limit`, `--vector` | MUST |
+| REQ-CLI-11 | `search` supports `--query`, `--type`, `--project`, `--tags`, `--include-archived`, `--limit`, `--vector`, `--purpose` | MUST |
 | REQ-CLI-12 | `run` executes workflows: `skillvault run <workflow> <file> [--save output.md]`. Input from file or stdin (`-`). Output to stdout or `--save` path. Sequential pipeline execution. Pre-flight validates entry existence and status. | MUST |
 
 **Scenarios**:
@@ -245,18 +245,23 @@ See spec §9 (§9.1–§9.2).
 - GIVEN vault configured, WHEN `skillvault sync push` runs, THEN snapshot uploaded via transport.
 - GIVEN non-tui build, WHEN `skillvault tui` runs, THEN rebuild message printed to stderr.
 - GIVEN GloVe loaded, WHEN `skillvault search "machine learning" --vector`, THEN vector search executes instead of FTS5.
+- GIVEN a running vault, WHEN `skillvault add-entry --title "Review" --type reference --purpose LEARNING`, THEN entry persisted with purpose LEARNING.
+- GIVEN a running vault, WHEN `skillvault add-entry --title "Go Patterns" --type reference` without `--purpose`, THEN entry persisted with empty purpose — no error.
+- GIVEN a running vault, WHEN `skillvault add-entry --title "Bad" --type reference --purpose INVALID`, THEN command exits with validation error indicating unrecognized purpose value.
+- GIVEN entries with purposes WORK, KNOWLEDGE, and empty, WHEN `skillvault search --purpose KNOWLEDGE`, THEN only KNOWLEDGE entries returned.
+- GIVEN entries with various purposes, WHEN `skillvault search --query "patterns"` without `--purpose`, THEN all matching entries returned regardless of purpose.
 
 ---
 
-## Capability 12: MCP Tools (16)
+## Capability 12: MCP Tools (19)
 
 See spec §10 (§10.1–§10.12).
 
 | ID | Requirement | Strength |
 |----|-------------|----------|
-| REQ-MCP-01 | 16 MCP tools: `save_entry`, `search_entries`, `get_entry`, `save_artifact`, `get_context`, `compose_series`, `render_workflow`, `session_wrap`, `archive_entry`, `list_projects`, `search_by_tags`, `get_context_bundle`, `save_entry_ref`, `list_entry_refs`, `get_entry_graph`, `compare_entries` | MUST |
-| REQ-MCP-02 | `save_entry`: `title`, `type`, `summary`, `body`(opt), `project`(opt), `tags`, `status`; rejects secrets | MUST |
-| REQ-MCP-03 | `search_entries`: `query`, `type`(opt), `project`(opt), `tags`, `include_archived`(default false), `limit`(default 10), `vector`(opt bool, default false) | MUST |
+| REQ-MCP-01 | 19 MCP tools: `save_entry`, `search_entries`, `get_entry`, `save_artifact`, `get_context`, `compose_series`, `render_workflow`, `session_wrap`, `archive_entry`, `list_projects`, `search_by_tags`, `get_context_bundle`, `save_entry_ref`, `list_entry_refs`, `get_entry_graph`, `compare_entries`, `save_result`, `run_workflow`, `route_scenario` | MUST |
+| REQ-MCP-02 | `save_entry`: `title`, `type`, `summary`, `body`(opt), `project`(opt), `tags`, `status`, `purpose`(opt); rejects secrets | MUST |
+| REQ-MCP-03 | `search_entries`: `query`, `type`(opt), `project`(opt), `tags`, `purpose`(opt), `include_archived`(default false), `limit`(default 10), `vector`(opt bool, default false) | MUST |
 | REQ-MCP-04 | `get_entry`: returns entry by ID/slug with artifact ref if linked | MUST |
 | REQ-MCP-05 | `save_artifact`: `title`, `type`, `content`(opt), `file_path`(opt), `summary`, `project`(opt), `tags`; at least one of content/file_path required | MUST |
 | REQ-MCP-06 | `get_context`: `mode`, `project`(opt), `query`(opt), `workflow`(opt), `include`, `exclude_archived`, `max_chars` | MUST |
@@ -267,6 +272,8 @@ See spec §10 (§10.1–§10.12).
 | REQ-MCP-11 | `list_projects`: lists projects and statuses | MUST |
 | REQ-MCP-12 | `search_by_tags`: `tags`(array, req), `match`(`all`/`any`, default `all`), `type`(opt), `project`(opt), `limit`(default 20). Returns id, title, type, summary, project, status, tags. Uses REQ-TQR-01/02. | MUST |
 | REQ-MCP-13 | `get_context_bundle`: `project`(opt). Returns structured JSON — project info, entries grouped by type, artifact refs. Cross-refs Hermes Context Layer (Capability 10). | MUST |
+| REQ-MCP-18 | `run_workflow` MCP tool: delegates to `RunPipelineStructured`. Input: `workflow` (slug or ID, required), `steps` (map of step index → input text, required). Output: structured run result with `run_id`, `workflow_id`, `workflow_slug`, `status`, `steps` array (each with `step_index`, `status`, `output`, `error`), `started_at`, `finished_at`. All values JSON-RPC-compatible. | MUST |
+| REQ-MCP-19 | `route_scenario` MCP tool: wraps `EntryService.RouteScenario`. Input: `scenario` (string, required). Output: matched workflow (ID, slug, name, steps) and skill/entry metadata as JSON. Empty scenario rejected with validation error. No-match returns meaningful error. | MUST |
 
 **Scenarios**:
 - GIVEN `search_entries` with filters, WHEN results match, THEN entries returned with full metadata.
@@ -275,6 +282,13 @@ See spec §10 (§10.1–§10.12).
 - GIVEN entries tagged `["tdd","go"]` and `["tdd"]`, WHEN `search_by_tags(tags=["tdd","go"], match="all")`, THEN only dual-tagged entry returned.
 - GIVEN project X with 2 decisions, 1 session, 1 artifact, WHEN `get_context_bundle(project="X")`, THEN response contains project object, `decisions`(2), `sessions`(1), and artifact refs.
 - GIVEN GloVe loaded, WHEN `search_entries` called with `vector: true` and `query: "authentication"`, THEN results ranked by cosine similarity instead of FTS5.
+- GIVEN valid entry payload, WHEN `save_entry` is called with `purpose: "LEARNING"`, THEN entry persisted with purpose LEARNING.
+- GIVEN valid entry payload with no `purpose` field, WHEN `save_entry` is called, THEN entry persisted with empty purpose — no error.
+- GIVEN entries with purposes WORK and KNOWLEDGE, WHEN `search_entries` is called with `purpose: "WORK"`, THEN only WORK entries returned.
+- GIVEN workflow "research" with 2 valid steps, WHEN `run_workflow(workflow: "research", steps: {1: "topic: Go", 2: ""})` is called, THEN response includes `status: "completed"` and both steps with outputs.
+- GIVEN step references a missing entry, WHEN `run_workflow` is called, THEN pre-flight validation rejects before any execution.
+- GIVEN routing entry associates scenario "write spec" with workflow "spec-plan-task", WHEN `route_scenario(scenario: "write spec")` is called, THEN response includes workflow slug "spec-plan-task" and related metadata.
+- GIVEN no routing entry matches "unknown task", WHEN `route_scenario(scenario: "unknown task")` is called, THEN response is error indicating no workflow matched.
 
 ---
 
@@ -506,6 +520,78 @@ See delta spec `skillvault-v3-workflow-pipelines`.
 
 ---
 
+## Capability 25: Entry Purpose Taxonomy
+
+The `purpose` field classifies entries by LifeOS purpose, orthogonal to entry type. Five values represent the v7.6 purpose model (minus OBSERVABILITY, deferred). Empty purpose is backward-compatible.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-PUR-01 | The system SHALL support five purpose values: `WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`. | MUST |
+| REQ-PUR-02 | Empty purpose (`""`) SHALL be valid and represent "unset" — backward-compatible default for all existing entries and calls without purpose. | MUST |
+| REQ-PUR-03 | The system SHALL reject any purpose value not in the allowed set with a validation error naming the invalid value. | MUST |
+| REQ-PUR-04 | `search` CLI command and `search_entries` MCP tool SHALL accept an optional `--purpose` / `purpose` filter that returns only entries matching the given purpose value. | MUST |
+| REQ-PUR-05 | `add-entry` CLI SHALL accept optional `--purpose` flag accepting one of the five values. | MUST |
+| REQ-PUR-06 | `save_entry` MCP tool SHALL accept an optional `purpose` parameter accepting one of the five values or empty. | MUST |
+| REQ-PUR-07 | Export SHALL include the `purpose` field for each entry. Import SHALL restore it — full round-trip fidelity. | MUST |
+| REQ-PUR-08 | Purpose SHALL be stored as a `TEXT` column in the entries table, defaulting to empty string (`""`), added via migration 007. | MUST |
+
+**Scenarios**:
+- GIVEN a vault with no prior purpose usage, WHEN `save_entry` is called with `purpose: "KNOWLEDGE"` or `add-entry --purpose KNOWLEDGE`, THEN the entry is persisted with `purpose = "KNOWLEDGE"`.
+- GIVEN a valid entry payload, WHEN `save_entry` is called with `purpose: "INVALID_VALUE"`, THEN the save is rejected with a validation error indicating "INVALID_VALUE" is not a recognized purpose.
+- GIVEN a valid entry payload with no `purpose` field (or empty string), WHEN the entry is saved, THEN the entry is persisted with `purpose = ""` — no error, backward-compatible behavior.
+- GIVEN 3 entries: one WORK, one KNOWLEDGE, one with empty purpose, WHEN `search_entries` is called with `purpose: "WORK"`, THEN only the WORK entry is returned.
+- GIVEN entries with various purposes including empty, WHEN `search_entries` is called without a `purpose` parameter, THEN all entries are returned regardless of their purpose value.
+- GIVEN a running vault, WHEN `skillvault add-entry --title "Review" --type reference --purpose LEARNING`, THEN the entry is persisted with purpose LEARNING.
+- GIVEN an export containing entries with purposes WORK, KNOWLEDGE, and empty, WHEN the export is imported into a fresh vault, THEN all entries retain their original purpose values.
+- GIVEN entries with purposes WORK, KNOWLEDGE, LEARNING, and an empty-purpose entry, WHEN `skillvault search --purpose WORK`, THEN only WORK entries appear in results.
+
+---
+
+## Capability 26: Workflow Run Bridge
+
+Provides structured pipeline execution (`RunPipelineStructured`) that accepts step inputs as structured arguments (not stdin/file) and returns a JSON-shaped run result. Exposed as the `run_workflow` MCP tool. Additive — existing CLI `run` (`RunPipeline`) is unchanged.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-RBR-01 | `RunPipelineStructured(workflowRef, steps)` SHALL accept a workflow reference (slug or ID) and a map of step index → input text. It SHALL execute steps sequentially in `order_index` order, substituting system variables identically to `RunPipeline`. | MUST |
+| REQ-RBR-02 | The return value SHALL be a structured result containing: `run_id`, `workflow_id`, `workflow_slug`, `status` (completed\|failed), `steps` (array of {step_index, status, output, error}), `started_at`, `finished_at`. | MUST |
+| REQ-RBR-03 | If a step fails, execution SHALL halt. The run status SHALL be `failed`, the failing step's entry in `steps` SHALL include `status: "failed"` and an `error` field, and unexecuted steps SHALL have `status: "pending"`. | MUST |
+| REQ-RBR-04 | `RunPipelineStructured` SHALL create `runs` and `run_steps` records in the database identically to `RunPipeline`. | MUST |
+| REQ-RBR-05 | Pre-flight validation SHALL reject execution if any referenced entry slug does not exist or is archived, BEFORE any step executes. | MUST |
+| REQ-RBR-06 | The existing `RunPipeline` method and CLI `run` command SHALL remain unchanged — stdin/file input path is preserved. | MUST |
+| REQ-RBR-07 | `{{previous_output}}` truncation at 32K SHALL apply to structured runs identically to existing pipeline behavior. | MUST |
+| REQ-RBR-08 | The system SHALL NOT execute steps in parallel; execution is strictly sequential. | MUST |
+
+**Scenarios**:
+- GIVEN a workflow "research_article" with 2 steps both referencing valid active entries, WHEN `RunPipelineStructured("research_article", {1: "Analyze: REST vs GraphQL", 2: ""})` is called, THEN a run record is created with status `completed`, AND `steps` array shows both steps with status `completed` and their respective outputs.
+- GIVEN step 1 succeeds, step 2 fails, WHEN structured run executes, THEN run status is `failed`, step 1 shows `completed` with output, step 2 shows `failed` with error, and any step 3 shows `pending`.
+- GIVEN a workflow step references entry slug "nonexistent_entry" that does not exist, WHEN `RunPipelineStructured` is invoked, THEN execution is rejected before any step runs, AND no run/run_step records are created.
+- GIVEN a workflow and input file, WHEN `skillvault run my_workflow input.md` is invoked, THEN the existing `RunPipeline` path executes via stdin/file — behavior is identical to before structured run was added.
+- GIVEN a valid workflow slug and step inputs, WHEN the `run_workflow` MCP tool is called, THEN it delegates to `RunPipelineStructured` and returns the structured result as JSON-RPC response.
+
+---
+
+## Capability 27: MCP Route Tool
+
+Expose the existing `RouteScenario` capability (from PR #16) as an MCP tool. The `route_scenario` MCP tool accepts a scenario string and returns the matched workflow, skill, or entry information — enabling agent-driven scenario-to-workflow resolution.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-MRT-01 | The system SHALL expose a `route_scenario` MCP tool that wraps `EntryService.RouteScenario`. | MUST |
+| REQ-MRT-02 | Input: `scenario` (string, required) — the scenario description to resolve. | MUST |
+| REQ-MRT-03 | Output SHALL include the matched workflow (ID, slug, name, steps) and any matched skill/entry (ID, slug, title, type), encoded as a JSON object. | MUST |
+| REQ-MRT-04 | The tool SHALL return a meaningful error message when no workflow or skill matches the scenario string. | MUST |
+| REQ-MRT-05 | The tool SHALL return a validation error when `scenario` is empty or missing. | MUST |
+| REQ-MRT-06 | Args and results SHALL be JSON-RPC-compatible — all values serializable as JSON without custom types. | MUST |
+
+**Scenarios**:
+- GIVEN a workflow "spec-plan-task" is associated with a routing entry tagged for "spec writing", WHEN `route_scenario` is called with `scenario: "write a specification"`, THEN the response includes the matched workflow ID, slug "spec-plan-task", steps, and related skill/entry metadata.
+- GIVEN no routing entries match the scenario, WHEN `route_scenario` is called with `scenario: "do something unknown"`, THEN the response is an error indicating no workflow or skill matched the scenario.
+- GIVEN an empty string scenario, WHEN `route_scenario` is called with `scenario: ""`, THEN the call is rejected with a validation error: "scenario is required".
+- GIVEN a valid scenario that matches a workflow, WHEN `route_scenario` returns, THEN the result is a JSON object with string/array/number values only — no Go-specific types, function references, or channels.
+
+---
+
 ## Coverage Summary
 
 | Capability | Requirements | Scenarios |
@@ -520,8 +606,8 @@ See delta spec `skillvault-v3-workflow-pipelines`.
 | EntryLink + Relation Types | 5 | 3 |
 | Multi-Status Model | 7 | 3 |
 | Hermes Context Layer (7 Modes) | 11 | 3 |
-| CLI Commands | 12 | 8 |
-| MCP Tools | 13 | 6 |
+| CLI Commands | 12 | 13 |
+| MCP Tools | 15 | 14 |
 | Secret Detection | 7 | 5 |
 | Search (FTS5 + Vector) | 5 | 3 |
 | Workflow Rendering | 4 | 4 |
@@ -534,6 +620,9 @@ See delta spec `skillvault-v3-workflow-pipelines`.
 | TUI (Build-Tag Gated) | 1 | 5 |
 | Vector Search (GloVe 300d) | 7 | 4 |
 | Entry Diff | 4 | 3 |
-| **Total** | **146** | **100** |
+| Entry Purpose Taxonomy | 8 | 8 |
+| Workflow Run Bridge | 8 | 5 |
+| MCP Route Tool | 6 | 4 |
+| **Total** | **168** | **117** |
 **Edge cases**: secret detection rejection, duplicate slug import conflict, archived exclusion in context and search, empty tag rejection, self-referencing link rejection, missing content/file_path on artifact save, max_chars truncation, TUI rebuild message on non-tagged build, sanitized credential logging on sync errors.
 **Error states**: invalid entry type, invalid relation type, invalid schema version on import, secret detected warning, missing required fields on CLI, unknown sync subcommand, TUI startup with no terminal (TTY check).
