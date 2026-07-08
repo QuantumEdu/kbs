@@ -33,14 +33,14 @@ Chain strategy: feature-branch-chain
 
 ## Phase 4: Run Bridge + MCP (PR B)
 
-- [ ] 4.1 RED: Add `TestRunPipelineStructured_Success`/`_StepFailure`/`_PreFlightReject`/`_CLIUnchanged` in `internal/app/workflow_runs_test.go`.
-- [ ] 4.2 GREEN: Add `StructuredRunResult` + `StructuredStepResult` to `internal/domain/workflow.go`. Implement `RunPipelineStructured(ctx, workflowRef, stepInputs)` in `internal/app/workflow_runs.go` — reuses store, `maxPreviousOutputLen`, `vars.Resolve`. Step failures produce `status:"failed"` not Go error.
-- [ ] 4.3 RED: Add `TestRouteScenario_MCP` (match, no-match, empty rejection per gate #3) in `internal/mcp/mcp_test.go`.
-- [ ] 4.4 GREEN: Add `workflowRunSvc` + `WithWorkflowRunService()` to `ToolRegistry` in `internal/mcp/tools.go`. Register `run_workflow` + `route_scenario` in `registerV2Tools()`. `handleRouteScenario` MUST reject empty scenario before service call.
-- [ ] 4.5 GREEN: Wire `WorkflowRunService` via `WithWorkflowRunService()` in `cmd/skillvault/main.go`.
+- [x] 4.1 RED: Add `TestRunPipelineStructured_Success`/`_StepFailure`/`_PreFlightReject`/`_CLIUnchanged` in `internal/app/workflow_runs_test.go`.
+- [x] 4.2 GREEN: Add `StructuredRunResult` + `StructuredStepResult` to `internal/domain/workflow.go`. Implement `RunPipelineStructured(ctx, workflowRef, stepInputs)` in `internal/app/workflow_runs.go` — reuses store, `maxPreviousOutputLen`, `vars.Resolve`. Step failures produce `status:"failed"` not Go error.
+- [x] 4.3 RED: Add `TestRouteScenario_MCP` (match, no-match, empty rejection per gate #3) in `internal/mcp/mcp_test.go`.
+- [x] 4.4 GREEN: Add `workflowRunSvc` + `WithWorkflowRunService()` to `ToolRegistry` in `internal/mcp/tools.go`. Register `run_workflow` + `route_scenario` in `registerV2Tools()`. `handleRouteScenario` MUST reject empty scenario before service call.
+- [x] 4.5 GREEN: Wire `WorkflowRunService` via `WithWorkflowRunService()` in `cmd/skillvault/main.go`.
 
 ## Phase 5: Verification
 
-- [ ] 5.1 `go test ./...` — all pass. Backward compat: old entries without purpose survive.
-- [ ] 5.2 `go vet ./...` — clean.
+- [x] 5.1 `go test ./...` — all pass. Backward compat: old entries without purpose survive.
+- [x] 5.2 `go vet ./...` — clean.
 - [ ] 5.3 Verify PR A independently before PR B.
