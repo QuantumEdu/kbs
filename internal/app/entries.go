@@ -23,6 +23,7 @@ type SaveEntryInput struct {
 	Project string
 	Tags    []string
 	Status  string
+	Purpose string
 }
 
 type GetEntryResult struct {
@@ -108,6 +109,12 @@ func (s *EntryService) SaveEntry(ctx context.Context, input SaveEntryInput) (*Ge
 		status = domain.Status(input.Status)
 	}
 
+	if input.Purpose != "" {
+		if err := domain.ValidatePurpose(input.Purpose); err != nil {
+			return nil, fmt.Errorf("validate purpose: %w", err)
+		}
+	}
+
 	var projectID *string
 	if input.Project != "" {
 		proj, err := s.projectStore.Get(ctx, input.Project)
@@ -142,6 +149,7 @@ func (s *EntryService) SaveEntry(ctx context.Context, input SaveEntryInput) (*Ge
 		Slug:         slug,
 		Title:        input.Title,
 		Type:         domain.EntryType(input.Type),
+		Purpose:      domain.Purpose(input.Purpose),
 		Summary:      input.Summary,
 		BodyOptional: input.Body,
 		Status:       status,
@@ -207,6 +215,11 @@ func (s *EntryService) SearchEntries(ctx context.Context, query string, filters 
 	q.Query = query
 	if err := domain.ValidateSearchQuery(q); err != nil {
 		return nil, fmt.Errorf("validate search: %w", err)
+	}
+	if q.Purpose != nil && *q.Purpose != "" {
+		if err := domain.ValidatePurpose(*q.Purpose); err != nil {
+			return nil, fmt.Errorf("validate purpose filter: %w", err)
+		}
 	}
 	return s.store.Search(ctx, q)
 }

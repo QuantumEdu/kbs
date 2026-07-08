@@ -1276,3 +1276,150 @@ func TestRouteScenarioStaleWorkflow(t *testing.T) {
 		t.Errorf("expected stale workflow warning on stderr, got: %q", *stderr)
 	}
 }
+
+// --- Purpose Taxonomy Tests ---
+
+func TestPurposeSaveAndRetrieve(t *testing.T) {
+	_, svc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	result, err := svc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Knowledge Entry",
+		Type:    "reference",
+		Summary: "Entry with purpose",
+		Purpose: "KNOWLEDGE",
+	})
+	if err != nil {
+		t.Fatalf("SaveEntry with purpose failed: %v", err)
+	}
+	if result.Entry.Entry.Purpose != domain.PurposeKnowledge {
+		t.Errorf("expected purpose KNOWLEDGE, got %q", result.Entry.Entry.Purpose)
+	}
+
+	got, err := svc.GetEntry(ctx, result.Entry.Entry.ID)
+	if err != nil {
+		t.Fatalf("GetEntry failed: %v", err)
+	}
+	if got.Entry.Entry.Purpose != domain.PurposeKnowledge {
+		t.Errorf("retrieved purpose = %q, want KNOWLEDGE", got.Entry.Entry.Purpose)
+	}
+}
+
+func TestPurposeSaveWithoutPurpose(t *testing.T) {
+	_, svc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	result, err := svc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "No Purpose Entry",
+		Type:    "skill",
+		Summary: "Entry without purpose",
+	})
+	if err != nil {
+		t.Fatalf("SaveEntry without purpose failed: %v", err)
+	}
+	if result.Entry.Entry.Purpose != "" {
+		t.Errorf("expected empty purpose, got %q", result.Entry.Entry.Purpose)
+	}
+}
+
+func TestPurposeRejectsInvalid(t *testing.T) {
+	_, svc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_, err := svc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Bad Purpose",
+		Type:    "skill",
+		Summary: "Invalid purpose",
+		Purpose: "INVALID",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid purpose")
+	}
+	if !strings.Contains(err.Error(), "invalid purpose") {
+		t.Errorf("expected 'invalid purpose' in error, got: %v", err)
+	}
+}
+
+func TestPurposeSearchFilter(t *testing.T) {
+	_, svc, _, _, _, projectSvc, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projectSvc.SaveProject(ctx, SaveProjectInput{Name: "purpose-test"})
+
+	svc.SaveEntry(ctx, SaveEntryInput{
+		Title: "Work Entry", Type: "reference", Summary: "A work entry",
+		Purpose: "WORK", Project: "purpose-test",
+	})
+	svc.SaveEntry(ctx, SaveEntryInput{
+		Title: "Knowledge Entry", Type: "reference", Summary: "A knowledge entry",
+		Purpose: "KNOWLEDGE", Project: "purpose-test",
+	})
+	svc.SaveEntry(ctx, SaveEntryInput{
+		Title: "No Purpose Entry", Type: "reference", Summary: "No purpose",
+		Project: "purpose-test",
+	})
+
+	purposeWork := "WORK"
+	results, err := svc.SearchEntries(ctx, "Entry", domain.SearchQuery{
+		Purpose: &purposeWork,
+		Limit:   10,
+	})
+	if err != nil {
+		t.Fatalf("SearchEntries with purpose filter failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result for WORK purpose, got %d", len(results))
+	}
+	if results[0].Entry.Title != "Work Entry" {
+		t.Errorf("expected 'Work Entry', got %q", results[0].Entry.Title)
+	}
+}
+
+func TestPurposeImportExportRoundTrip(t *testing.T) {
+	_, entrySvc, _, _, _, projectSvc, _, _, exportSvc, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projectSvc.SaveProject(ctx, SaveProjectInput{Name: "export-test"})
+
+	result, err := entrySvc.SaveEntry(ctx, SaveEntryInput{
+		Title: "Export Purpose", Type: "reference", Summary: "Has purpose",
+		Purpose: "LEARNING", Project: "export-test",
+	})
+	if err != nil {
+		t.Fatalf("SaveEntry failed: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	exportPath := filepath.Join(tmpDir, "export.json")
+
+	if err := exportSvc.ExportVault(ctx, ExportVaultInput{OutputPath: exportPath, IncludeArtifacts: true}); err != nil {
+		t.Fatalf("ExportVault failed: %v", err)
+	}
+
+	sqlDB2, err := db.OpenDB(":memory:")
+	if err != nil {
+		t.Fatalf("OpenDB2 failed: %v", err)
+	}
+	defer sqlDB2.Close()
+	if err := db.RunMigrations(sqlDB2); err != nil {
+		t.Fatalf("RunMigrations2 failed: %v", err)
+	}
+	store2 := db.NewStore(sqlDB2)
+	importSvc2 := NewVaultImportService(store2.ImportExport, store2.Entries, store2.Projects, store2.Artifacts)
+	if err := importSvc2.Import(ctx, exportPath); err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+
+	got, err := NewEntryService(store2.Entries, store2.Projects, store2.Artifacts).GetEntry(ctx, result.Entry.Entry.ID)
+	if err != nil {
+		t.Fatalf("GetEntry after import failed: %v", err)
+	}
+	if got.Entry.Entry.Purpose != domain.PurposeLearning {
+		t.Errorf("imported purpose = %q, want LEARNING", got.Entry.Entry.Purpose)
+	}
+}
