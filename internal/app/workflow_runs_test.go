@@ -323,6 +323,244 @@ func TestRunPipelineStepErrorHaltsExecution(t *testing.T) {
 	}
 }
 
+// --- RunPipelineStructured tests (PR B) ---
+
+func TestRunPipelineStructuredWorkflowNotFound(t *testing.T) {
+	_, runSvc, _, _, _, cleanup := setupRunServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_, err := runSvc.RunPipelineStructured(ctx, "nonexistent", nil)
+	if err == nil {
+		t.Fatal("expected error for nonexistent workflow")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should mention 'not found', got: %v", err)
+	}
+}
+
+func TestRunPipelineStructuredSuccessfulExecution(t *testing.T) {
+	store, runSvc, wfSvc, entrySvc, projSvc, cleanup := setupRunServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projSvc.SaveProject(ctx, SaveProjectInput{Name: "testproj"})
+	entrySvc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Step 1 Prompt",
+		Type:    "prompt",
+		Summary: "First step",
+		Body:    "Process input: {{input}}",
+		Project: "testproj",
+	})
+	entrySvc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Step 2 Prompt",
+		Type:    "prompt",
+		Summary: "Second step",
+		Body:    "Previous was: {{previous_output}}. Input: {{input}}",
+		Project: "testproj",
+	})
+
+	steps := []SaveWorkflowStep{
+		{OrderIndex: 1, Title: "Step 1", Instruction: "First", Required: true, EntrySlug: "step-1-prompt"},
+		{OrderIndex: 2, Title: "Step 2", Instruction: "Second", Required: true, EntrySlug: "step-2-prompt"},
+	}
+	wf, err := wfSvc.SaveWorkflow(ctx, SaveWorkflowInput{
+		Name:  "Pipeline Structured WF",
+		Steps: steps,
+	})
+	if err != nil {
+		t.Fatalf("SaveWorkflow failed: %v", err)
+	}
+
+	stepInputs := map[int]string{
+		1: "STEP1_OUTPUT",
+		2: "STEP2_OUTPUT",
+	}
+
+	result, err := runSvc.RunPipelineStructured(ctx, wf.Slug, stepInputs)
+	if err != nil {
+		t.Fatalf("RunPipelineStructured failed: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Status != domain.RunStatusCompleted {
+		t.Errorf("result status = %q, want 'completed'", result.Status)
+	}
+	if result.RunID == "" {
+		t.Error("run_id should not be empty")
+	}
+	if result.WorkflowID != wf.ID {
+		t.Errorf("workflow_id = %q, want %q", result.WorkflowID, wf.ID)
+	}
+	if result.WorkflowSlug != wf.Slug {
+		t.Errorf("workflow_slug = %q, want %q", result.WorkflowSlug, wf.Slug)
+	}
+	if len(result.Steps) != 2 {
+		t.Fatalf("expected 2 steps in result, got %d", len(result.Steps))
+	}
+	if result.Steps[0].Status != domain.RunStatusCompleted {
+		t.Errorf("step 0 status = %q, want 'completed'", result.Steps[0].Status)
+	}
+	if result.Steps[0].Output != "STEP1_OUTPUT" {
+		t.Errorf("step 0 output = %q, want 'STEP1_OUTPUT'", result.Steps[0].Output)
+	}
+	if result.Steps[1].Status != domain.RunStatusCompleted {
+		t.Errorf("step 1 status = %q, want 'completed'", result.Steps[1].Status)
+	}
+	if result.Steps[1].Output != "STEP2_OUTPUT" {
+		t.Errorf("step 1 output = %q, want 'STEP2_OUTPUT'", result.Steps[1].Output)
+	}
+
+	// Verify stored run in DB
+	_, runSteps, err := store.WorkflowRuns.GetRun(ctx, result.RunID)
+	if err != nil {
+		t.Fatalf("GetRun failed: %v", err)
+	}
+	if len(runSteps) != 2 {
+		t.Errorf("expected 2 run steps in db, got %d", len(runSteps))
+	}
+	if runSteps[0].Output != "STEP1_OUTPUT" {
+		t.Errorf("db step 0 output = %q, want 'STEP1_OUTPUT'", runSteps[0].Output)
+	}
+	if runSteps[1].Output != "STEP2_OUTPUT" {
+		t.Errorf("db step 1 output = %q, want 'STEP2_OUTPUT'", runSteps[1].Output)
+	}
+}
+
+func TestRunPipelineStructuredStepFailure(t *testing.T) {
+	store, runSvc, wfSvc, entrySvc, projSvc, cleanup := setupRunServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projSvc.SaveProject(ctx, SaveProjectInput{Name: "testproj"})
+	entrySvc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Step A",
+		Type:    "prompt",
+		Summary: "First step",
+		Body:    "Do A: {{input}}",
+		Project: "testproj",
+	})
+	entrySvc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Step B",
+		Type:    "prompt",
+		Summary: "Second step",
+		Body:    "Do B: {{previous_output}}",
+		Project: "testproj",
+	})
+
+	steps := []SaveWorkflowStep{
+		{OrderIndex: 1, Title: "Step A", Instruction: "First", Required: true, EntrySlug: "step-a"},
+		{OrderIndex: 2, Title: "Step B", Instruction: "Second", Required: true, EntrySlug: "step-b"},
+	}
+	wf, _ := wfSvc.SaveWorkflow(ctx, SaveWorkflowInput{
+		Name:  "Fail WF",
+		Steps: steps,
+	})
+
+	// Only provide input for step 1 (step 2 input missing → step 2 failure)
+	stepInputs := map[int]string{
+		1: "step A output",
+	}
+
+	result, err := runSvc.RunPipelineStructured(ctx, wf.Slug, stepInputs)
+	if err != nil {
+		t.Fatalf("RunPipelineStructured returned unexpected error: %v", err)
+	}
+	if result.Status != domain.RunStatusFailed {
+		t.Errorf("result status = %q, want 'failed'", result.Status)
+	}
+	if result.FinishedAt == nil {
+		t.Error("failed run should have FinishedAt set")
+	}
+	if len(result.Steps) != 2 {
+		t.Fatalf("expected 2 steps in result, got %d", len(result.Steps))
+	}
+	if result.Steps[0].Status != domain.RunStatusCompleted {
+		t.Errorf("step 0 status = %q, want 'completed'", result.Steps[0].Status)
+	}
+	if result.Steps[0].Output != "step A output" {
+		t.Errorf("step 0 output = %q, want 'step A output'", result.Steps[0].Output)
+	}
+	if result.Steps[1].Status != domain.RunStatusFailed {
+		t.Errorf("step 1 status = %q, want 'failed'", result.Steps[1].Status)
+	}
+	if result.Steps[1].Error == "" {
+		t.Error("failing step should have error message")
+	}
+
+	// Verify DB: step 1 completed, step 2 failed, run failed
+	_, runSteps, _ := store.WorkflowRuns.GetRun(ctx, result.RunID)
+	if len(runSteps) != 2 {
+		t.Fatalf("expected 2 run steps in db, got %d", len(runSteps))
+	}
+	if runSteps[0].Status != domain.RunStatusCompleted {
+		t.Errorf("db step 0 status = %q, want 'completed'", runSteps[0].Status)
+	}
+	if runSteps[1].Status != domain.RunStatusFailed {
+		t.Errorf("db step 1 status = %q, want 'failed'", runSteps[1].Status)
+	}
+}
+
+func TestRunPipelineStructuredPreFlightEntryNotFound(t *testing.T) {
+	_, runSvc, wfSvc, _, _, cleanup := setupRunServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	steps := []SaveWorkflowStep{
+		{OrderIndex: 1, Title: "Step 1", Instruction: "Missing", Required: true, EntrySlug: "no-such-entry"},
+	}
+	wf, _ := wfSvc.SaveWorkflow(ctx, SaveWorkflowInput{
+		Name:  "Bad WF",
+		Steps: steps,
+	})
+
+	_, err := runSvc.RunPipelineStructured(ctx, wf.Slug, nil)
+	if err == nil {
+		t.Fatal("expected pre-flight error for nonexistent entry")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("error should mention 'not found', got: %v", err)
+	}
+}
+
+func TestRunPipelineCLIUnchanged(t *testing.T) {
+	// Verify RunPipeline still works and is not broken by PR B changes.
+	_, runSvc, wfSvc, entrySvc, projSvc, cleanup := setupRunServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projSvc.SaveProject(ctx, SaveProjectInput{Name: "testproj"})
+	entrySvc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Exec Step",
+		Type:    "prompt",
+		Summary: "Test",
+		Body:    "Process: {{input}}",
+		Project: "testproj",
+	})
+
+	steps := []SaveWorkflowStep{
+		{OrderIndex: 1, Title: "Step 1", Instruction: "First", Required: true, EntrySlug: "exec-step"},
+	}
+	wf, _ := wfSvc.SaveWorkflow(ctx, SaveWorkflowInput{
+		Name:  "CLI WF",
+		Steps: steps,
+	})
+
+	stdin := strings.NewReader("step1_output\n")
+	var stdout bytes.Buffer
+	run, output, err := runSvc.RunPipeline(ctx, wf.Slug, "my input", stdin, &stdout)
+	if err != nil {
+		t.Fatalf("RunPipeline should still work: %v", err)
+	}
+	if run.Status != domain.RunStatusCompleted {
+		t.Errorf("run status = %q, want 'completed'", run.Status)
+	}
+	if output != "step1_output" {
+		t.Errorf("final output = %q, want 'step1_output'", output)
+	}
+}
+
 func TestRunPipelineTruncationWarning(t *testing.T) {
 	_, runSvc, wfSvc, entrySvc, projSvc, cleanup := setupRunServices(t)
 	defer cleanup()

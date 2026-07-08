@@ -25,6 +25,7 @@ type ToolRegistry struct {
 	contextSvc     *app.ContextService
 	seriesSvc      *app.SeriesService
 	workflowSvc    *app.WorkflowService
+	workflowRunSvc *app.WorkflowRunService
 	sessionSvc     *app.SessionService
 	projectSvc     *app.ProjectService
 	saveResultSvc  *app.SavePromptResultService
@@ -52,6 +53,12 @@ func (r *ToolRegistry) WithCompareService(svc *app.VectorService) *ToolRegistry 
 // WithSaveResultService sets the save-result service.
 func (r *ToolRegistry) WithSaveResultService(svc *app.SavePromptResultService) *ToolRegistry {
 	r.saveResultSvc = svc
+	return r
+}
+
+// WithWorkflowRunService sets the workflow run service for run_workflow tool.
+func (r *ToolRegistry) WithWorkflowRunService(svc *app.WorkflowRunService) *ToolRegistry {
+	r.workflowRunSvc = svc
 	return r
 }
 
@@ -180,6 +187,13 @@ func (r *ToolRegistry) registerV2Tools() {
 			"source_prompt_id": map[string]interface{}{"type": "string", "description": "Source prompt entry ID"},
 			"model":            map[string]interface{}{"type": "string", "description": "Model identifier"},
 		})},
+		{Name: "run_workflow", Description: "Execute a workflow with structured step inputs and return per-step results", InputSchema: schemaObj(map[string]interface{}{
+			"workflow": map[string]interface{}{"type": "string", "description": "Workflow slug or ID (required)"},
+			"steps":    map[string]interface{}{"type": "object", "description": "Map of step index (int) -> input text"},
+		})},
+		{Name: "route_scenario", Description: "Resolve a free-text scenario to a matching workflow or skill", InputSchema: schemaObj(map[string]interface{}{
+			"scenario": map[string]interface{}{"type": "string", "description": "Scenario text to route (required)"},
+		})},
 	}
 }
 
@@ -235,6 +249,10 @@ func (r *ToolRegistry) dispatch(ctx context.Context, name string, args map[strin
 		return r.handleCompareEntries(ctx, args)
 	case "save_result":
 		return r.handleSaveResult(ctx, args)
+	case "run_workflow":
+		return r.handleRunWorkflow(ctx, args)
+	case "route_scenario":
+		return r.handleRouteScenario(ctx, args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -974,6 +992,58 @@ func (r *ToolRegistry) handleSaveResult(ctx context.Context, args map[string]int
 		"project_id": proj,
 	}
 	return jsonResult(result), nil
+}
+
+func (r *ToolRegistry) handleRunWorkflow(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.workflowRunSvc == nil {
+		return errResult("Error: workflow run service not available"), nil
+	}
+
+	workflowRef := strArg(args, "workflow")
+	if workflowRef == "" {
+		return errResult("Error: workflow is required"), nil
+	}
+
+	// Parse steps from args: { "1": "step output", "2": "step output" }
+	stepInputs := make(map[int]string)
+	if rawSteps, ok := args["steps"].(map[string]interface{}); ok {
+		for k, v := range rawSteps {
+			var idx int
+			if _, err := fmt.Sscanf(k, "%d", &idx); err == nil {
+				if s, ok2 := v.(string); ok2 {
+					stepInputs[idx] = s
+				}
+			}
+		}
+	}
+
+	result, err := r.workflowRunSvc.RunPipelineStructured(ctx, workflowRef, stepInputs)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+	return jsonResult(result), nil
+}
+
+func (r *ToolRegistry) handleRouteScenario(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.entrySvc == nil {
+		return errResult("Error: entry service not available"), nil
+	}
+
+	scenario := strArg(args, "scenario")
+	if scenario == "" {
+		return errResult("Error: scenario is required and must not be empty"), nil
+	}
+
+	result, err := r.entrySvc.RouteScenario(ctx, scenario)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+
+	// RouteResult is already JSON-tagged, marshal it for the response.
+	data, _ := json.Marshal(result)
+	return &ToolCallResult{
+		Content: []ToolContent{{Type: "text", Text: string(data)}},
+	}, nil
 }
 
 func errResult(text string) *ToolCallResult {
