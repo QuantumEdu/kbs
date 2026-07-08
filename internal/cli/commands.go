@@ -88,6 +88,8 @@ func ParseCommand(args []string) (string, error) {
 		return sub, nil
 	case "import-workflow":
 		return sub, nil
+	case "route":
+		return sub, nil
 	case "save-result":
 		return sub, nil
 	case "sync":
@@ -580,6 +582,35 @@ func ParseImportWorkflowFlags(args []string) (*ImportWorkflowFlags, error) {
 
 	if flags.File == "" {
 		return nil, fmt.Errorf("--file is required")
+	}
+
+	return flags, nil
+}
+
+// RouteFlags holds parsed route command flags.
+type RouteFlags struct {
+	Scenario string
+	JSON     bool
+}
+
+// ParseRouteFlags parses route-specific flags from args.
+// Usage: skillvault route <scenario> [--json]
+func ParseRouteFlags(args []string) (*RouteFlags, error) {
+	if len(args) < 3 {
+		return nil, fmt.Errorf("route requires a scenario string")
+	}
+
+	flags := &RouteFlags{Scenario: args[2]}
+
+	fs := flag.NewFlagSet("route", flag.ContinueOnError)
+	fs.BoolVar(&flags.JSON, "json", false, "Output as JSON")
+
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 3 {
+		if err := fs.Parse(args[3:]); err != nil {
+			return nil, fmt.Errorf("parse route flags: %w", err)
+		}
 	}
 
 	return flags, nil

@@ -154,8 +154,6 @@ func TestVersionCommand(t *testing.T) {
 	}
 }
 
-
-
 func TestImportWorkflowCommand(t *testing.T) {
 	tmpDir := t.TempDir()
 	binPath := filepath.Join(tmpDir, "skillvault")
@@ -215,6 +213,104 @@ phases:
 	}
 	if !strings.Contains(string(out), "Phases:") {
 		t.Errorf("expected output to show phases, got: %q", string(out))
+	}
+}
+
+func TestRouteCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	binPath := filepath.Join(tmpDir, "skillvault")
+
+	// Build binary once to avoid go run module-cache cleanup issues.
+	buildCmd := exec.Command("go", "build", "-o", binPath, "./cmd/skillvault")
+	buildCmd.Dir = "../.."
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\nOutput: %s", err, string(out))
+	}
+
+	vaultHome := filepath.Join(tmpDir, "vaulthome")
+	if err := os.MkdirAll(vaultHome, 0755); err != nil {
+		t.Fatalf("failed to create vault home: %v", err)
+	}
+	env := append(os.Environ(), "HOME="+vaultHome)
+
+	// Initialize vault in temp home.
+	initCmd := exec.Command(binPath, "init")
+	initCmd.Env = env
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		t.Fatalf("init failed: %v\nOutput: %s", err, string(out))
+	}
+
+	// Add a routing entry mapping "research" to a skill.
+	body := "research:\n  skill: extract-wisdom"
+	addCmd := exec.Command(binPath, "add-entry", "--title", "Research Route", "--type", "routing", "--summary", "Route research to skill", "--body", body, "--tags", "workflow-route")
+	addCmd.Env = env
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		t.Fatalf("add-entry failed: %v\nOutput: %s", err, string(out))
+	}
+
+	// Resolve the route.
+	cmd := exec.Command(binPath, "route", "research")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("route failed: %v\nOutput: %s", err, string(out))
+	}
+
+	if !strings.Contains(string(out), "Route: research") {
+		t.Errorf("expected output to contain 'Route: research', got: %q", string(out))
+	}
+	if !strings.Contains(string(out), "extract-wisdom") {
+		t.Errorf("expected output to contain target skill, got: %q", string(out))
+	}
+	if !strings.Contains(string(out), "(skill)") {
+		t.Errorf("expected output to contain type '(skill)', got: %q", string(out))
+	}
+}
+
+func TestRouteCommandJSON(t *testing.T) {
+	tmpDir := t.TempDir()
+	binPath := filepath.Join(tmpDir, "skillvault")
+
+	buildCmd := exec.Command("go", "build", "-o", binPath, "./cmd/skillvault")
+	buildCmd.Dir = "../.."
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\nOutput: %s", err, string(out))
+	}
+
+	vaultHome := filepath.Join(tmpDir, "vaulthome")
+	if err := os.MkdirAll(vaultHome, 0755); err != nil {
+		t.Fatalf("failed to create vault home: %v", err)
+	}
+	env := append(os.Environ(), "HOME="+vaultHome)
+
+	initCmd := exec.Command(binPath, "init")
+	initCmd.Env = env
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		t.Fatalf("init failed: %v\nOutput: %s", err, string(out))
+	}
+
+	body := "research:\n  skill: extract-wisdom"
+	addCmd := exec.Command(binPath, "add-entry", "--title", "Research Route", "--type", "routing", "--summary", "Route research to skill", "--body", body, "--tags", "workflow-route")
+	addCmd.Env = env
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		t.Fatalf("add-entry failed: %v\nOutput: %s", err, string(out))
+	}
+
+	cmd := exec.Command(binPath, "route", "research", "--json")
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("route --json failed: %v\nOutput: %s", err, string(out))
+	}
+
+	if !strings.Contains(string(out), `"scenario": "research"`) {
+		t.Errorf("expected JSON to contain scenario, got: %q", string(out))
+	}
+	if !strings.Contains(string(out), `"type": "skill"`) {
+		t.Errorf("expected JSON to contain type skill, got: %q", string(out))
+	}
+	if !strings.Contains(string(out), `"target": "extract-wisdom"`) {
+		t.Errorf("expected JSON to contain target, got: %q", string(out))
 	}
 }
 

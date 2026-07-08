@@ -65,6 +65,10 @@ func TestParseSubcommand(t *testing.T) {
 		// TUI command
 		{"tui", []string{"skillvault", "tui"}, "tui", false},
 
+		// Route command
+		{"route", []string{"skillvault", "route", "research"}, "route", false},
+		{"route no arg", []string{"skillvault", "route"}, "route", false},
+
 		// Errors
 		{"no args", []string{"skillvault"}, "", true},
 		{"invalid subcommand", []string{"skillvault", "invalid"}, "", true},
@@ -780,5 +784,51 @@ func TestParseSearchFlags_Vector(t *testing.T) {
 	}
 	if flags.Limit != 5 {
 		t.Errorf("Limit = %d, want 5", flags.Limit)
+	}
+}
+
+func TestParseRouteFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    RouteFlags
+		wantErr bool
+	}{
+		{
+			name: "scenario required",
+			args: []string{"skillvault", "route", "research"},
+			want: RouteFlags{Scenario: "research", JSON: false},
+		},
+		{
+			name: "with --json flag",
+			args: []string{"skillvault", "route", "onboarding", "--json"},
+			want: RouteFlags{Scenario: "onboarding", JSON: true},
+		},
+		{
+			name:    "missing scenario",
+			args:    []string{"skillvault", "route"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flags, err := ParseRouteFlags(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseRouteFlags failed: %v", err)
+			}
+			if flags.Scenario != tt.want.Scenario {
+				t.Errorf("Scenario = %q, want %q", flags.Scenario, tt.want.Scenario)
+			}
+			if flags.JSON != tt.want.JSON {
+				t.Errorf("JSON = %v, want %v", flags.JSON, tt.want.JSON)
+			}
+		})
 	}
 }

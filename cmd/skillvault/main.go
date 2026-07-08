@@ -47,6 +47,7 @@ var commandDescs = map[string]string{
 	"export":               "Export vault contents to a JSON file",
 	"import":               "Import vault contents from a JSON file",
 	"import-workflow":      "Import a workflow-builder YAML file as entries + workflow",
+	"route":                "Resolve a scenario to its matching workflow or skill",
 	"save-result":          "Save an AI prompt result to the vault",
 	"stats":                "Show vault statistics and entry counts",
 	"memory-index":         "Index pi-memory markdown files into the vault",
@@ -229,6 +230,9 @@ func openVault() *vaultServices {
 
 	// Wire VectorService into EntryService for auto-embed on save.
 	entrySvc.SetVectorService(compareSvc)
+
+	// Wire WorkflowStore into EntryService for route scenario resolution.
+	entrySvc.SetWorkflowStore(store.Workflows)
 
 	// Sync service: load config, build gzip transport from config defaults.
 	// The transport can be overridden at runtime via CLI flags.
@@ -693,6 +697,53 @@ func runCLI(cmd string) {
 		fmt.Printf("  Phases:   %d\n", len(slugs))
 		if flags.Project != "" {
 			fmt.Printf("  Project:  %s\n", flags.Project)
+		}
+
+	case "route":
+		flags, err := cli.ParseRouteFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		result, err := svc.entrySvc.RouteScenario(ctx, flags.Scenario)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		if flags.JSON {
+			data, err := json.MarshalIndent(result, "", "  ")
+			if err != nil {
+				cli.PrintError(fmt.Errorf("marshal route result: %w", err))
+				os.Exit(1)
+			}
+			fmt.Println(string(data))
+			return
+		}
+
+		fmt.Printf("Route: %s → %s (%s)\n", result.Scenario, result.Target, result.Type)
+		if result.Description != "" {
+			fmt.Printf("  Description: %s\n", result.Description)
+		}
+		if result.Workflow != nil {
+			fmt.Printf("  Workflow: %s (%s)\n", result.Workflow.Name, result.Workflow.ID)
+			steps, err := svc.workflowSvc.RenderWorkflow(ctx, result.Workflow.ID)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[sk-vault] warning: could not render workflow steps: %v\n", err)
+			} else if len(steps) > 0 {
+				fmt.Println("  Steps:")
+				for _, s := range steps {
+					req := ""
+					if s.Required {
+						req = " [REQUIRED]"
+					}
+					fmt.Printf("    %d. %s%s\n", s.OrderIndex, s.Title, req)
+					if s.Instruction != "" {
+						fmt.Printf("       %s\n", s.Instruction)
+					}
+				}
+			}
 		}
 
 	case "save-result":
