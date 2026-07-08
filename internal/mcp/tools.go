@@ -88,12 +88,14 @@ func (r *ToolRegistry) registerV2Tools() {
 			"project": map[string]interface{}{"type": "string", "description": "Project name or ID"},
 			"tags":    map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
 			"status":  map[string]interface{}{"type": "string", "description": "draft|active|archived|deprecated|canonical"},
+			"purpose": map[string]interface{}{"type": "string", "description": "Entry purpose: WORK|KNOWLEDGE|LEARNING|RELATIONSHIP|STATE"},
 		})},
 		{Name: "search_entries", Description: "Search entries with FTS5 and filters", InputSchema: schemaObj(map[string]interface{}{
 			"query":            map[string]interface{}{"type": "string", "description": "Search query"},
 			"type":             map[string]interface{}{"type": "string", "description": "Filter by entry type"},
 			"project":          map[string]interface{}{"type": "string", "description": "Filter by project"},
 			"tags":             map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+			"purpose":          map[string]interface{}{"type": "string", "description": "Filter by purpose (WORK|KNOWLEDGE|LEARNING|RELATIONSHIP|STATE)"},
 			"include_archived": map[string]interface{}{"type": "boolean", "description": "Include archived entries"},
 			"limit":            map[string]interface{}{"type": "number", "description": "Max results (default 10)"},
 			"vector":           map[string]interface{}{"type": "boolean", "description": "Use vector/cosine similarity search instead of FTS5"},
@@ -247,6 +249,7 @@ func (r *ToolRegistry) handleSaveEntry(ctx context.Context, args map[string]inte
 		Project: strArg(args, "project"),
 		Tags:    parseStrings(args["tags"]),
 		Status:  strArg(args, "status"),
+		Purpose: strArg(args, "purpose"),
 	}
 	if input.Type == "" {
 		input.Type = "note"
@@ -341,9 +344,16 @@ func (r *ToolRegistry) handleSearchEntries(ctx context.Context, args map[string]
 		typePtr = &typ
 	}
 
+	purpose := strArg(args, "purpose")
+	var purposePtr *string
+	if purpose != "" {
+		purposePtr = &purpose
+	}
+
 	results, err := r.entrySvc.SearchEntries(ctx, query, domain.SearchQuery{
 		ProjectID:       projectID,
 		Type:            typePtr,
+		Purpose:         purposePtr,
 		Tags:            tags,
 		IncludeArchived: includeArchived,
 		Limit:           limit,

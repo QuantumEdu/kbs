@@ -119,6 +119,7 @@ type AddEntryFlags struct {
 	Project string
 	Tags    string
 	Status  string
+	Purpose string
 }
 
 // ParseAddEntryFlags parses add-entry-specific flags from args.
@@ -133,6 +134,7 @@ func ParseAddEntryFlags(args []string) (*AddEntryFlags, error) {
 	fs.StringVar(&flags.Project, "project", "", "Project slug or ID")
 	fs.StringVar(&flags.Tags, "tags", "", "Comma-separated tags")
 	fs.StringVar(&flags.Status, "status", "", "Entry status")
+	fs.StringVar(&flags.Purpose, "purpose", "", "Entry purpose (WORK, KNOWLEDGE, LEARNING, RELATIONSHIP, STATE)")
 
 	fs.SetOutput(&nullWriter{})
 
@@ -158,6 +160,7 @@ type SearchFlags struct {
 	ProjectID       string
 	Type            string
 	Tag             string
+	Purpose         string
 	IncludeArchived bool
 	Limit           int
 	Vector          bool
@@ -178,6 +181,7 @@ func ParseSearchFlags(args []string) (*SearchFlags, error) {
 	fs.BoolVar(&flags.IncludeArchived, "include-archived", false, "Include archived entries")
 	fs.IntVar(&flags.Limit, "limit", 20, "Max results")
 	fs.BoolVar(&flags.Vector, "vector", false, "Use vector/cosine similarity search")
+	fs.StringVar(&flags.Purpose, "purpose", "", "Filter by purpose (WORK, KNOWLEDGE, LEARNING, RELATIONSHIP, STATE)")
 
 	fs.SetOutput(&nullWriter{})
 
