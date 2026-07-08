@@ -43,4 +43,4 @@ Chain strategy: feature-branch-chain
 
 - [x] 5.1 `go test ./...` — all pass. Backward compat: old entries without purpose survive.
 - [x] 5.2 `go vet ./...` — clean.
-- [ ] 5.3 Verify PR A independently before PR B.
+- [x] 5.3 Verify PR A independently before PR B.
