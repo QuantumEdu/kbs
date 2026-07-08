@@ -4,9 +4,9 @@
 
 ### Requirement: REQ-MCP-01 — tool count
 
-The system SHALL expose 18 MCP tools: `save_entry`, `search_entries`, `get_entry`, `save_artifact`, `get_context`, `compose_series`, `render_workflow`, `session_wrap`, `archive_entry`, `list_projects`, `search_by_tags`, `get_context_bundle`, `save_entry_ref`, `list_entry_refs`, `get_entry_graph`, `compare_entries`, `run_workflow`, `route_scenario`.
+The system SHALL expose 19 MCP tools: `save_entry`, `search_entries`, `get_entry`, `save_artifact`, `get_context`, `compose_series`, `render_workflow`, `session_wrap`, `archive_entry`, `list_projects`, `search_by_tags`, `get_context_bundle`, `save_entry_ref`, `list_entry_refs`, `get_entry_graph`, `compare_entries`, `save_result`, `run_workflow`, `route_scenario`.
 
-(Previously: 16 tools — `run_workflow` and `route_scenario` were not present.)
+(Previously: 17 tools — `run_workflow` and `route_scenario` were not present.)
 
 ### Requirement: REQ-MCP-02 — save_entry params
 
