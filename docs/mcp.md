@@ -1,83 +1,85 @@
-# MCP Server — 16 herramientas para agentes AI
+# MCP Server — 19 tools for AI agents
 
-SkillVault funciona como servidor MCP (Model Context Protocol) sobre stdio JSON-RPC 2.0. Esto permite que agentes como Claude Code, OpenCode, o cualquier cliente MCP lean y escriban directamente en tu vault.
+SkillVault runs as an MCP (Model Context Protocol) server over stdio JSON-RPC 2.0. This lets agents like Claude Code, OpenCode, or any MCP client read and write directly to your vault.
 
 ---
 
 ## Setup
 
-### 1. Instalación
+### 1. Installation
 
 ```bash
 go build -o ~/tools/skillvault ./cmd/skillvault
 ```
 
-### 2. Configuración
+### 2. Configuration
 
-Agregá a tu `opencode.json` (o claude_desktop_config.json, según el cliente):
+Add to your `opencode.json` (or `claude_desktop_config.json`, depending on the client):
 
 ```json
 {
   "mcpServers": {
     "skillvault": {
-      "command": "/home/tu-user/tools/skillvault",
+      "command": "/home/your-user/tools/skillvault",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-### 3. Symlink para acceso directo (opcional)
+### 3. Symlink for direct access (optional)
 
 ```bash
 ln -sf ~/tools/skillvault ~/tools/mcp
-# Ahora los agentes pueden llamar "mcp" directamente
-# El binario detecta el symlink y entra en modo MCP automáticamente
+# Now agents can call "mcp" directly
+# The binary detects the symlink and enters MCP mode automatically
 ```
 
-Si el binario se ejecuta como `mcp` (por el nombre del symlink), entra directo a modo MCP sin necesidad del argumento.
+When the binary runs as `mcp` (via the symlink name), it enters MCP mode directly without needing the argument.
 
-### 4. Verificación
+### 4. Verification
 
 ```bash
 skillvault mcp
-# Espera conexiones stdio JSON-RPC. Probalo con:
+# Waits for stdio JSON-RPC connections. Test with:
 echo '{"jsonrpc":"2.0","id":1,"method":"list_projects","params":{}}' | skillvault mcp
 ```
 
 ---
 
-## Herramientas
+## Tools
 
 ### `save_entry`
 
-Guarda cualquier tipo de entrada en el vault.
+Save any type of entry in the vault.
 
-**Parámetros:**
-- `title` (string, requerido) — Título
-- `type` (string, requerido) — Tipo: `prompt`, `skill`, `workflow_note`, `reference`, `user`, `feedback`, `project_state`, `session`, `decision`, `artifact_summary`
-- `summary` (string, requerido) — Resumen
-- `content` (string, opcional) — Contenido largo
-- `project` (string, opcional) — Slug del proyecto
-- `tags` (string[], opcional) — Tags
-- `status` (string, opcional) — `draft`, `active`, `archived`, `deprecated`, `canonical`
+**Parameters:**
+- `title` (string, required) — Title
+- `type` (string, required) — Type: `prompt`, `skill`, `workflow_note`, `reference`, `user`, `feedback`, `project_state`, `session`, `decision`, `artifact_summary`, `handoff`, `routing`
+- `summary` (string, required) — Summary
+- `body` (string, optional) — Long-form content
+- `project` (string, optional) — Project slug
+- `tags` (string[], optional) — Tags
+- `status` (string, optional) — `draft`, `active`, `archived`, `deprecated`, `canonical`
+- `purpose` (string, optional) — LifeOS-aligned purpose: `WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`
 
-**Ejemplo desde el agente:**
+**Example (from agent):**
 ```json
 {
   "method": "save_entry",
   "params": {
     "title": "Clean Architecture Rules",
     "type": "skill",
-    "summary": "Reglas de Clean Architecture para el proyecto",
-    "content": "1. Domain no depende de nada\n2. App depende de domain\n3. Adapters dependen de app",
-    "project": "miapp",
+    "purpose": "KNOWLEDGE",
+    "summary": "Clean Architecture rules for the project",
+    "content": "1. Domain depends on nothing\n2. App depends on domain\n3. Adapters depend on app",
+    "project": "myapp",
     "tags": ["architecture", "clean-code"]
   }
 }
 ```
 
-**Respuesta:**
+**Response:**
 ```json
 {
   "id": "clean-architecture-rules",
@@ -89,113 +91,114 @@ Guarda cualquier tipo de entrada en el vault.
 
 ### `search_entries`
 
-Búsqueda full-text con filtros.
+Full-text search with filters.
 
-**Parámetros:**
-- `query` (string, requerido) — Términos de búsqueda
-- `type` (string, opcional) — Filtrar por tipo
-- `project` (string, opcional) — Filtrar por proyecto
-- `tags` (string[], opcional) — Filtrar por tags
-- `status` (string, opcional) — Filtrar por estado
-- `include_archived` (bool, opcional) — Incluir archivados (default: false)
-- `limit` (int, opcional) — Máximo de resultados
-- `vector` (bool, opcional) — Usar búsqueda semántica por coseno (default: false)
+**Parameters:**
+- `query` (string, required) — Search terms
+- `type` (string, optional) — Filter by type
+- `project` (string, optional) — Filter by project
+- `tags` (string[], optional) — Filter by tags
+- `purpose` (string, optional) — Filter by purpose (`WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`)
+- `status` (string, optional) — Filter by status
+- `include_archived` (bool, optional) — Include archived (default: false)
+- `limit` (int, optional) — Max results
+- `vector` (bool, optional) — Use cosine similarity search (default: false)
 
 ---
 
 ### `get_entry`
 
-Obtiene una entrada por ID o slug.
+Retrieve an entry by ID or slug.
 
-**Parámetros:**
-- `id` (string, requerido) — ID o slug de la entrada
+**Parameters:**
+- `id` (string, required) — Entry ID or slug
 
 ---
 
 ### `save_artifact`
 
-Guarda un artefacto largo respaldado por filesystem.
+Save a large filesystem-backed artifact.
 
-**Parámetros:**
-- `title` (string, requerido) — Título
-- `type` (string, requerido) — Tipo de artefacto
-- `content` (string, requerido) — Contenido completo
-- `project` (string, opcional) — Proyecto
-- `tags` (string[], opcional) — Tags
+**Parameters:**
+- `title` (string, required) — Title
+- `type` (string, required) — Artifact type
+- `content` (string, required) — Full content
+- `project` (string, optional) — Project
+- `tags` (string[], optional) — Tags
 
-**Cómo funciona:** el contenido se escribe en `~/.skillvault/objects/YYYY/MM/<slug>.<ext>` con hash SHA256. La metadata (título, tipo, slug, fecha) va a SQLite. Ideal para outputs largos de AI, análisis de PDFs, reportes, etc.
+**How it works:** content is written to `~/.skillvault/objects/YYYY/MM/<slug>.<ext>` with a SHA256 hash. Metadata (title, type, slug, date) goes to SQLite. Ideal for long AI outputs, PDF analyses, reports, etc.
 
 ---
 
 ### `save_result`
 
-Guarda un resultado de AI prompt como entrada en el vault.
+Save an AI prompt result as a vault entry.
 
-**Parámetros:**
-- `name` (string, requerido) — Nombre del resultado (genera slug)
-- `content` (string, requerido) — Contenido del resultado
-- `type` (string, opcional) — Tipo de entrada (default: `ai_output`)
-- `category` (string, opcional) — Categoría opcional
-- `tags` (string[], opcional) — Tags
-- `project` (string, opcional) — Slug del proyecto
-- `source_prompt_id` (string, opcional) — ID de la entry prompt que generó este resultado
-- `model` (string, opcional) — Modelo que generó el resultado
+**Parameters:**
+- `name` (string, required) — Result name (generates slug)
+- `content` (string, required) — Result content
+- `type` (string, optional) — Entry type (default: `ai_output`)
+- `category` (string, optional) — Optional category
+- `tags` (string[], optional) — Tags
+- `project` (string, optional) — Project slug
+- `source_prompt_id` (string, optional) — ID of the prompt entry that generated this result
+- `model` (string, optional) — Model that generated the result
 
 ---
 
 ### `get_context`
 
-Compila un paquete de contexto para el agente.
+Compile an agent-ready context pack.
 
-**Parámetros:**
-- `mode` (string, requerido) — `profile`, `project`, `workflow`, `skill`, `planning`, `session_recall`, `full_brief`
-- `project` (string, requerido) — Proyecto
-- `max_chars` (int, opcional) — Máximo de caracteres (default: 10000)
-- `include` (string[], opcional) — Filtrar secciones específicas
+**Parameters:**
+- `mode` (string, required) — `profile`, `project`, `workflow`, `skill`, `planning`, `session_recall`, `full_brief`
+- `project` (string, required) — Project
+- `max_chars` (int, optional) — Max characters (default: 10000)
+- `include` (string[], optional) — Filter specific sections
 
-**Respuesta:** texto estructurado con secciones priorizadas. Ideal para inyectar directamente en el prompt del agente.
+**Response:** structured text with prioritized sections. Designed for direct injection into the agent's prompt.
 
 ---
 
 ### `compose_series`
 
-Obtiene entradas ordenadas de una serie.
+Get ordered entries in a series.
 
-**Parámetros:**
-- `id` (string, requerido) — ID de la serie
+**Parameters:**
+- `series_id` (string, required) — Series ID
 
 ---
 
 ### `render_workflow`
 
-Obtiene los pasos de un workflow como checklist ordenado.
+Get workflow steps as an ordered checklist.
 
-**Parámetros:**
-- `id` (string, requerido) — ID del workflow
+**Parameters:**
+- `workflow_id` (string, required) — Workflow ID
 
 ---
 
 ### `session_wrap`
 
-Crea una entrada de sesión con decisiones, pendientes y aprendizajes.
+Create a session entry with decisions, pending items, and learnings.
 
-**Parámetros:**
-- `project` (string, requerido) — Slug del proyecto
-- `summary` (string, requerido) — Resumen de la sesión
-- `decisions` (string[], opcional) — Decisiones tomadas
-- `pending` (string[], opcional) — Pendientes
-- `learnings` (string[], opcional) — Aprendizajes
+**Parameters:**
+- `project` (string, required) — Project slug
+- `summary` (string, required) — Session summary
+- `decisions` (string[], optional) — Decisions made
+- `pending` (string[], optional) — Pending items
+- `learnings` (string[], optional) — Learnings
 
-**Ejemplo desde el agente:**
+**Example (from agent):**
 ```json
 {
   "method": "session_wrap",
   "params": {
-    "project": "miapp",
-    "summary": "Implementamos el módulo de auth",
-    "decisions": ["JWT con refresh tokens", "SQLite para sesiones"],
-    "pending": ["Agregar rate limiting", "Documentar endpoints"],
-    "learnings": ["El middleware de JWT debe ir antes del CORS handler"]
+    "project": "myapp",
+    "summary": "Implemented the auth module",
+    "decisions": ["JWT with refresh tokens", "SQLite for sessions"],
+    "pending": ["Add rate limiting", "Document endpoints"],
+    "learnings": ["JWT middleware must go before the CORS handler"]
   }
 }
 ```
@@ -204,33 +207,93 @@ Crea una entrada de sesión con decisiones, pendientes y aprendizajes.
 
 ### `archive_entry`
 
-Archiva una entrada (cambia status a `archived`).
+Archive an entry (changes status to `archived`).
 
-**Parámetros:**
-- `id` (string, requerido) — ID de la entrada a archivar
+**Parameters:**
+- `id` (string, required) — Entry ID to archive
 
 ---
 
 ### `list_projects`
 
-Lista todos los proyectos con su estado.
+List all projects with their status.
 
-**Parámetros:** ninguno.
+**Parameters:** none.
+
+---
+
+### `save_entry_ref`
+
+Create or update a graph edge between two entries.
+
+**Parameters:**
+- `source_id` (string, required) — Source entry ID
+- `target_id` (string, required) — Target entry ID
+- `relation_type` (string, required) — Type: `references`, `supersedes`, `related_to`, `part_of`, `derived_from`, `implements`, `uses`, `extends`, `handoff_of`, `generated_from`, `depends_on`
+- `label` (string, optional) — Descriptive label
+
+**Example:**
+```json
+{
+  "method": "save_entry_ref",
+  "params": {
+    "source_id": "clean-architecture-rules",
+    "target_id": "hexagonal-architecture-guide",
+    "relation_type": "related_to",
+    "label": "Both are architectural patterns"
+  }
+}
+```
+
+**Note:** `depends_on`, `part_of`, and `supersedes` have cycle detection — an edge that creates a cycle is rejected.
+
+---
+
+### `list_entry_refs`
+
+List graph edges with optional filters.
+
+**Parameters:**
+- `source_id` (string, optional) — Filter by source
+- `target_id` (string, optional) — Filter by target
+- `relation_type` (string, optional) — Filter by relation type
+
+---
+
+### `get_entry_graph`
+
+Traverse the graph from a starting entry, returning connected nodes and edges.
+
+**Parameters:**
+- `entry_id` (string, required) — Starting entry ID
+- `depth` (int, optional) — Max depth (default: 3, max: 10)
+- `direction` (string, optional) — `outgoing`, `incoming`, or `both` (default: both)
+
+**Response:**
+```json
+{
+  "root_entry": "clean-architecture-rules",
+  "nodes": [{"id": "...", "title": "...", "type": "..."}],
+  "edges": [{"source_id": "...", "target_id": "...", "ref_type": "..."}],
+  "node_count": 5,
+  "edge_count": 4
+}
+```
 
 ---
 
 ### `search_by_tags`
 
-Busca entradas por tags usando intersección (all) o unión (any).
+Search entries by tags using intersection (all) or union (any).
 
-**Parámetros:**
-- `tags` (string[], requerido) — Tags a buscar
-- `match` (string, opcional) — `all` (intersección, default) o `any` (unión)
-- `type` (string, opcional) — Filtrar por tipo de entrada
-- `project` (string, opcional) — Filtrar por proyecto
-- `limit` (int, opcional) — Máximo de resultados (default: 20)
+**Parameters:**
+- `tags` (string[], required) — Tags to match
+- `match` (string, optional) — `all` (intersection, default) or `any` (union)
+- `type` (string, optional) — Filter by entry type
+- `project` (string, optional) — Filter by project
+- `limit` (int, optional) — Max results (default: 20)
 
-**Ejemplo desde el agente:**
+**Example (from agent):**
 ```json
 {
   "method": "search_by_tags",
@@ -245,94 +308,73 @@ Busca entradas por tags usando intersección (all) o unión (any).
 
 ### `get_context_bundle`
 
-Obtiene un bundle estructurado de contexto de proyecto en una sola llamada.
+Get a structured project context bundle in a single call.
 
-**Parámetros:**
-- `project` (string, opcional) — Slug del proyecto
+**Parameters:**
+- `project` (string, optional) — Project slug
 
-**Respuesta:** JSON estructurado con información del proyecto, entradas agrupadas por tipo y referencias a artefactos.
+**Response:** structured JSON with project info, entries grouped by type, and artifact references.
 
-Útil como primera llamada cuando un agente comienza a trabajar en un proyecto conocido.
-
----
-
-### `save_entry_ref`
-
-Crea o actualiza una arista (relación) entre dos entradas.
-
-**Parámetros:**
-- `source_id` (string, requerido) — ID de la entrada origen
-- `target_id` (string, requerido) — ID de la entrada destino
-- `ref_type` (string, requerido) — Tipo: `references`, `supersedes`, `related_to`, `part_of`, `derived_from`, `implements`, `uses`, `extends`, `handoff_of`, `generated_from`, `depends_on`
-- `label` (string, opcional) — Etiqueta descriptiva
-
-**Ejemplo:**
-```json
-{
-  "method": "save_entry_ref",
-  "params": {
-    "source_id": "clean-architecture-rules",
-    "target_id": "hexagonal-architecture-guide",
-    "ref_type": "related_to",
-    "label": "Ambos son patrones arquitectónicos"
-  }
-}
-```
-
-**Nota:** Las relaciones `depends_on`, `part_of` y `supersedes` tienen detección de ciclos — no se permite crear una arista que genere un ciclo.
+Use this as the first call when an agent starts working on a known project.
 
 ---
 
-### `list_entry_refs`
+### `compare_entries`
 
-Lista aristas del grafo con filtros opcionales.
+Compute a line-based LCS unified diff between two entries.
 
-**Parámetros:**
-- `source_id` (string, opcional) — Filtrar por origen
-- `target_id` (string, opcional) — Filtrar por destino
-- `ref_type` (string, opcional) — Filtrar por tipo de relación
-
----
-
-### `get_entry_graph`
-
-Traversa el grafo desde una entrada raíz y devuelve nodos y aristas conectados.
-
-**Parámetros:**
-- `entry_id` (string, requerido) — ID de la entrada raíz
-- `depth` (int, opcional) — Profundidad máxima (default: 3, max: 10)
-- `direction` (string, opcional) — `outgoing`, `incoming` o `both` (default: both)
-
-**Respuesta:**
-```json
-{
-  "root_entry": "clean-architecture-rules",
-  "nodes": [{"id": "...", "title": "...", "type": "..."}],
-  "edges": [{"source_id": "...", "target_id": "...", "ref_type": "..."}],
-  "node_count": 5,
-  "edge_count": 4
-}
-```
+**Parameters:**
+- `id1` (string, required) — First entry ID
+- `id2` (string, required) — Second entry ID
 
 ---
 
-## Flujo típico desde el agente
+### `run_workflow`
+
+Execute a workflow with structured step inputs and return per-step results.
+
+**Parameters:**
+- `workflow` (string, required) — Workflow slug or ID
+- `steps` (object, optional) — Map of step index (int) → input text to inject into each step
+
+**Response:** JSON array of per-step results with rendered prompts and their outputs. Steps without `entry_slug` are skipped (checklist-only steps).
+
+---
+
+### `route_scenario`
+
+Resolve a free-text scenario to a matching workflow or skill.
+
+**Parameters:**
+- `scenario` (string, required) — Scenario text to route
+
+**Response:** JSON with `scenario`, `target` (slug), `type` (workflow or skill), `description`, and `workflow` details. Returns an error if no match is found.
+
+---
+
+## Typical Agent Flow
 
 ```
-1. Al inicio de sesión → get_context_bundle(project=miapp)
-   → Bundle completo: proyecto + entradas agrupadas por tipo + artefactos
+1. Session start → get_context_bundle(project=myapp)
+   → Full bundle: project + entries grouped by type + artifacts
 
-2. Durante la sesión → save_entry(...) o save_artifact(...)
-   → Guarda skills, decisiones, outputs largos
+2. During session → save_entry(...) or save_artifact(...)
+   → Save skills, decisions, long outputs
 
-3. Búsqueda específica → search_by_tags(tags=["go","tdd"], match="all")
-   → Encuentra entradas exactas por tags
+3. Targeted search → search_by_tags(tags=["go","tdd"], match="all")
+   → Find exact entries by tags
 
-4. Al cerrar → session_wrap(project, summary, decisions, pending, learnings)
-   → Persiste el estado de la sesión para la próxima
+4. Scenario routing → route_scenario(scenario="research")
+   → Resolve what workflow or skill handles the scenario
+
+5. Execute workflow → run_workflow(workflow="research-workflow", steps={...})
+   → Run the pipeline with structured inputs
+
+6. Session close → session_wrap(project, summary, decisions, pending, learnings)
+   → Persist session state for the next one
 ```
 
-## Configuración por editor
+## Editor-specific Configuration
 
 ### OpenCode
 
@@ -364,4 +406,4 @@ Traversa el grafo desde una entrada raíz y devuelve nodos y aristas conectados.
 
 ### Cline / Continue
 
-Misma configuración — apuntan al mismo binario con `args: ["mcp"]`.
+Same configuration — point to the same binary with `args: ["mcp"]`.

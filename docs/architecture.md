@@ -27,7 +27,8 @@ cmd/skillvault/main.go
 
 Capa más interna. No importa nada del proyecto.
 
-- 10 tipos de entrada (EntryType)
+- 12 tipos de entrada (EntryType), incluyendo `routing` para enrutamiento de escenarios
+- Taxonomía `purpose` alineada con LifeOS: `WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`
 - 5 estados (Status)
 - Value objects: Entry, Artifact, Project, Workflow, Series, Tag, EntryLink
 - Validadores: `ValidateEntry()`, `ValidateProject()`, etc.
@@ -52,8 +53,8 @@ Orquesta el dominio y los stores. Cada servicio expone operaciones de alto nivel
 
 Tres formas de hablar con SkillVault:
 
-1. **CLI** (`internal/cli/`) — 14 comandos planos con `flag` de stdlib. Sin Cobra, sin frameworks.
-2. **MCP** (`internal/mcp/`) — Servidor JSON-RPC 2.0 sobre stdio. 10 herramientas.
+1. **CLI** (`internal/cli/`) — 25+ comandos planos con `flag` de stdlib. Sin Cobra, sin frameworks. Incluye `import-workflow` (importación YAML desde workflow-builder) y `route` para enrutamiento de escenarios.
+2. **MCP** (`internal/mcp/`) — Servidor JSON-RPC 2.0 sobre stdio. 19 herramientas. Expone `run_workflow` (ejecución estructurada con inputs por step) y `route_scenario` (resolución de escenarios). El CLI `run` se mantiene stdin/stdout para pipelines.
 3. **HTTP API** (`internal/api/`) — Esqueleto vacío. Futuro.
 
 Todos los adapters llaman a los mismos `internal/app/` services.
@@ -74,7 +75,7 @@ Todos los adapters llaman a los mismos `internal/app/` services.
 
 **FTS5**: dos tablas virtuales (`entries_fts` para contenido rico, `content_fts` para artefactos). Tokenizer `porter unicode61`.
 
-**Migrations**: SQL embebido con `go:embed`, aplicadas por orden con `schema_migrations`.
+**Migrations**: SQL embebido con `go:embed`, aplicadas por orden con `schema_migrations`. La migración 007 agrega columna `purpose` para la taxonomía LifeOS.
 
 #### Filesystem (`internal/files/`)
 
@@ -179,7 +180,7 @@ Dos modos:
 | Decisión | Razón |
 |----------|-------|
 | Sin ORM | SQLite queries son simples, el overhead de un ORM no aporta |
-| Sin Cobra | `flag` de stdlib alcanza para 14 comandos planos |
+| Sin Cobra | `flag` de stdlib alcanza para 25+ comandos planos |
 | Slugs como IDs | Legibles, estables, se pueden usar en URLs y MCP |
 | Soft delete | No se pierde history; `archived` excluye de context |
 | `modernc.org/sqlite` | Única dependencia externa. Sin CGO. Binario portable. |

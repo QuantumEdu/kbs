@@ -1,83 +1,98 @@
-# CLI Reference — 21 comandos
+# CLI Reference — 33 commands
 
-Todas las entradas usan **slugs** como identificadores. Un slug es el título en kebab-case: `"Clean Architecture Review"` → `clean-architecture-review`.
+All entries use **slugs** as identifiers. A slug is the title in kebab-case: `"Clean Architecture Review"` → `clean-architecture-review`.
 
 ---
 
 ## `init`
 
-Inicializa el vault: crea directorios y la base de datos SQLite.
+Initialize the vault: creates directories and the SQLite database.
 
 ```bash
 skillvault init
 ```
 
-Idempotente: si ya existe `~/.skillvault/`, solo asegura que los subdirectorios estén.
+Idempotent: if `~/.skillvault/` already exists, it only ensures subdirectories are present.
 
 ---
 
 ## `add-entry`
 
-Guarda una entrada reutilizable (prompt, skill, decisión, feedback, etc.).
+Save a reusable entry (prompt, skill, decision, feedback, routing rule, etc.).
 
 ```bash
 skillvault add-entry \
   --title "CSS Grid Layout" \
   --type skill \
-  --summary "Guía rápida de CSS Grid" \
+  --purpose KNOWLEDGE \
+  --summary "Quick CSS Grid guide" \
   --body "grid-template-columns: repeat(...)" \
   --project web \
   --tags "css,frontend" \
   --status active
 ```
 
-| Flag | Requerido | Descripción |
-|------|-----------|-------------|
-| `--title` | ✅ | Título de la entrada (genera slug automático) |
-| `--type` | ❌ | Tipo (default: `reference`): `prompt`, `skill`, `workflow_note`, `reference`, `user`, `feedback`, `project_state`, `session`, `decision`, `artifact_summary` |
-| `--summary` | ✅ | Resumen corto (indexado en FTS5) |
-| `--body` | ❌ | Contenido largo (opcional si solo querés el resumen) |
-| `--project` | ❌ | Slug del proyecto al que pertenece |
-| `--tags` | ❌ | Tags separados por coma |
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--title` | ✅ | Entry title (generates slug automatically) |
+| `--type` | ❌ | Type (default: `reference`): `prompt`, `skill`, `workflow_note`, `reference`, `user`, `feedback`, `project_state`, `session`, `decision`, `artifact_summary`, `handoff`, `routing` |
+| `--purpose` | ❌ | LifeOS-aligned purpose: `WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE` |
+| `--summary` | ✅ | Short summary (indexed in FTS5) |
+| `--body` | ❌ | Long-form body (optional if you only want the summary) |
+| `--project` | ❌ | Slug of the project |
+| `--tags` | ❌ | Comma-separated tags |
 | `--status` | ❌ | `draft`, `active` (default), `archived`, `deprecated`, `canonical` |
 
-El vault rechaza la entrada si detecta secretos (API keys, tokens, private keys).
+The vault rejects an entry if it detects secrets (API keys, tokens, private keys).
+
+### Purpose Taxonomy
+
+Purpose is orthogonal to entry type — classify memory by why it exists, not just what shape it has.
+
+| Purpose | Use for |
+|---------|---------|
+| `WORK` | Active projects, workflows, tasks, deliverables |
+| `KNOWLEDGE` | Concepts, references, reusable technical facts |
+| `LEARNING` | Lessons, skill development, retrospectives |
+| `RELATIONSHIP` | People, organizations, stakeholder context |
+| `STATE` | Current state snapshots, project status, handoffs |
 
 ---
 
 ## `search`
 
-Búsqueda full-text con filtros.
+Full-text search with filters.
 
 ```bash
-skillvault search "grid css" --type skill --project web --status active --limit 10
+skillvault search "grid css" --type skill --purpose KNOWLEDGE --project web --status active --limit 10
 ```
 
-| Flag | Descripción |
+| Flag | Description |
 |------|-------------|
-| `--type` | Filtrar por tipo de entrada |
-| `--project` | Filtrar por proyecto |
-| `--tag` | Filtrar por tag individual |
-| `--include-archived` | Incluir entradas archivadas |
-| `--limit` | Máximo de resultados (default: 20) |
-| `--vector` | Usar búsqueda por similitud coseno (requiere vectores cargados) |
+| `--type` | Filter by entry type |
+| `--purpose` | Filter by purpose (`WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`) |
+| `--project` | Filter by project |
+| `--tag` | Filter by individual tag |
+| `--include-archived` | Include archived entries |
+| `--limit` | Max results (default: 20) |
+| `--vector` | Use cosine similarity search (requires loaded vectors) |
 
-La búsqueda usa FTS5 con tokenizer `porter unicode61`. Busca en título, summary, content y tags.
+Search uses FTS5 with `porter unicode61` tokenizer. It searches title, summary, content, and tags.
 
-El flag `--vector` activa búsqueda semántica con vectores GloVe (si están configurados vía `SKILLVAULT_GLOVE_PATH`).
+`--vector` enables semantic search with GloVe vectors (if configured via `SKILLVAULT_GLOVE_PATH`).
 
 ---
 
 ## `get`
 
-Obtiene una entrada por ID o slug.
+Retrieve an entry by ID or slug.
 
 ```bash
 skillvault get css-grid-layout
-skillvault get skill:css-grid-layout        # con prefijo de tipo
+skillvault get skill:css-grid-layout        # with type prefix
 ```
 
-Devuelve:
+Returns:
 
 ```json
 {
@@ -85,7 +100,7 @@ Devuelve:
   "type": "skill",
   "title": "CSS Grid Layout",
   "status": "active",
-  "summary": "Guía rápida de CSS Grid",
+  "summary": "Quick CSS Grid guide",
   "created_at": "2026-06-20T..."
 }
 ```
@@ -94,81 +109,81 @@ Devuelve:
 
 ## `save-artifact`
 
-Guarda un artefacto largo respaldado por el filesystem.
+Save a large artifact backed by the filesystem.
 
 ```bash
 skillvault save-artifact \
-  --title "Reporte de auditoría" \
+  --title "Audit Report" \
   --type pdf_analysis \
-  --content "$(cat reporte.md)" \
-  --project miapp \
-  --tags "seguridad"
+  --content "$(cat report.md)" \
+  --project myapp \
+  --tags "security"
 ```
 
-| Flag | Requerido | Descripción |
-|------|-----------|-------------|
-| `--title` | ✅ | Título del artefacto |
-| `--type` | ✅ | Tipo: `pdf_analysis`, `spec_doc`, `architecture_doc`, `research_note`, `prompt_response`, `ai_output`, `raw_document`, `report`, `log_analysis`, `generated_code` |
-| `--content` | ✅ | Contenido (se almacena en `~/.skillvault/objects/YYYY/MM/`) |
-| `--project` | ❌ | Proyecto asociado |
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--title` | ✅ | Artifact title |
+| `--type` | ✅ | Type: `pdf_analysis`, `spec_doc`, `architecture_doc`, `research_note`, `prompt_response`, `ai_output`, `raw_document`, `report`, `log_analysis`, `generated_code` |
+| `--content` | ✅ | Content (stored in `~/.skillvault/objects/YYYY/MM/`) |
+| `--project` | ❌ | Associated project |
 | `--tags` | ❌ | Tags |
 
-El contenido se guarda en disco con hash SHA256. La metadata (título, tipo, tags, slug del archivo) va a SQLite.
+Content is saved to disk with SHA256 hash. Metadata (title, type, tags, file slug) goes to SQLite.
 
 ---
 
 ## `get-context`
 
-Compila un paquete de contexto para agentes.
+Compile a context pack for AI agents.
 
 ```bash
 skillvault get-context \
   --mode planning \
-  --project miapp \
+  --project myapp \
   --max-chars 8000
 ```
 
-| Flag | Requerido | Descripción |
-|------|-----------|-------------|
-| `--mode` | ✅ | Modo: `profile`, `project`, `workflow`, `skill`, `planning`, `session_recall`, `full_brief` |
-| `--project` | ✅ | Proyecto |
-| `--max-chars` | ❌ | Máximo de caracteres (default: 12000) |
-| `--include` | ❌ | Filtrar secciones específicas (separadas por coma) |
-| `--query` | ❌ | Query adicional para filtrar entradas |
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--mode` | ✅ | Mode: `profile`, `project`, `workflow`, `skill`, `planning`, `session_recall`, `full_brief` |
+| `--project` | ✅ | Project |
+| `--max-chars` | ❌ | Max characters (default: 12000) |
+| `--include` | ❌ | Filter specific sections (comma-separated) |
+| `--query` | ❌ | Additional query to filter entries |
 
-### Modos de contexto
+### Context Modes
 
-| Modo | Qué incluye |
-|------|-------------|
-| `profile` | User feedback + entradas tipo user |
-| `project` | Estado activo del proyecto + decisiones + resúmenes de artefactos |
-| `workflow` | Workflows + sus pasos |
-| `skill` | Skills activos + prompts |
-| `planning` | profile + project + workflow combinados |
-| `session_recall` | Últimas 10 sesiones |
-| `full_brief` | Todas las secciones |
+| Mode | Includes |
+|------|----------|
+| `profile` | User feedback + user-type entries |
+| `project` | Active project state + decisions + artifact summaries |
+| `workflow` | Workflows + their steps |
+| `skill` | Active skills + prompts |
+| `planning` | profile + project + workflow combined |
+| `session_recall` | Last 10 sessions |
+| `full_brief` | All sections |
 
-Si el contenido excede `max_chars`, se truncan las secciones de menor prioridad primero.
+If content exceeds `max_chars`, lowest-priority sections are truncated first.
 
 ---
 
 ## `add-project`
 
-Crea un proyecto.
+Create a project.
 
 ```bash
 skillvault add-project \
-  --name "MiApp" \
-  --description "Aplicación web de ejemplo"
+  --name "MyApp" \
+  --description "Example web application"
 ```
 
-Los proyectos agrupan entradas, artefactos, sesiones y workflows.
+Projects group entries, artifacts, sessions, and workflows.
 
 ---
 
 ## `list-projects`
 
-Lista todos los proyectos.
+List all projects.
 
 ```bash
 skillvault list-projects
@@ -178,25 +193,25 @@ skillvault list-projects
 
 ## `archive`
 
-Archiva una entrada (soft delete: cambia status a `archived`).
+Archive an entry (soft delete: changes status to `archived`).
 
 ```bash
 skillvault archive css-grid-layout
 ```
 
-Las entradas archivadas siguen siendo searchables pero se excluyen de los context packs.
+Archived entries remain searchable but are excluded from context packs.
 
 ---
 
 ## `add-workflow`
 
-Crea un workflow desde un archivo JSON.
+Create a workflow from a JSON file.
 
 ```bash
 skillvault add-workflow workflow.json
 ```
 
-Formato del JSON:
+JSON format:
 
 ```json
 {
@@ -212,9 +227,27 @@ Formato del JSON:
 
 ---
 
+## `import-workflow`
+
+Import a workflow-builder YAML file into SkillVault workflows and phase-skill entries.
+
+```bash
+skillvault import-workflow --file .agent/skills/research/workflow.yaml
+skillvault import-workflow --file workflow.yaml --project myapp
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--file` | ✅ | Path to workflow-builder YAML file |
+| `--project` | ❌ | Project slug or ID for scoped import |
+
+This command reads the workflow-builder YAML format (phases → skills → steps), creates workflow entries and phase-skill entries, and links them. Use this as the bridge between agent workflow definitions and SkillVault workflows.
+
+---
+
 ## `render-workflow`
 
-Renderiza un workflow como checklist.
+Render a workflow as a checklist.
 
 ```bash
 skillvault render-workflow spec-plan-task
@@ -230,51 +263,83 @@ Output:
 
 ---
 
+## `route`
+
+Resolve a natural-language scenario to its matching workflow or skill.
+
+```bash
+skillvault route research
+skillvault route onboarding --json
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `<scenario>` | ✅ | Scenario text to route (positional) |
+| `--json` | ❌ | Output result as JSON |
+
+Output (default):
+
+```
+Route: research → research-workflow (workflow)
+  Description: Research and analyze a topic
+  Workflow: research-workflow (wf-abc123)
+  Steps:
+    1. Define scope [REQUIRED]
+    2. Gather sources
+    3. Synthesize findings
+```
+
+JSON output includes full metadata: `scenario`, `target`, `type` (workflow/skill), `description`, and `workflow` details.
+
+Routing works by matching the scenario text against entries of type `routing` and `workflow_note` that contain YAML route maps.
+
+---
+
 ## `run`
 
-Ejecuta un workflow como pipeline paso a paso.
+Execute a workflow as a step-by-step pipeline.
 
 ```bash
 skillvault run <workflow-slug> <input-file> [--save output.md]
 skillvault run research-article article.md --save result.md
-skillvault run research-article -                  # leer input desde stdin
+skillvault run research-article -                  # read input from stdin
 ```
 
-| Flag | Requerido | Descripción |
-|------|-----------|-------------|
-| `--save` | ❌ | Guarda el output final en un archivo |
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--save` | ❌ | Save final output to a file |
 
-El pipeline ejecuta cada paso del workflow que tenga `entry_slug` configurado:
-1. Resuelve la entry asociada y verifica que esté activa
-2. Inyecta `{{input}}`, `{{previous_output}}`, `{{final_output}}` en el contenido
-3. Muestra el prompt renderizado en stdout
-4. Lee la respuesta del agente desde stdin
-5. Pasa el resultado al siguiente paso como `{{previous_output}}`
+The pipeline executes each step that has `entry_slug` configured:
+1. Resolves the linked entry and verifies it's active
+2. Injects `{{input}}`, `{{previous_output}}`, `{{final_output}}` into the content
+3. Prints the rendered prompt to stdout
+4. Reads the agent's response from stdin
+5. Passes the result to the next step as `{{previous_output}}`
 
-Pasos sin `entry_slug` se saltean (checklists renderizables).
+Steps without `entry_slug` are skipped (renderable checklists).
 
 ---
 
 ## `session-wrap`
 
-Crea una entrada de sesión con decisiones, pendientes y aprendizajes.
+Create a session entry with decisions, pending items, and learnings.
 
 ```bash
 skillvault session-wrap \
-  --project miapp \
+  --project myapp \
   --summary "Sprint planning" \
-  --decisions "Migrar a SQLite,usar FTS5" \
+  --decisions "Migrate to SQLite,use FTS5" \
   --pending "Benchmark queries" \
-  --learnings "FTS5 necesita tokenizer explícito"
+  --learnings "FTS5 needs explicit tokenizer"
 ```
 
-Parámetros separados por coma. Opcionalmente puede linkear un artefacto.
+Comma-separated parameters. Optionally links an artifact.
 
 ---
 
 ## `graph`
 
-Visualiza el grafo de relaciones entre entradas.
+Visualize the entry relationship graph.
 
 ```bash
 skillvault graph --entry clean-architecture-review --depth 3 --format mermaid
@@ -282,120 +347,132 @@ skillvault graph --entry clean-architecture-review --format json
 skillvault graph --entry clean-architecture-review --format dot
 ```
 
-| Flag | Requerido | Descripción |
-|------|-----------|-------------|
-| `--entry` | ✅ | ID de la entrada raíz |
-| `--depth` | ❌ | Profundidad de traversión (default: 3, max: 10) |
-| `--format` | ❌ | `mermaid`, `json` o `dot` (default: mermaid) |
-| `--direction` | ❌ | `outgoing`, `incoming` o `both` (default: both) |
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--entry` | ✅ | Root entry ID |
+| `--depth` | ❌ | Traversal depth (default: 3, max: 10) |
+| `--format` | ❌ | `mermaid`, `json`, or `dot` (default: mermaid) |
+| `--direction` | ❌ | `outgoing`, `incoming`, or `both` (default: both) |
 
----
-
-El formato `mermaid` genera `graph TD` que se renderiza nativamente en GitHub.
+The `mermaid` format generates `graph TD` which renders natively on GitHub.
 
 ---
 
 ## `entry ref`
 
-Gestiona aristas del grafo entre entradas (entry_links).
+Manage graph edges between entries (entry_links).
 
 ```bash
-# Añadir relación
-skillvault entry ref add <source> <target> <type> --label "opcional"
+# Add a relation
+skillvault entry ref add <source> <target> <type> --label "optional"
 
-# Listar relaciones
+# List relations
 skillvault entry ref list [--source <id>] [--target <id>] [--type <rel>]
 
-# Eliminar relación
+# Remove a relation
 skillvault entry ref remove <source> <target> <type>
 ```
 
-Tipos de relación: `references`, `supersedes`, `related_to`, `part_of`, `derived_from`, `implements`, `uses`, `extends`, `handoff_of`, `generated_from`, `depends_on`.
+Relation types: `references`, `supersedes`, `related_to`, `part_of`, `derived_from`, `implements`, `uses`, `extends`, `handoff_of`, `generated_from`, `depends_on`.
 
-Las relaciones `depends_on`, `part_of` y `supersedes` tienen detección de ciclos.
+`depends_on`, `part_of`, and `supersedes` have cycle detection.
 
-> 💡 El subcomando `ref` también se puede invocar directamente como `skillvault ref ...` (alias).
+> 💡 The `ref` subcommand can also be invoked directly as `skillvault ref ...` (alias).
 
 ---
 
 ## `memory index` / `memory reindex` / `memory list-external`
 
-Indexa archivos pi-memory (.md) como shadow entries en el vault.
+Index pi-memory (.md) files as shadow entries in the vault.
 
 ```bash
-# Indexar un directorio de memoria
+# Index a memory directory
 skillvault memory index --path ~/memory --project myapp [--wikilinks]
 
-# Reindexar (alias)
+# Reindex (alias)
 skillvault memory reindex --path ~/memory --project myapp
 
-# Listar entradas externas indexadas
+# List indexed external entries
 skillvault memory list-external --project myapp
 ```
 
-| Flag | Requerido | Descripción |
-|------|-----------|-------------|
-| `--path` | ✅ | Directorio con archivos .md |
-| `--project` | ✅ | Proyecto destino |
-| `--wikilinks` | ❌ | Parsea `[[wikilinks]]` y crea entry_refs |
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--path` | ✅ | Directory with .md files |
+| `--project` | ✅ | Target project |
+| `--wikilinks` | ❌ | Parse `[[wikilinks]]` and create entry_refs |
 
-Soporta frontmatter YAML (description, tags, created, updated). Archivos eliminados del directorio se archivan automáticamente (orphan cleanup).
+Supports YAML frontmatter (description, tags, created, updated). Files removed from the directory are auto-archived (orphan cleanup).
 
 ---
 
-Exporta todo el vault a un archivo JSON.
+## `compare-entries`
+
+Compute a unified diff between two entries.
+
+```bash
+skillvault compare-entries <entry-id-1> <entry-id-2>
+```
+
+Shows a line-based LCS diff of both entries' full text representations (title + summary + body + tags).
+
+---
+
+## `export`
+
+Export the entire vault to a JSON file.
 
 ```bash
 skillvault export backup.json
-skillvault export --output export.json   # explícito
+skillvault export --output export.json   # explicit
 ```
 
-| Flag | Requerido | Descripción |
-|------|-----------|-------------|
-| `--output` | ❌ | Ruta de salida (default: `skillvault-export.json`) |
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--output` | ❌ | Output path (default: `skillvault-export.json`) |
 
-Incluye todos los tipos de entrada, proyectos, workflows, series, tags, entry_links y metadata de artefactos.
+Includes all entry types, projects, workflows, series, tags, entry_links, and artifact metadata.
 
 ---
 
 ## `import`
 
-Importa un vault desde un archivo JSON.
+Import a vault from a JSON file.
 
 ```bash
 skillvault import backup.json
 ```
 
-Resuelve conflictos de slug automáticamente (agrega sufijo numérico a duplicados).
+Resolves slug conflicts automatically (appends numeric suffix to duplicates).
 
 ---
 
 ## `save-result`
 
-Guarda un resultado de AI prompt como entrada en el vault.
+Save an AI prompt result as a vault entry.
 
 ```bash
-skillvault save-result --name "Mi resultado" --content "Respuesta del modelo..." [flags]
+skillvault save-result --name "My result" --content "Model response..." [flags]
 ```
 
-| Flag | Requerido | Descripción |
-|------|-----------|-------------|
-| `--name` | ✅ | Nombre del resultado (genera slug) |
-| `--content` | ✅ | Contenido del resultado |
-| `--type` | ❌ | Tipo (default: `ai_output`) |
-| `--category` | ❌ | Categoría opcional |
-| `--tags` | ❌ | Tags separados por coma |
-| `--project` | ❌ | Slug del proyecto |
-| `--source-prompt` | ❌ | ID de la entry prompt que generó este resultado |
-| `--model` | ❌ | Modelo que generó el resultado |
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--name` | ✅ | Result name (generates slug) |
+| `--content` | ✅ | Result content |
+| `--type` | ❌ | Type (default: `ai_output`) |
+| `--category` | ❌ | Optional category |
+| `--tags` | ❌ | Comma-separated tags |
+| `--project` | ❌ | Project slug |
+| `--source-prompt` | ❌ | ID of the prompt entry that generated this result |
+| `--model` | ❌ | Model that generated the result |
 
-**MCP tool equivalente:** `save_result` (disponible en modo MCP).
+**MCP equivalent:** `save_result` (available in MCP mode).
 
 ---
 
 ## `version`
 
-Muestra la versión del vault.
+Show vault version.
 
 ```bash
 skillvault version
@@ -406,17 +483,15 @@ skillvault version
 
 ## `http`
 
-Inicia el servidor HTTP REST API.
+Start the HTTP REST API server.
 
 ```bash
 skillvault http
-# Sirve en http://127.0.0.1:7438
+# Serves on http://127.0.0.1:7438
 ```
 
-| Flag | Requerido | Descripción |
-|------|-----------|-------------|
-| `--api-key` | ❌ | API key para autenticación HTTP Basic |
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--api-key` | ❌ | API key for HTTP Basic authentication |
 
-Endpoints disponibles: health, entries CRUD, artifacts, context, projects, sessions, workflows, export/import. Ver [`docs/quickstart.md`](quickstart.md) o [`docs/architecture.md`](architecture.md) para detalles.
-
----
+Endpoints: health, entries CRUD, artifacts, context, projects, sessions, workflows, export/import. See [`docs/quickstart.md`](quickstart.md) or [`docs/architecture.md`](architecture.md) for details.

@@ -1,88 +1,95 @@
-# Quickstart — 5 minutos
+# Quickstart — 5 minutes
 
-## Instalación
+## Installation
 
 ```bash
-# Requisito: Go 1.26+
+# Prerequisites: Go 1.26+
 git clone https://github.com/QuantumEdu/kbs
 cd kbs
 
-# Build (binario único, sin CGO, ~7 MB)
+# Build (single binary, no CGO, ~7 MB)
 go build -ldflags="-s -w" -o ~/tools/skillvault ./cmd/skillvault
 
-# Agregá ~/tools a tu PATH si no está
+# Add ~/tools to your PATH if it's not there
 export PATH="$HOME/tools:$PATH"
 ```
 
-## Inicializar el vault
+## Initialize the vault
 
 ```bash
 skillvault init
 ```
 
-Crea `~/.skillvault/` con:
+Creates `~/.skillvault/` with:
 
 ```
 ~/.skillvault/
 ├── vault.db       # SQLite + FTS5
-├── objects/       # Artefactos largos (archivos)
-├── exports/       # Backups JSON
-└── cache/         # Caché temporal
+├── objects/       # Long artifacts (files)
+├── exports/       # JSON backups
+└── cache/         # Temporary cache
 ```
 
-## Primeros pasos
+## First steps
 
-### 1. Creá un proyecto
+### 1. Create a project
 
 ```bash
 skillvault add-project \
-  --name "MiApp" \
-  --description "Mi primera app con SkillVault"
+  --name "MyApp" \
+  --description "My first SkillVault app"
 ```
 
-### 2. Guardá un skill reutilizable
+### 2. Save a reusable skill
 
 ```bash
 skillvault add-entry \
   --title "Code Review Checklist" \
   --type skill \
-  --summary "Checklist para revisar PRs" \
-  --content "1. Funciona?\n2. Tiene tests?\n3. Maneja errores?" \
-  --project miapp \
+  --purpose KNOWLEDGE \
+  --summary "Checklist for reviewing PRs" \
+  --content "1. Does it work?\n2. Does it have tests?\n3. Does it handle errors?" \
+  --project myapp \
   --tags "review,pr"
 ```
 
-### 3. Buscá
+### 3. Search
 
 ```bash
-skillvault search "review" --type skill --project miapp
+skillvault search "review" --type skill --project myapp
 ```
 
-### 4. Guardá un artefacto pesado (va al filesystem)
+Filter by LifeOS-aligned purpose:
+
+```bash
+skillvault search "review" --purpose KNOWLEDGE
+```
+
+### 4. Save a large artifact (filesystem-backed)
 
 ```bash
 skillvault save-artifact \
-  --title "Análisis de seguridad" \
+  --title "Security Analysis" \
   --type pdf_analysis \
-  --content "$(cat /tmp/reporte-seguridad.md)" \
-  --project miapp \
-  --tags "seguridad"
+  --content "$(cat /tmp/security-report.md)" \
+  --project myapp \
+  --tags "security"
 ```
 
-### 5. Obtené contexto para tu agente
+### 5. Get context for your agent
 
 ```bash
 skillvault get-context \
   --mode planning \
-  --project miapp \
+  --project myapp \
   --max-chars 5000
 ```
 
-Devuelve texto estructurado como:
+Returns structured text like:
 
 ```
 ## Scope
-Project: MiApp
+Project: MyApp
 Mode: planning
 
 ## Active Decisions
@@ -92,34 +99,76 @@ Mode: planning
 ...
 ```
 
-### 6. Cerra una sesión con decisiones
+### 6. Wrap up a session with decisions
 
 ```bash
 skillvault session-wrap \
-  --project miapp \
-  --summary "Revisamos el middleware de auth" \
-  --decisions "Usar JWT,no sessions" \
-  --pending "Agregar refresh token rotation"
+  --project myapp \
+  --summary "Reviewed auth middleware" \
+  --decisions "Use JWT,no sessions" \
+  --pending "Add refresh token rotation"
 ```
 
-### 7. Ejecutá un pipeline de workflow
+### 7. Execute a workflow pipeline
 
 ```bash
-# Creá un workflow con entry_slug en los pasos
+# Create a workflow with entry_slug in steps
 skillvault add-workflow pipeline.json
 
-# Ejecutalo: cada paso renderiza el prompt, espera input del agente
-skillvault run research-article article.md --save resultado.md
+# Run it: each step renders the prompt, waits for agent input
+skillvault run research-article article.md --save result.md
 ```
 
-Cada paso del pipeline:
-1. Toma la entry vinculada y le inyecta `{{input}}` y `{{previous_output}}`
-2. Muestra el prompt por stdout
-3. Espera que el agente responda por stdin
-4. Pasa la respuesta al siguiente paso
+Each pipeline step:
+1. Takes the linked entry and injects `{{input}}` and `{{previous_output}}`
+2. Prints the prompt to stdout
+3. Waits for the agent to respond via stdin
+4. Passes the response to the next step
 
-## Qué sigue?
+## Workflow bridge
 
-- [`docs/commands.md`](commands.md) — referencia completa de comandos
-- [`docs/mcp.md`](mcp.md) — configurar MCP para Claude Code / OpenCode
-- [`docs/tutorial.md`](tutorial.md) — tutorial completo con workflow real
+Import workflow-builder YAML directly into SkillVault:
+
+```bash
+# Import a workflow-builder YAML file
+skillvault import-workflow --file .agent/skills/research/workflow.yaml --project myapp
+
+# Add a routing entry that maps scenarios to workflows
+skillvault add-entry \
+  --title "Research route" \
+  --type routing \
+  --purpose WORK \
+  --summary "Route research scenarios" \
+  --body $'research:\n  workflow: research-workflow' \
+  --tags workflow-route
+
+# Resolve what should handle a scenario
+skillvault route research
+skillvault route research --json
+
+# Run the workflow from the CLI
+skillvault run research-workflow input.md --save output.md
+```
+
+## Purpose taxonomy
+
+Purpose is orthogonal to entry type. Use it to organize memory by why it exists:
+
+| Purpose | Use for |
+|---------|---------|
+| `WORK` | Active projects, workflows, tasks, deliverables |
+| `KNOWLEDGE` | Concepts, references, reusable technical facts |
+| `LEARNING` | Lessons, skill development, retrospectives |
+| `RELATIONSHIP` | People, organizations, stakeholder context |
+| `STATE` | Current state snapshots, project status, handoffs |
+
+```bash
+skillvault add-entry --title "ISO checklist" --type reference --purpose KNOWLEDGE --summary "..."
+skillvault search "ISO" --purpose KNOWLEDGE
+```
+
+## What next?
+
+- [`docs/commands.md`](commands.md) — full command reference
+- [`docs/mcp.md`](mcp.md) — MCP setup for Claude Code / OpenCode
+- [`docs/tutorial.md`](tutorial.md) — complete tutorial with a real workflow
