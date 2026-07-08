@@ -14,10 +14,10 @@ Store, search, and retrieve prompts, skills, workflows, decisions, project memor
 ```
 
 **Codename:** Qu@ntum  
-**Status:** v3 — Pipeline execution + Service hardening
+**Status:** v3 — Workflow bridge + LifeOS-aligned purpose taxonomy
 **Binary size:** ~7 MB  
 **Dependencies:** Zero frameworks. Only `modernc.org/sqlite`.  
-**Language:** Go 1.25+
+**Language:** Go 1.26+
 
 ---
 
@@ -31,6 +31,19 @@ Store, search, and retrieve prompts, skills, workflows, decisions, project memor
 | [`docs/mcp.md`](docs/mcp.md) | MCP server setup for Claude Code / OpenCode |
 | [`docs/tutorial.md`](docs/tutorial.md) | Real-world workflow: project → skills → context → session |
 | [`docs/architecture.md`](docs/architecture.md) | Clean Architecture deep-dive, data flows, design decisions |
+
+---
+
+## What SkillVault Does
+
+SkillVault is a local knowledge and workflow layer for humans and AI agents:
+
+- Store reusable prompts, skills, references, decisions, session summaries, and workflow notes.
+- Classify entries by **type** and by LifeOS-aligned **purpose** (`WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`).
+- Import workflow-builder YAML into SkillVault workflows and phase-skill entries.
+- Route natural scenarios to the right workflow or skill with `skillvault route <scenario>`.
+- Run workflows from the CLI or via MCP with structured JSON-RPC-compatible output.
+- Serve agent tools over MCP (`run_workflow`, `route_scenario`, search, context, graph, artifacts, and more).
 
 ---
 
@@ -110,12 +123,16 @@ skillvault add-project --name "MyApp" --description "My application"
 skillvault add-entry \
   --title "Clean Architecture Review" \
   --type skill \
+  --purpose KNOWLEDGE \
   --summary "Checklist for reviewing clean architecture compliance" \
   --project myapp \
   --tags "architecture,review"
 
 # Search your vault
 skillvault search "architecture"
+
+# Filter by LifeOS-style purpose
+skillvault search "architecture" --purpose KNOWLEDGE
 
 # Save a long AI output as an artifact (stored on disk, indexed in DB)
 skillvault save-artifact \
@@ -136,6 +153,29 @@ skillvault session-wrap \
   --pending "Add refresh token rotation"
 ```
 
+### Workflow bridge quick path
+
+```bash
+# Import workflow-builder YAML into SkillVault
+skillvault import-workflow --file .agent/skills/research/workflow.yaml --project myapp
+
+# Add a routing entry that maps scenarios to a workflow or skill
+skillvault add-entry \
+  --title "Research route" \
+  --type routing \
+  --purpose WORK \
+  --summary "Route research scenarios" \
+  --body $'research:\n  workflow: research-workflow' \
+  --tags workflow-route
+
+# Resolve what should handle a scenario
+skillvault route research
+skillvault route research --json
+
+# Execute a workflow pipeline from the CLI
+skillvault run research-workflow input.md --save output.md
+```
+
 ---
 
 ## Architecture
@@ -154,12 +194,12 @@ DB decides. Disk remembers. Qu@ntum delivers.
 
 ```
 cmd/skillvault/
-├── internal/cli/         # 21+ CLI commands (stdlib, no Cobra)
-├── internal/mcp/         # 16 MCP tools over stdio JSON-RPC 2.0
+├── internal/cli/         # 25+ CLI commands (stdlib, no Cobra)
+├── internal/mcp/         # 19 MCP tools over stdio JSON-RPC 2.0
 ├── internal/api/         # HTTP API (local only)
 ├── internal/app/         # Use cases: save, search, context, session, refs, memory, pipeline
 ├── internal/domain/      # Pure entities + validators
-├── internal/db/          # SQLite + FTS5 (8 stores + 2 migrations)
+├── internal/db/          # SQLite + FTS5 stores + embedded migrations
 ├── internal/files/       # Artifact filesystem (objects/YYYY/MM/)
 ├── internal/context/     # Qu@ntum context compiler (7 modes)
 ├── internal/security/    # Secret scanner (4 regex patterns)
@@ -199,7 +239,9 @@ cmd/skillvault/
 | `list-projects` | List all projects | `skillvault list-projects` |
 | `archive` | Archive an entry | `skillvault archive clean-architecture-review` |
 | `add-workflow` | Create a workflow (JSON file) | `skillvault add-workflow workflow.json` |
+| `import-workflow` | Import workflow-builder YAML | `skillvault import-workflow --file workflow.yaml --project myapp` |
 | `render-workflow` | Render workflow as checklist | `skillvault render-workflow spec-plan-task` |
+| `route` | Resolve scenario → workflow or skill | `skillvault route research --json` |
 | `run` | Execute a workflow pipeline step by step | `skillvault run research-article article.md --save output.md` |
 | `session-wrap` | Save session with decisions | `skillvault session-wrap --project myapp --summary "..." --decisions "d1,d2"` |
 | `graph` | Visualize entry graph | `skillvault graph --entry e1 --format mermaid` |
@@ -213,14 +255,14 @@ cmd/skillvault/
 
 ---
 
-## MCP Tools (16)
+## MCP Tools (19)
 
 For AI agents (Claude Code, OpenCode, etc.):
 
 | Tool | Description |
 |------|-------------|
 | `save_entry` | Save a prompt, skill, decision, feedback, session — anything reusable |
-| `search_entries` | FTS5 search with filters by type, project, tags, status |
+| `search_entries` | FTS5 search with filters by type, project, tags, status, purpose |
 | `get_entry` | Retrieve entry by ID with artifact reference |
 | `save_artifact` | Save long AI output as file-backed artifact with metadata |
 | `save_result` | Save an AI prompt result as a vault entry |
@@ -233,8 +275,11 @@ For AI agents (Claude Code, OpenCode, etc.):
 | `save_entry_ref` | Create/update a graph edge between two entries (with cycle detection) |
 | `list_entry_refs` | List graph edges with filters |
 | `get_entry_graph` | Traverse entry graph from a starting entry |
+| `compare_entries` | Compare semantic/vector similarity between entries |
 | `search_by_tags` | Search entries by tag intersection (all) or union (any) |
 | `get_context_bundle` | Get structured project context bundle with entries grouped by type |
+| `run_workflow` | Run a workflow with structured step inputs and JSON results |
+| `route_scenario` | Resolve a scenario to a workflow or skill route |
 
 ### MCP Setup (Claude Code / OpenCode)
 
@@ -262,7 +307,7 @@ ln -sf ~/tools/skillvault ~/tools/mcp
 
 ## Entity Model
 
-### Entry Types (11)
+### Entry Types (12)
 
 | Type | Purpose |
 |------|---------|
@@ -277,6 +322,26 @@ ln -sf ~/tools/skillvault ~/tools/mcp
 | `decision` | Architectual decision |
 | `artifact_summary` | Summary of a stored artifact |
 | `handoff` | Session handoff document |
+| `routing` | Scenario → workflow/skill routing rules |
+
+### Purpose Taxonomy
+
+Purpose is orthogonal to entry type. Use it to organize memory by why it exists, not just what shape it has.
+
+| Purpose | Use for |
+|---------|---------|
+| `WORK` | Active projects, workflows, tasks, deliverables |
+| `KNOWLEDGE` | Concepts, references, reusable technical facts |
+| `LEARNING` | Lessons, skill development, retrospectives |
+| `RELATIONSHIP` | People, organizations, stakeholder context |
+| `STATE` | Current state snapshots, project status, handoffs |
+
+Examples:
+
+```bash
+skillvault add-entry --title "ISO checklist" --type reference --purpose KNOWLEDGE --summary "..."
+skillvault search "ISO" --purpose KNOWLEDGE
+```
 
 ### Status Model
 
@@ -386,7 +451,7 @@ SkillVault → creates session entry + optional artifact
 ## Testing
 
 ```bash
-# Run all 400+ tests
+# Run all 750+ tests
 go test ./...
 
 # With coverage
@@ -428,6 +493,10 @@ Test pyramid:
 | HTTP auth layer | ✅ Active |
 | Graceful shutdown | ✅ Active |
 | save_result MCP tool | ✅ Active |
+| Workflow-builder YAML import | ✅ Active |
+| Scenario routing (`route`, `route_scenario`) | ✅ Active |
+| LifeOS purpose taxonomy | ✅ Active |
+| Structured MCP workflow runs (`run_workflow`) | ✅ Active |
 
 ---
 
