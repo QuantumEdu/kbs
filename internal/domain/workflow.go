@@ -53,3 +53,22 @@ type WorkflowRunStep struct {
 	StartedAt  time.Time
 	FinishedAt *time.Time
 }
+
+// StructuredRunResult holds the result of a structured pipeline run.
+type StructuredRunResult struct {
+	RunID        string                 `json:"run_id"`
+	WorkflowID   string                 `json:"workflow_id"`
+	WorkflowSlug string                 `json:"workflow_slug"`
+	Status       RunStatus              `json:"status"`
+	Steps        []StructuredStepResult `json:"steps"`
+	StartedAt    time.Time              `json:"started_at"`
+	FinishedAt   *time.Time             `json:"finished_at"`
+}
+
+// StructuredStepResult holds the result of a single step in a structured run.
+type StructuredStepResult struct {
+	StepIndex int       `json:"step_index"`
+	Status    RunStatus `json:"status"`
+	Output    string    `json:"output,omitempty"`
+	Error     string    `json:"error,omitempty"`
+}

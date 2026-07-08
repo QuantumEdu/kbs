@@ -832,3 +832,43 @@ func TestParseRouteFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestParseAddEntryFlagsPurpose(t *testing.T) {
+	// --purpose flag parses correctly.
+	flags, err := ParseAddEntryFlags([]string{"skillvault", "add-entry", "--title", "Go Patterns", "--summary", "Learn Go", "--purpose", "KNOWLEDGE"})
+	if err != nil {
+		t.Fatalf("ParseAddEntryFlags with --purpose failed: %v", err)
+	}
+	if flags.Purpose != "KNOWLEDGE" {
+		t.Errorf("Purpose = %q, want KNOWLEDGE", flags.Purpose)
+	}
+
+	// Without --purpose, field is empty.
+	flags, err = ParseAddEntryFlags([]string{"skillvault", "add-entry", "--title", "T", "--summary", "S"})
+	if err != nil {
+		t.Fatalf("ParseAddEntryFlags without purpose failed: %v", err)
+	}
+	if flags.Purpose != "" {
+		t.Errorf("Purpose = %q, want empty", flags.Purpose)
+	}
+}
+
+func TestParseSearchFlagsPurpose(t *testing.T) {
+	// --purpose filter parses correctly.
+	flags, err := ParseSearchFlags([]string{"skillvault", "search", "go", "--purpose", "WORK"})
+	if err != nil {
+		t.Fatalf("ParseSearchFlags with --purpose failed: %v", err)
+	}
+	if flags.Purpose != "WORK" {
+		t.Errorf("Purpose = %q, want WORK", flags.Purpose)
+	}
+
+	// Without --purpose, field is empty.
+	flags, err = ParseSearchFlags([]string{"skillvault", "search", "go"})
+	if err != nil {
+		t.Fatalf("ParseSearchFlags without purpose failed: %v", err)
+	}
+	if flags.Purpose != "" {
+		t.Errorf("Purpose = %q, want empty", flags.Purpose)
+	}
+}
