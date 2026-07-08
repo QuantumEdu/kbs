@@ -2,6 +2,9 @@ package db
 
 import (
 	"database/sql"
+	"io/fs"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -282,8 +285,8 @@ func TestMigrationIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to count migrations: %v", err)
 	}
-	if count != 5 {
-		t.Errorf("expected 5 migration records (v1..v5), got %d", count)
+	if count != 7 {
+		t.Errorf("expected 7 migration records (v1..v7), got %d", count)
 	}
 }
 
@@ -361,5 +364,200 @@ func TestMigration005EntryEmbeddings(t *testing.T) {
 	err = db.QueryRow("SELECT version FROM schema_migrations WHERE version = 5").Scan(&version)
 	if err != nil {
 		t.Errorf("migration version 5 not recorded: %v", err)
+	}
+}
+
+func TestMigration006RoutingEntryType(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open in-memory DB: %v", err)
+	}
+	defer db.Close()
+
+	if err := RunMigrations(db); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+
+	// Verify migration version 6 was recorded
+	var version int
+	err = db.QueryRow("SELECT version FROM schema_migrations WHERE version = 6").Scan(&version)
+	if err != nil {
+		t.Fatalf("migration version 6 not recorded: %v", err)
+	}
+
+	// CHECK constraint must accept 'routing'
+	_, err = db.Exec(`INSERT INTO entries (id, title, slug, type) VALUES ('rt-1', 'Test Routing', 'test-routing', 'routing')`)
+	if err != nil {
+		t.Errorf("CHECK constraint rejected 'routing' type: %v", err)
+	}
+
+	// CHECK constraint must reject invalid types
+	_, err = db.Exec(`INSERT INTO entries (id, title, slug, type) VALUES ('bad-1', 'Bad', 'bad-type', 'bogus')`)
+	if err == nil {
+		t.Error("CHECK constraint accepted invalid type 'bogus'")
+	}
+	if err != nil && !strings.Contains(err.Error(), "CHECK constraint") {
+		t.Errorf("expected CHECK constraint error, got: %v", err)
+	}
+
+	// Verify routing entry is insertable and retrievable
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM entries WHERE type = 'routing'").Scan(&count)
+	if err != nil {
+		t.Errorf("failed to query routing entries: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 routing entry, got %d", count)
+	}
+
+	// Verify idempotency — running migration again should not fail
+	if err := RunMigrations(db); err != nil {
+		t.Errorf("RunMigrations should be idempotent but failed: %v", err)
+	}
+}
+
+// applyMigrationVersion reads and executes a single embedded migration by version.
+// It also records the version in schema_migrations.
+func applyMigrationVersion(t *testing.T, db *sql.DB, version int) {
+	t.Helper()
+
+	entries, err := fs.ReadDir(migrationsFS, "migrations")
+	if err != nil {
+		t.Fatalf("failed to read migrations directory: %v", err)
+	}
+
+	var matches []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".sql") {
+			continue
+		}
+		parts := strings.SplitN(e.Name(), "_", 2)
+		if len(parts) < 2 {
+			continue
+		}
+		v, err := strconv.Atoi(parts[0])
+		if err != nil {
+			continue
+		}
+		if v == version {
+			matches = append(matches, e.Name())
+		}
+	}
+	if len(matches) == 0 {
+		t.Fatalf("migration version %d not found", version)
+	}
+	sort.Strings(matches)
+	name := matches[0]
+
+	sqlBytes, err := fs.ReadFile(migrationsFS, "migrations/"+name)
+	if err != nil {
+		t.Fatalf("failed to read migration %s: %v", name, err)
+	}
+
+	if _, err := db.Exec(string(sqlBytes)); err != nil {
+		t.Fatalf("migration %s failed: %v", name, err)
+	}
+	if _, err := db.Exec("INSERT OR IGNORE INTO schema_migrations (version, name) VALUES (?, ?)", version, strings.TrimSuffix(name, ".sql")); err != nil {
+		t.Fatalf("failed to record migration %s: %v", name, err)
+	}
+}
+
+// TestMigration006UpgradeFromV5 verifies that a database at migration 005
+// (post-005 schema, with legacy type CHECK and no title/slug/status constraints)
+// upgrades cleanly to 006 without data loss or constraint failures.
+func TestMigration006UpgradeFromV5(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open in-memory DB: %v", err)
+	}
+	defer db.Close()
+
+	// Create schema_migrations table manually so we can record applied versions.
+	if _, err := db.Exec(`CREATE TABLE schema_migrations (
+		version     INTEGER PRIMARY KEY,
+		name        TEXT NOT NULL,
+		applied_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		t.Fatalf("failed to create schema_migrations: %v", err)
+	}
+
+	// Apply migrations 001-005 to simulate an existing vault.
+	for v := 1; v <= 5; v++ {
+		applyMigrationVersion(t, db, v)
+	}
+
+	// Insert rows that reflect the permissive post-005 schema:
+	// legacy types, empty/NULL slugs, and NULL status.
+	if _, err := db.Exec(`
+		INSERT INTO entries (id, name, type, summary, body_optional) VALUES
+		('e-legacy', 'Legacy Entry', 'agent', 'legacy summary', 'legacy body'),
+		('e-nulls', 'Nulls Entry', 'prompt', '', ''),
+		('e-empty', '', 'note', '', '')
+	`); err != nil {
+		t.Fatalf("failed to seed v5 entries: %v", err)
+	}
+
+	// Apply migration 006.
+	applyMigrationVersion(t, db, 6)
+
+	// Verify legacy rows survived with original values.
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM entries").Scan(&count); err != nil {
+		t.Fatalf("failed to count entries: %v", err)
+	}
+	if count != 3 {
+		t.Errorf("expected 3 preserved entries, got %d", count)
+	}
+
+	var name string
+	var title, slug, status sql.NullString
+	if err := db.QueryRow("SELECT name, title, slug, status FROM entries WHERE id = 'e-nulls'").Scan(&name, &title, &slug, &status); err != nil {
+		t.Errorf("failed to query preserved row: %v", err)
+	} else {
+		if name != "Nulls Entry" {
+			t.Errorf("expected name 'Nulls Entry', got %q", name)
+		}
+		if title.Valid {
+			t.Errorf("expected NULL title, got %q", title.String)
+		}
+		if slug.Valid {
+			t.Errorf("expected NULL slug, got %q", slug.String)
+		}
+		if !status.Valid || status.String != "active" {
+			t.Errorf("expected status 'active', got %v", status)
+		}
+	}
+
+	// Verify 'routing' is now accepted.
+	if _, err := db.Exec(`INSERT INTO entries (id, type) VALUES ('rt-1', 'routing')`); err != nil {
+		t.Errorf("CHECK constraint rejected 'routing' type on upgraded DB: %v", err)
+	}
+
+	// Verify invalid types are still rejected.
+	_, err = db.Exec(`INSERT INTO entries (id, type) VALUES ('bad-1', 'bogus')`)
+	if err == nil {
+		t.Error("CHECK constraint accepted invalid type 'bogus' on upgraded DB")
+	}
+
+	// Verify critical indexes were recreated.
+	for _, idx := range []string{"idx_entries_type", "idx_entries_project_id", "idx_entries_status", "idx_entries_slug", "idx_entries_active"} {
+		var idxCount int
+		if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?", idx).Scan(&idxCount); err != nil {
+			t.Errorf("failed to check index %s: %v", idx, err)
+		} else if idxCount != 1 {
+			t.Errorf("index %s missing after migration", idx)
+		}
+	}
+
+	// Verify RunMigrations is idempotent on the upgraded DB.
+	if err := RunMigrations(db); err != nil {
+		t.Errorf("RunMigrations should be idempotent after v5->v6 upgrade but failed: %v", err)
+	}
+
+	// Sanity-check that migration version 6 was recorded.
+	var version int
+	err = db.QueryRow("SELECT version FROM schema_migrations WHERE version = 6").Scan(&version)
+	if err != nil {
+		t.Errorf("migration version 6 not recorded after upgrade: %v", err)
 	}
 }

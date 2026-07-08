@@ -81,6 +81,8 @@ func typeBadge(t domain.EntryType) string {
 		color = "39"
 	case domain.EntryTypeProjectState:
 		color = "178"
+	case domain.EntryTypeRouting:
+		color = "213"
 	default:
 		color = "244"
 	}

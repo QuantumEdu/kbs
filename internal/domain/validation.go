@@ -37,7 +37,7 @@ func NormalizeTags(tags []string) []string {
 func ValidateEntryType(t string) error {
 	et := EntryType(t)
 	if !et.IsValid() {
-		return fmt.Errorf("invalid entry type: %q (expected one of: prompt, skill, workflow_note, reference, user, feedback, project_state, session, decision, artifact_summary)", t)
+		return fmt.Errorf("invalid entry type: %q (expected one of: prompt, skill, workflow_note, reference, user, feedback, project_state, session, decision, artifact_summary, handoff, routing)", t)
 	}
 	return nil
 }
@@ -46,6 +46,14 @@ func ValidateStatus(s string) error {
 	st := Status(s)
 	if !st.IsValid() {
 		return fmt.Errorf("invalid status: %q (expected one of: draft, active, archived, deprecated, canonical)", s)
+	}
+	return nil
+}
+
+func ValidatePurpose(p string) error {
+	pu := Purpose(p)
+	if !pu.IsValid() {
+		return fmt.Errorf("invalid purpose: %q (expected one of: WORK, KNOWLEDGE, LEARNING, RELATIONSHIP, STATE, or empty)", p)
 	}
 	return nil
 }

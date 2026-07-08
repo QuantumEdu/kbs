@@ -10,7 +10,7 @@ import (
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
-const exportSchemaVersion = 2
+const exportSchemaVersion = 3
 
 func (s *sqliteImportExportStore) ExportAll(ctx context.Context) (domain.VaultExport, error) {
 	export := domain.VaultExport{
@@ -176,16 +176,17 @@ func (s *sqliteImportExportStore) ImportAll(ctx context.Context, data domain.Vau
 			artifactID = *e.ArtifactID
 		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO entries (id, name, title, slug, type, content, summary, body_optional, status, project_id, artifact_id, external_ref, tags_denorm, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', CURRENT_TIMESTAMP)
+			`INSERT INTO entries (id, name, title, slug, type, content, summary, body_optional, purpose, status, project_id, artifact_id, external_ref, tags_denorm, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', CURRENT_TIMESTAMP)
 			 ON CONFLICT(id) DO UPDATE SET
 			 name=excluded.name, title=excluded.title, slug=excluded.slug,
 			 type=excluded.type, content=excluded.content,
 			 summary=excluded.summary, body_optional=excluded.body_optional,
+			 purpose=excluded.purpose,
 			 status=excluded.status, project_id=excluded.project_id,
 			 artifact_id=excluded.artifact_id, external_ref=excluded.external_ref,
 			 updated_at=CURRENT_TIMESTAMP`,
-			e.ID, e.Title, e.Title, e.Slug, string(e.Type), e.BodyOptional, e.Summary, e.BodyOptional, string(e.Status), projectID, artifactID, e.ExternalRef)
+			e.ID, e.Title, e.Title, e.Slug, string(e.Type), e.BodyOptional, e.Summary, e.BodyOptional, string(e.Purpose), string(e.Status), projectID, artifactID, e.ExternalRef)
 		if err != nil {
 			return fmt.Errorf("import entry %s: %w", e.ID, err)
 		}
@@ -326,7 +327,7 @@ func (s *sqliteImportExportStore) exportProjects(ctx context.Context) ([]domain.
 }
 
 func (s *sqliteImportExportStore) exportEntries(ctx context.Context) ([]domain.Entry, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, COALESCE(title,''), COALESCE(slug,''), type, project_id, COALESCE(summary,''), COALESCE(body_optional,''), COALESCE(status,'active'), artifact_id, COALESCE(external_ref,'') FROM entries ORDER BY id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, COALESCE(title,''), COALESCE(slug,''), type, purpose, project_id, COALESCE(summary,''), COALESCE(body_optional,''), COALESCE(status,'active'), artifact_id, COALESCE(external_ref,'') FROM entries ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +336,7 @@ func (s *sqliteImportExportStore) exportEntries(ctx context.Context) ([]domain.E
 	for rows.Next() {
 		var e domain.Entry
 		var projID, artID, summary, body, status sql.NullString
-		if err := rows.Scan(&e.ID, &e.Title, &e.Slug, &e.Type, &projID, &summary, &body, &status, &artID, &e.ExternalRef); err != nil {
+		if err := rows.Scan(&e.ID, &e.Title, &e.Slug, &e.Type, &e.Purpose, &projID, &summary, &body, &status, &artID, &e.ExternalRef); err != nil {
 			return nil, err
 		}
 		e.Status = domain.Status(status.String)

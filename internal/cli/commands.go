@@ -86,6 +86,10 @@ func ParseCommand(args []string) (string, error) {
 			return "", fmt.Errorf("import requires a file path")
 		}
 		return sub, nil
+	case "import-workflow":
+		return sub, nil
+	case "route":
+		return sub, nil
 	case "save-result":
 		return sub, nil
 	case "sync":
@@ -115,6 +119,7 @@ type AddEntryFlags struct {
 	Project string
 	Tags    string
 	Status  string
+	Purpose string
 }
 
 // ParseAddEntryFlags parses add-entry-specific flags from args.
@@ -129,6 +134,7 @@ func ParseAddEntryFlags(args []string) (*AddEntryFlags, error) {
 	fs.StringVar(&flags.Project, "project", "", "Project slug or ID")
 	fs.StringVar(&flags.Tags, "tags", "", "Comma-separated tags")
 	fs.StringVar(&flags.Status, "status", "", "Entry status")
+	fs.StringVar(&flags.Purpose, "purpose", "", "Entry purpose (WORK, KNOWLEDGE, LEARNING, RELATIONSHIP, STATE)")
 
 	fs.SetOutput(&nullWriter{})
 
@@ -154,6 +160,7 @@ type SearchFlags struct {
 	ProjectID       string
 	Type            string
 	Tag             string
+	Purpose         string
 	IncludeArchived bool
 	Limit           int
 	Vector          bool
@@ -174,6 +181,7 @@ func ParseSearchFlags(args []string) (*SearchFlags, error) {
 	fs.BoolVar(&flags.IncludeArchived, "include-archived", false, "Include archived entries")
 	fs.IntVar(&flags.Limit, "limit", 20, "Max results")
 	fs.BoolVar(&flags.Vector, "vector", false, "Use vector/cosine similarity search")
+	fs.StringVar(&flags.Purpose, "purpose", "", "Filter by purpose (WORK, KNOWLEDGE, LEARNING, RELATIONSHIP, STATE)")
 
 	fs.SetOutput(&nullWriter{})
 
@@ -552,6 +560,64 @@ func ParseImportFlags(args []string) (*ImportFlags, error) {
 		return nil, fmt.Errorf("import requires a file path")
 	}
 	return &ImportFlags{FilePath: args[2]}, nil
+}
+
+// ImportWorkflowFlags holds parsed import-workflow command flags.
+type ImportWorkflowFlags struct {
+	File    string
+	Project string
+}
+
+// ParseImportWorkflowFlags parses import-workflow-specific flags from args.
+func ParseImportWorkflowFlags(args []string) (*ImportWorkflowFlags, error) {
+	flags := &ImportWorkflowFlags{}
+
+	fs := flag.NewFlagSet("import-workflow", flag.ContinueOnError)
+	fs.StringVar(&flags.File, "file", "", "Path to workflow-builder YAML file (required)")
+	fs.StringVar(&flags.Project, "project", "", "Project slug or ID for scoped import")
+
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 2 {
+		if err := fs.Parse(args[2:]); err != nil {
+			return nil, fmt.Errorf("parse import-workflow flags: %w", err)
+		}
+	}
+
+	if flags.File == "" {
+		return nil, fmt.Errorf("--file is required")
+	}
+
+	return flags, nil
+}
+
+// RouteFlags holds parsed route command flags.
+type RouteFlags struct {
+	Scenario string
+	JSON     bool
+}
+
+// ParseRouteFlags parses route-specific flags from args.
+// Usage: skillvault route <scenario> [--json]
+func ParseRouteFlags(args []string) (*RouteFlags, error) {
+	if len(args) < 3 {
+		return nil, fmt.Errorf("route requires a scenario string")
+	}
+
+	flags := &RouteFlags{Scenario: args[2]}
+
+	fs := flag.NewFlagSet("route", flag.ContinueOnError)
+	fs.BoolVar(&flags.JSON, "json", false, "Output as JSON")
+
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 3 {
+		if err := fs.Parse(args[3:]); err != nil {
+			return nil, fmt.Errorf("parse route flags: %w", err)
+		}
+	}
+
+	return flags, nil
 }
 
 // nullWriter discards writes (used to suppress flag package errors).

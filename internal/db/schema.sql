@@ -1,7 +1,7 @@
--- SkillVault Schema Reference (v3 Workflow Pipelines) + Sprint 1 entry_refs + handoff + external_ref
+-- SkillVault Schema Reference (v3 Workflow Pipelines) + Sprint 1 entry_refs + handoff + external_ref + routing
 -- This file is the consolidated reference schema.
 -- Keep in sync with internal/db/migrations/002_entry_refs_and_handoff.sql, 003_hermes.sql,
--- and 004_workflow_pipelines.sql.
+-- 004_workflow_pipelines.sql, and 006_routing_and_import.sql.
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version     INTEGER PRIMARY KEY,
@@ -25,9 +25,10 @@ CREATE TABLE IF NOT EXISTS entries (
     title           TEXT NOT NULL,
     slug            TEXT NOT NULL UNIQUE,
     content         TEXT,
-    type            TEXT NOT NULL CHECK(type IN ('prompt','skill','workflow_note','reference','user','feedback','project_state','session','decision','artifact_summary','handoff')),
+            type            TEXT NOT NULL CHECK(type IN ('prompt','skill','workflow_note','reference','user','feedback','project_state','session','decision','artifact_summary','handoff','routing')),
     summary         TEXT DEFAULT '',
     body_optional   TEXT DEFAULT '',
+    purpose         TEXT DEFAULT '',
     status          TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('draft','active','archived','deprecated','canonical')),
     project_id      TEXT REFERENCES projects(id),
     artifact_id     TEXT,
@@ -156,6 +157,7 @@ CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(type);
 CREATE INDEX IF NOT EXISTS idx_entries_project_id ON entries(project_id);
 CREATE INDEX IF NOT EXISTS idx_entries_status ON entries(status) WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS idx_entries_slug ON entries(slug);
+CREATE INDEX IF NOT EXISTS idx_entries_purpose ON entries(purpose);
 CREATE INDEX IF NOT EXISTS idx_projects_slug ON projects(slug);
 CREATE INDEX IF NOT EXISTS idx_tags_slug ON tags(slug);
 CREATE INDEX IF NOT EXISTS idx_entry_tags_tag ON entry_tags(tag);

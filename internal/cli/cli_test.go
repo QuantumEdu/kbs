@@ -27,6 +27,7 @@ func TestParseSubcommand(t *testing.T) {
 		{"session-wrap", []string{"skillvault", "session-wrap", "--summary", "S"}, "session-wrap", false},
 		{"export", []string{"skillvault", "export"}, "export", false},
 		{"import", []string{"skillvault", "import", "file.json"}, "import", false},
+		{"import-workflow", []string{"skillvault", "import-workflow", "--file", "wf.yaml"}, "import-workflow", false},
 
 		// Legacy commands
 		{"version", []string{"skillvault", "version"}, "version", false},
@@ -63,6 +64,10 @@ func TestParseSubcommand(t *testing.T) {
 
 		// TUI command
 		{"tui", []string{"skillvault", "tui"}, "tui", false},
+
+		// Route command
+		{"route", []string{"skillvault", "route", "research"}, "route", false},
+		{"route no arg", []string{"skillvault", "route"}, "route", false},
 
 		// Errors
 		{"no args", []string{"skillvault"}, "", true},
@@ -491,6 +496,38 @@ func TestParseImportFlags(t *testing.T) {
 	}
 }
 
+func TestParseImportWorkflowFlags(t *testing.T) {
+	// Happy path with --file
+	flags, err := ParseImportWorkflowFlags([]string{"skillvault", "import-workflow", "--file", "workflow.yaml"})
+	if err != nil {
+		t.Fatalf("ParseImportWorkflowFlags failed: %v", err)
+	}
+	if flags.File != "workflow.yaml" {
+		t.Errorf("File = %q, want %q", flags.File, "workflow.yaml")
+	}
+	if flags.Project != "" {
+		t.Errorf("Project = %q, want empty", flags.Project)
+	}
+
+	// With --project flag
+	flags, err = ParseImportWorkflowFlags([]string{"skillvault", "import-workflow", "--file", "wf.yaml", "--project", "my-proj"})
+	if err != nil {
+		t.Fatalf("ParseImportWorkflowFlags with project failed: %v", err)
+	}
+	if flags.File != "wf.yaml" {
+		t.Errorf("File = %q, want %q", flags.File, "wf.yaml")
+	}
+	if flags.Project != "my-proj" {
+		t.Errorf("Project = %q, want %q", flags.Project, "my-proj")
+	}
+
+	// Missing --file
+	_, err = ParseImportWorkflowFlags([]string{"skillvault", "import-workflow"})
+	if err == nil {
+		t.Fatal("expected error for missing --file")
+	}
+}
+
 func TestTagItems(t *testing.T) {
 	tests := []struct {
 		raw  string
@@ -747,5 +784,91 @@ func TestParseSearchFlags_Vector(t *testing.T) {
 	}
 	if flags.Limit != 5 {
 		t.Errorf("Limit = %d, want 5", flags.Limit)
+	}
+}
+
+func TestParseRouteFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    RouteFlags
+		wantErr bool
+	}{
+		{
+			name: "scenario required",
+			args: []string{"skillvault", "route", "research"},
+			want: RouteFlags{Scenario: "research", JSON: false},
+		},
+		{
+			name: "with --json flag",
+			args: []string{"skillvault", "route", "onboarding", "--json"},
+			want: RouteFlags{Scenario: "onboarding", JSON: true},
+		},
+		{
+			name:    "missing scenario",
+			args:    []string{"skillvault", "route"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flags, err := ParseRouteFlags(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseRouteFlags failed: %v", err)
+			}
+			if flags.Scenario != tt.want.Scenario {
+				t.Errorf("Scenario = %q, want %q", flags.Scenario, tt.want.Scenario)
+			}
+			if flags.JSON != tt.want.JSON {
+				t.Errorf("JSON = %v, want %v", flags.JSON, tt.want.JSON)
+			}
+		})
+	}
+}
+
+func TestParseAddEntryFlagsPurpose(t *testing.T) {
+	// --purpose flag parses correctly.
+	flags, err := ParseAddEntryFlags([]string{"skillvault", "add-entry", "--title", "Go Patterns", "--summary", "Learn Go", "--purpose", "KNOWLEDGE"})
+	if err != nil {
+		t.Fatalf("ParseAddEntryFlags with --purpose failed: %v", err)
+	}
+	if flags.Purpose != "KNOWLEDGE" {
+		t.Errorf("Purpose = %q, want KNOWLEDGE", flags.Purpose)
+	}
+
+	// Without --purpose, field is empty.
+	flags, err = ParseAddEntryFlags([]string{"skillvault", "add-entry", "--title", "T", "--summary", "S"})
+	if err != nil {
+		t.Fatalf("ParseAddEntryFlags without purpose failed: %v", err)
+	}
+	if flags.Purpose != "" {
+		t.Errorf("Purpose = %q, want empty", flags.Purpose)
+	}
+}
+
+func TestParseSearchFlagsPurpose(t *testing.T) {
+	// --purpose filter parses correctly.
+	flags, err := ParseSearchFlags([]string{"skillvault", "search", "go", "--purpose", "WORK"})
+	if err != nil {
+		t.Fatalf("ParseSearchFlags with --purpose failed: %v", err)
+	}
+	if flags.Purpose != "WORK" {
+		t.Errorf("Purpose = %q, want WORK", flags.Purpose)
+	}
+
+	// Without --purpose, field is empty.
+	flags, err = ParseSearchFlags([]string{"skillvault", "search", "go"})
+	if err != nil {
+		t.Fatalf("ParseSearchFlags without purpose failed: %v", err)
+	}
+	if flags.Purpose != "" {
+		t.Errorf("Purpose = %q, want empty", flags.Purpose)
 	}
 }

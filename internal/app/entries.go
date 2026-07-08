@@ -5,8 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 	"unicode"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/quantum-6/skillvault/internal/db"
 	"github.com/quantum-6/skillvault/internal/domain"
@@ -20,6 +23,7 @@ type SaveEntryInput struct {
 	Project string
 	Tags    []string
 	Status  string
+	Purpose string
 }
 
 type GetEntryResult struct {
@@ -27,10 +31,39 @@ type GetEntryResult struct {
 	Artifact *domain.Artifact
 }
 
+// RouteType discriminates the target of a resolved route.
+type RouteType string
+
+const (
+	RouteTypeWorkflow RouteType = "workflow"
+	RouteTypeSkill    RouteType = "skill"
+)
+
+const (
+	routingTagName   = "workflow-route"
+	routeSearchLimit = 50
+)
+
+// RouteTarget represents a routing body YAML key value with workflow and/or skill targets.
+type RouteTarget struct {
+	Workflow string `yaml:"workflow"`
+	Skill    string `yaml:"skill"`
+}
+
+// RouteResult holds the resolved scenario routing result.
+type RouteResult struct {
+	Scenario    string           `json:"scenario"`
+	Type        RouteType        `json:"type"`
+	Target      string           `json:"target"`
+	Description string           `json:"description"`
+	Workflow    *domain.Workflow `json:"workflow,omitempty"`
+}
+
 type EntryService struct {
 	store         db.EntryStore
 	projectStore  db.ProjectStore
 	artifactStore db.ArtifactStore
+	workflowStore db.WorkflowStore
 	vector        *VectorService
 }
 
@@ -46,6 +79,11 @@ func NewEntryService(store db.EntryStore, projectStore db.ProjectStore, artifact
 // When nil or not set, auto-embed is silently skipped.
 func (s *EntryService) SetVectorService(svc *VectorService) {
 	s.vector = svc
+}
+
+// SetWorkflowStore injects a WorkflowStore for route scenario resolution.
+func (s *EntryService) SetWorkflowStore(store db.WorkflowStore) {
+	s.workflowStore = store
 }
 
 func (s *EntryService) Save(ctx context.Context, entry domain.Entry, tags []string) error {
@@ -69,6 +107,12 @@ func (s *EntryService) SaveEntry(ctx context.Context, input SaveEntryInput) (*Ge
 			return nil, fmt.Errorf("validate status: %w", err)
 		}
 		status = domain.Status(input.Status)
+	}
+
+	if input.Purpose != "" {
+		if err := domain.ValidatePurpose(input.Purpose); err != nil {
+			return nil, fmt.Errorf("validate purpose: %w", err)
+		}
 	}
 
 	var projectID *string
@@ -105,6 +149,7 @@ func (s *EntryService) SaveEntry(ctx context.Context, input SaveEntryInput) (*Ge
 		Slug:         slug,
 		Title:        input.Title,
 		Type:         domain.EntryType(input.Type),
+		Purpose:      domain.Purpose(input.Purpose),
 		Summary:      input.Summary,
 		BodyOptional: input.Body,
 		Status:       status,
@@ -171,6 +216,11 @@ func (s *EntryService) SearchEntries(ctx context.Context, query string, filters 
 	if err := domain.ValidateSearchQuery(q); err != nil {
 		return nil, fmt.Errorf("validate search: %w", err)
 	}
+	if q.Purpose != nil && *q.Purpose != "" {
+		if err := domain.ValidatePurpose(*q.Purpose); err != nil {
+			return nil, fmt.Errorf("validate purpose filter: %w", err)
+		}
+	}
 	return s.store.Search(ctx, q)
 }
 
@@ -192,6 +242,95 @@ func (s *EntryService) SearchByTags(ctx context.Context, tags []string, matchAll
 
 func (s *EntryService) ArchiveEntry(ctx context.Context, id string) error {
 	return s.store.Archive(ctx, id)
+}
+
+// RouteScenario resolves a scenario string to a matching workflow or skill
+// by searching routing-type entries. Resolution cascade: FTS5 → tag fallback →
+// YAML body key match → workflow lookup.
+func (s *EntryService) RouteScenario(ctx context.Context, scenario string) (*RouteResult, error) {
+	routingType := string(domain.EntryTypeRouting)
+
+	// Step 1: FTS5 search on routing entries.
+	results, err := s.SearchEntries(ctx, scenario, domain.SearchQuery{
+		Type:  &routingType,
+		Limit: routeSearchLimit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search routing entries: %w", err)
+	}
+
+	// Step 2: Tag fallback — search by routing tag when FTS5 is empty.
+	if len(results) == 0 {
+		tagResults, tagErr := s.SearchByTags(ctx, []string{routingTagName}, false, &routingType, nil, routeSearchLimit)
+		if tagErr != nil {
+			// Tag fallback is best-effort; continue with empty.
+			tagResults = nil
+		}
+		results = tagResults
+	}
+
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no routing entries found for scenario %q; create one with: add-entry --type routing --title \"Route to X\" --body \"%s:\n  workflow: your-workflow-slug\" --tags %s", scenario, scenario, routingTagName)
+	}
+
+	// Step 3: Parse YAML bodies for exact key match.
+	var lastErr error
+	for _, r := range results {
+		if r.Entry.BodyOptional == "" {
+			continue
+		}
+
+		var routeMap map[string]RouteTarget
+		if err := yaml.Unmarshal([]byte(r.Entry.BodyOptional), &routeMap); err != nil {
+			// Malformed YAML: warn and skip per spec.
+			fmt.Fprintf(os.Stderr, "[sk-vault] warning: skipping malformed YAML in routing entry %q: %v\n", r.Entry.ID, err)
+			continue
+		}
+
+		target, ok := routeMap[scenario]
+		if !ok {
+			continue
+		}
+
+		// Found a matching scenario key.
+		if target.Workflow != "" {
+			if s.workflowStore == nil {
+				return nil, fmt.Errorf("workflow store not wired; route resolution requires it")
+			}
+
+			wf, err := s.workflowStore.Get(ctx, target.Workflow)
+			if err != nil {
+				// Stale workflow reference: warn and continue.
+				fmt.Fprintf(os.Stderr, "[sk-vault] warning: referenced workflow %q not found (entry %q)\n", target.Workflow, r.Entry.ID)
+				lastErr = fmt.Errorf("referenced workflow %q not found", target.Workflow)
+				continue
+			}
+
+			return &RouteResult{
+				Scenario:    scenario,
+				Type:        RouteTypeWorkflow,
+				Target:      target.Workflow,
+				Description: wf.Description,
+				Workflow:    &wf,
+			}, nil
+		}
+
+		if target.Skill != "" {
+			return &RouteResult{
+				Scenario:    scenario,
+				Type:        RouteTypeSkill,
+				Target:      target.Skill,
+				Description: r.Entry.Summary,
+			}, nil
+		}
+	}
+
+	if lastErr != nil {
+		return nil, lastErr
+	}
+
+	// Entry bodies exist but no YAML key matched the scenario.
+	return nil, fmt.Errorf("no routing entries found for scenario %q", scenario)
 }
 
 func slugify(title string) string {

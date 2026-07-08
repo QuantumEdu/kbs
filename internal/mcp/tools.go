@@ -25,6 +25,7 @@ type ToolRegistry struct {
 	contextSvc     *app.ContextService
 	seriesSvc      *app.SeriesService
 	workflowSvc    *app.WorkflowService
+	workflowRunSvc *app.WorkflowRunService
 	sessionSvc     *app.SessionService
 	projectSvc     *app.ProjectService
 	saveResultSvc  *app.SavePromptResultService
@@ -55,6 +56,12 @@ func (r *ToolRegistry) WithSaveResultService(svc *app.SavePromptResultService) *
 	return r
 }
 
+// WithWorkflowRunService sets the workflow run service for run_workflow tool.
+func (r *ToolRegistry) WithWorkflowRunService(svc *app.WorkflowRunService) *ToolRegistry {
+	r.workflowRunSvc = svc
+	return r
+}
+
 // NewServiceToolRegistry creates a registry backed by app services.
 func NewServiceToolRegistry(
 	entrySvc *app.EntryService,
@@ -82,18 +89,20 @@ func (r *ToolRegistry) registerV2Tools() {
 	r.tools = []Tool{
 		{Name: "save_entry", Description: "Save a vault entry (prompt, skill, decision, etc.)", InputSchema: schemaObj(map[string]interface{}{
 			"title":   map[string]interface{}{"type": "string", "description": "Entry title (required)"},
-			"type":    map[string]interface{}{"type": "string", "description": "Entry type: prompt|skill|reference|user|feedback|project_state|session|decision|artifact_summary"},
+			"type":    map[string]interface{}{"type": "string", "description": "Entry type: prompt|skill|reference|user|feedback|project_state|session|decision|artifact_summary|handoff|routing"},
 			"summary": map[string]interface{}{"type": "string", "description": "Short summary"},
 			"body":    map[string]interface{}{"type": "string", "description": "Optional body content"},
 			"project": map[string]interface{}{"type": "string", "description": "Project name or ID"},
 			"tags":    map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
 			"status":  map[string]interface{}{"type": "string", "description": "draft|active|archived|deprecated|canonical"},
+			"purpose": map[string]interface{}{"type": "string", "description": "Entry purpose: WORK|KNOWLEDGE|LEARNING|RELATIONSHIP|STATE"},
 		})},
 		{Name: "search_entries", Description: "Search entries with FTS5 and filters", InputSchema: schemaObj(map[string]interface{}{
 			"query":            map[string]interface{}{"type": "string", "description": "Search query"},
 			"type":             map[string]interface{}{"type": "string", "description": "Filter by entry type"},
 			"project":          map[string]interface{}{"type": "string", "description": "Filter by project"},
 			"tags":             map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+			"purpose":          map[string]interface{}{"type": "string", "description": "Filter by purpose (WORK|KNOWLEDGE|LEARNING|RELATIONSHIP|STATE)"},
 			"include_archived": map[string]interface{}{"type": "boolean", "description": "Include archived entries"},
 			"limit":            map[string]interface{}{"type": "number", "description": "Max results (default 10)"},
 			"vector":           map[string]interface{}{"type": "boolean", "description": "Use vector/cosine similarity search instead of FTS5"},
@@ -178,6 +187,13 @@ func (r *ToolRegistry) registerV2Tools() {
 			"source_prompt_id": map[string]interface{}{"type": "string", "description": "Source prompt entry ID"},
 			"model":            map[string]interface{}{"type": "string", "description": "Model identifier"},
 		})},
+		{Name: "run_workflow", Description: "Execute a workflow with structured step inputs and return per-step results", InputSchema: schemaObj(map[string]interface{}{
+			"workflow": map[string]interface{}{"type": "string", "description": "Workflow slug or ID (required)"},
+			"steps":    map[string]interface{}{"type": "object", "description": "Map of step index (int) -> input text"},
+		})},
+		{Name: "route_scenario", Description: "Resolve a free-text scenario to a matching workflow or skill", InputSchema: schemaObj(map[string]interface{}{
+			"scenario": map[string]interface{}{"type": "string", "description": "Scenario text to route (required)"},
+		})},
 	}
 }
 
@@ -233,6 +249,10 @@ func (r *ToolRegistry) dispatch(ctx context.Context, name string, args map[strin
 		return r.handleCompareEntries(ctx, args)
 	case "save_result":
 		return r.handleSaveResult(ctx, args)
+	case "run_workflow":
+		return r.handleRunWorkflow(ctx, args)
+	case "route_scenario":
+		return r.handleRouteScenario(ctx, args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -247,6 +267,7 @@ func (r *ToolRegistry) handleSaveEntry(ctx context.Context, args map[string]inte
 		Project: strArg(args, "project"),
 		Tags:    parseStrings(args["tags"]),
 		Status:  strArg(args, "status"),
+		Purpose: strArg(args, "purpose"),
 	}
 	if input.Type == "" {
 		input.Type = "note"
@@ -341,9 +362,16 @@ func (r *ToolRegistry) handleSearchEntries(ctx context.Context, args map[string]
 		typePtr = &typ
 	}
 
+	purpose := strArg(args, "purpose")
+	var purposePtr *string
+	if purpose != "" {
+		purposePtr = &purpose
+	}
+
 	results, err := r.entrySvc.SearchEntries(ctx, query, domain.SearchQuery{
 		ProjectID:       projectID,
 		Type:            typePtr,
+		Purpose:         purposePtr,
 		Tags:            tags,
 		IncludeArchived: includeArchived,
 		Limit:           limit,
@@ -964,6 +992,58 @@ func (r *ToolRegistry) handleSaveResult(ctx context.Context, args map[string]int
 		"project_id": proj,
 	}
 	return jsonResult(result), nil
+}
+
+func (r *ToolRegistry) handleRunWorkflow(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.workflowRunSvc == nil {
+		return errResult("Error: workflow run service not available"), nil
+	}
+
+	workflowRef := strArg(args, "workflow")
+	if workflowRef == "" {
+		return errResult("Error: workflow is required"), nil
+	}
+
+	// Parse steps from args: { "1": "step output", "2": "step output" }
+	stepInputs := make(map[int]string)
+	if rawSteps, ok := args["steps"].(map[string]interface{}); ok {
+		for k, v := range rawSteps {
+			var idx int
+			if _, err := fmt.Sscanf(k, "%d", &idx); err == nil {
+				if s, ok2 := v.(string); ok2 {
+					stepInputs[idx] = s
+				}
+			}
+		}
+	}
+
+	result, err := r.workflowRunSvc.RunPipelineStructured(ctx, workflowRef, stepInputs)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+	return jsonResult(result), nil
+}
+
+func (r *ToolRegistry) handleRouteScenario(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.entrySvc == nil {
+		return errResult("Error: entry service not available"), nil
+	}
+
+	scenario := strArg(args, "scenario")
+	if scenario == "" {
+		return errResult("Error: scenario is required and must not be empty"), nil
+	}
+
+	result, err := r.entrySvc.RouteScenario(ctx, scenario)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+
+	// RouteResult is already JSON-tagged, marshal it for the response.
+	data, _ := json.Marshal(result)
+	return &ToolCallResult{
+		Content: []ToolContent{{Type: "text", Text: string(data)}},
+	}, nil
 }
 
 func errResult(text string) *ToolCallResult {

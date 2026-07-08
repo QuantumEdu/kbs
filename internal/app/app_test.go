@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +38,96 @@ func setupAppServices(t *testing.T) (*db.Store, *EntryService, *ArtifactService,
 
 	cleanup := func() { sqlDB.Close() }
 	return store, entrySvc, artifactSvc, workflowSvc, seriesSvc, projectSvc, contextSvc, sessionSvc, exportSvc, importSvc, cleanup
+}
+
+// captureStderr redirects os.Stderr to a buffer for the duration of the test
+// and returns a pointer that will hold the captured output once restore is called.
+func captureStderr(t *testing.T) (output *string, restore func()) {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stderr pipe: %v", err)
+	}
+	os.Stderr = w
+	var captured string
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		data, _ := io.ReadAll(r)
+		captured = string(data)
+	}()
+	return &captured, func() {
+		_ = w.Close()
+		<-done
+		os.Stderr = old
+	}
+}
+
+func TestEntryServiceRoutingTypeRoundTrip(t *testing.T) {
+	_, svc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	result, err := svc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Workflow Route Map",
+		Summary: "Maps scenarios to workflow slugs",
+		Type:    string(domain.EntryTypeRouting),
+		Body:    "scenario: new-project -> workflow: onboarding",
+		Tags:    []string{"routing", "workflow-map"},
+	})
+	if err != nil {
+		t.Fatalf("SaveEntry routing failed: %v", err)
+	}
+	if result.Entry.Entry.Type != domain.EntryTypeRouting {
+		t.Errorf("expected type %q, got %q", domain.EntryTypeRouting, result.Entry.Entry.Type)
+	}
+
+	got, err := svc.GetEntry(ctx, result.Entry.Entry.ID)
+	if err != nil {
+		t.Fatalf("GetEntry routing failed: %v", err)
+	}
+	if got.Entry.Entry.Type != domain.EntryTypeRouting {
+		t.Errorf("retrieved type mismatch: expected %q, got %q", domain.EntryTypeRouting, got.Entry.Entry.Type)
+	}
+	if got.Entry.Entry.Title != "Workflow Route Map" {
+		t.Errorf("retrieved title mismatch: expected %q, got %q", "Workflow Route Map", got.Entry.Entry.Title)
+	}
+}
+
+func TestRoutingEntrySearchable(t *testing.T) {
+	_, svc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := svc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Workflow Route Map",
+		Summary: "Maps scenarios to workflow slugs",
+		Type:    string(domain.EntryTypeRouting),
+		Body:    "scenario: new-project -> workflow: onboarding",
+		Tags:    []string{"routing"},
+	}); err != nil {
+		t.Fatalf("SaveEntry routing failed: %v", err)
+	}
+
+	results, err := svc.SearchEntries(ctx, "workflow slugs", domain.SearchQuery{Limit: 10})
+	if err != nil {
+		t.Fatalf("SearchEntries failed: %v", err)
+	}
+	if len(results) == 0 {
+		t.Errorf("expected routing entry to be searchable by summary, got 0 results")
+	}
+
+	found := false
+	for _, r := range results {
+		if r.Entry.Type == domain.EntryTypeRouting {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("search results did not include routing entry: %+v", results)
+	}
 }
 
 func TestEntryServiceUpsertNormalizesTags(t *testing.T) {
@@ -989,5 +1080,346 @@ func TestLinkArtifactToEntryNotFound(t *testing.T) {
 	err := svc.LinkArtifactToEntry(ctx, "nonexistent-art", "nonexistent-entry")
 	if err == nil {
 		t.Fatal("expected error for nonexistent artifact")
+	}
+}
+
+// --- Route Scenario Tests ---
+
+func TestRouteScenarioResolvesToWorkflow(t *testing.T) {
+	store, entrySvc, _, wfSvc, _, projectSvc, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+	entrySvc.SetWorkflowStore(store.Workflows)
+
+	// Create a project and a workflow.
+	proj, err := projectSvc.SaveProject(ctx, SaveProjectInput{Name: "route-test"})
+	if err != nil {
+		t.Fatalf("SaveProject failed: %v", err)
+	}
+
+	wf, err := wfSvc.SaveWorkflow(ctx, SaveWorkflowInput{
+		Name:        "Research Workflow",
+		Description: "A workflow for research tasks",
+		Steps: []SaveWorkflowStep{
+			{OrderIndex: 1, Title: "Analyze", Instruction: "Analyze the input"},
+			{OrderIndex: 2, Title: "Report", Instruction: "Write a report"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveWorkflow failed: %v", err)
+	}
+
+	// Create a routing entry that maps "research" scenario to the workflow.
+	routingYAML := "research:\n  workflow: " + wf.Slug
+	_, err = entrySvc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Route Map",
+		Summary: "Maps scenarios to workflows",
+		Type:    string(domain.EntryTypeRouting),
+		Body:    routingYAML,
+		Tags:    []string{routingTagName},
+		Project: proj.ID,
+	})
+	if err != nil {
+		t.Fatalf("SaveEntry routing failed: %v", err)
+	}
+
+	// Resolve the scenario.
+	result, err := entrySvc.RouteScenario(ctx, "research")
+	if err != nil {
+		t.Fatalf("RouteScenario failed: %v", err)
+	}
+	if result.Type != RouteTypeWorkflow {
+		t.Errorf("expected type workflow, got %q", result.Type)
+	}
+	if result.Target != wf.Slug {
+		t.Errorf("expected target %q, got %q", wf.Slug, result.Target)
+	}
+	if result.Workflow == nil {
+		t.Fatal("expected workflow in result, got nil")
+	}
+	if result.Workflow.ID != wf.ID {
+		t.Errorf("expected workflow ID %q, got %q", wf.ID, result.Workflow.ID)
+	}
+}
+
+func TestRouteScenarioResolvesToSkill(t *testing.T) {
+	store, entrySvc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+	entrySvc.SetWorkflowStore(store.Workflows)
+
+	// Create a routing entry that maps "onboarding" scenario to a skill.
+	routingYAML := "onboarding:\n  skill: onboarding-skill"
+	_, err := entrySvc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Skill Route Map",
+		Summary: "Maps onboarding to skill",
+		Type:    string(domain.EntryTypeRouting),
+		Body:    routingYAML,
+		Tags:    []string{routingTagName},
+	})
+	if err != nil {
+		t.Fatalf("SaveEntry routing failed: %v", err)
+	}
+
+	result, err := entrySvc.RouteScenario(ctx, "onboarding")
+	if err != nil {
+		t.Fatalf("RouteScenario failed: %v", err)
+	}
+	if result.Type != RouteTypeSkill {
+		t.Errorf("expected type skill, got %q", result.Type)
+	}
+	if result.Target != "onboarding-skill" {
+		t.Errorf("expected target onboarding-skill, got %q", result.Target)
+	}
+	if result.Workflow != nil {
+		t.Error("expected no workflow for skill route")
+	}
+}
+
+func TestRouteScenarioNoMatch(t *testing.T) {
+	store, entrySvc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+	entrySvc.SetWorkflowStore(store.Workflows)
+
+	_, err := entrySvc.RouteScenario(ctx, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error for nonexistent scenario")
+	}
+	if !strings.Contains(err.Error(), "no routing entries found") {
+		t.Errorf("expected 'no routing entries found' in error, got: %v", err)
+	}
+}
+
+func TestRouteScenarioMalformedYAMLSkipped(t *testing.T) {
+	store, entrySvc, _, wfSvc, _, _, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+	entrySvc.SetWorkflowStore(store.Workflows)
+
+	// Create a workflow.
+	wf, err := wfSvc.SaveWorkflow(ctx, SaveWorkflowInput{
+		Name: "Onboarding Workflow",
+		Steps: []SaveWorkflowStep{
+			{OrderIndex: 1, Title: "Welcome", Instruction: "Send welcome message"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveWorkflow failed: %v", err)
+	}
+
+	// Entry with malformed YAML (invalid indentation).
+	_, err = entrySvc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Bad YAML Entry",
+		Summary: "This has broken YAML",
+		Type:    string(domain.EntryTypeRouting),
+		Body:    "bad: yaml: [[[invalid:::",
+		Tags:    []string{routingTagName},
+	})
+	if err != nil {
+		t.Fatalf("SaveEntry bad YAML failed: %v", err)
+	}
+
+	// Entry with valid YAML mapping onboarding scenario.
+	validYAML := "onboarding:\n  workflow: " + wf.Slug
+	_, err = entrySvc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Good YAML Entry",
+		Summary: "Valid routing entry",
+		Type:    string(domain.EntryTypeRouting),
+		Body:    validYAML,
+		Tags:    []string{routingTagName},
+	})
+	if err != nil {
+		t.Fatalf("SaveEntry valid YAML failed: %v", err)
+	}
+
+	// Resolution should skip the bad entry and find the good one.
+	result, err := entrySvc.RouteScenario(ctx, "onboarding")
+	if err != nil {
+		t.Fatalf("RouteScenario failed: %v", err)
+	}
+	if result.Target != wf.Slug {
+		t.Errorf("expected target %q, got %q", wf.Slug, result.Target)
+	}
+}
+
+func TestRouteScenarioStaleWorkflow(t *testing.T) {
+	store, entrySvc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+	entrySvc.SetWorkflowStore(store.Workflows)
+
+	// Create a routing entry that references a nonexistent workflow slug.
+	routingYAML := "ghost:\n  workflow: nonexistent-workflow-slug"
+	_, err := entrySvc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Stale Route",
+		Summary: "References a deleted workflow",
+		Type:    string(domain.EntryTypeRouting),
+		Body:    routingYAML,
+		Tags:    []string{routingTagName},
+	})
+	if err != nil {
+		t.Fatalf("SaveEntry stale route failed: %v", err)
+	}
+
+	// Capture the stderr warning emitted for a stale workflow reference.
+	stderr, restore := captureStderr(t)
+	defer restore()
+
+	// Should not fatal-error; should warn and return an error about no match.
+	_, err = entrySvc.RouteScenario(ctx, "ghost")
+	restore()
+	if err == nil {
+		t.Fatal("expected error for stale workflow reference")
+	}
+	if !strings.Contains(*stderr, "referenced workflow \"nonexistent-workflow-slug\" not found") {
+		t.Errorf("expected stale workflow warning on stderr, got: %q", *stderr)
+	}
+}
+
+// --- Purpose Taxonomy Tests ---
+
+func TestPurposeSaveAndRetrieve(t *testing.T) {
+	_, svc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	result, err := svc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Knowledge Entry",
+		Type:    "reference",
+		Summary: "Entry with purpose",
+		Purpose: "KNOWLEDGE",
+	})
+	if err != nil {
+		t.Fatalf("SaveEntry with purpose failed: %v", err)
+	}
+	if result.Entry.Entry.Purpose != domain.PurposeKnowledge {
+		t.Errorf("expected purpose KNOWLEDGE, got %q", result.Entry.Entry.Purpose)
+	}
+
+	got, err := svc.GetEntry(ctx, result.Entry.Entry.ID)
+	if err != nil {
+		t.Fatalf("GetEntry failed: %v", err)
+	}
+	if got.Entry.Entry.Purpose != domain.PurposeKnowledge {
+		t.Errorf("retrieved purpose = %q, want KNOWLEDGE", got.Entry.Entry.Purpose)
+	}
+}
+
+func TestPurposeSaveWithoutPurpose(t *testing.T) {
+	_, svc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	result, err := svc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "No Purpose Entry",
+		Type:    "skill",
+		Summary: "Entry without purpose",
+	})
+	if err != nil {
+		t.Fatalf("SaveEntry without purpose failed: %v", err)
+	}
+	if result.Entry.Entry.Purpose != "" {
+		t.Errorf("expected empty purpose, got %q", result.Entry.Entry.Purpose)
+	}
+}
+
+func TestPurposeRejectsInvalid(t *testing.T) {
+	_, svc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	_, err := svc.SaveEntry(ctx, SaveEntryInput{
+		Title:   "Bad Purpose",
+		Type:    "skill",
+		Summary: "Invalid purpose",
+		Purpose: "INVALID",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid purpose")
+	}
+	if !strings.Contains(err.Error(), "invalid purpose") {
+		t.Errorf("expected 'invalid purpose' in error, got: %v", err)
+	}
+}
+
+func TestPurposeSearchFilter(t *testing.T) {
+	_, svc, _, _, _, projectSvc, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projectSvc.SaveProject(ctx, SaveProjectInput{Name: "purpose-test"})
+
+	svc.SaveEntry(ctx, SaveEntryInput{
+		Title: "Work Entry", Type: "reference", Summary: "A work entry",
+		Purpose: "WORK", Project: "purpose-test",
+	})
+	svc.SaveEntry(ctx, SaveEntryInput{
+		Title: "Knowledge Entry", Type: "reference", Summary: "A knowledge entry",
+		Purpose: "KNOWLEDGE", Project: "purpose-test",
+	})
+	svc.SaveEntry(ctx, SaveEntryInput{
+		Title: "No Purpose Entry", Type: "reference", Summary: "No purpose",
+		Project: "purpose-test",
+	})
+
+	purposeWork := "WORK"
+	results, err := svc.SearchEntries(ctx, "Entry", domain.SearchQuery{
+		Purpose: &purposeWork,
+		Limit:   10,
+	})
+	if err != nil {
+		t.Fatalf("SearchEntries with purpose filter failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result for WORK purpose, got %d", len(results))
+	}
+	if results[0].Entry.Title != "Work Entry" {
+		t.Errorf("expected 'Work Entry', got %q", results[0].Entry.Title)
+	}
+}
+
+func TestPurposeImportExportRoundTrip(t *testing.T) {
+	_, entrySvc, _, _, _, projectSvc, _, _, exportSvc, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projectSvc.SaveProject(ctx, SaveProjectInput{Name: "export-test"})
+
+	result, err := entrySvc.SaveEntry(ctx, SaveEntryInput{
+		Title: "Export Purpose", Type: "reference", Summary: "Has purpose",
+		Purpose: "LEARNING", Project: "export-test",
+	})
+	if err != nil {
+		t.Fatalf("SaveEntry failed: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	exportPath := filepath.Join(tmpDir, "export.json")
+
+	if err := exportSvc.ExportVault(ctx, ExportVaultInput{OutputPath: exportPath, IncludeArtifacts: true}); err != nil {
+		t.Fatalf("ExportVault failed: %v", err)
+	}
+
+	sqlDB2, err := db.OpenDB(":memory:")
+	if err != nil {
+		t.Fatalf("OpenDB2 failed: %v", err)
+	}
+	defer sqlDB2.Close()
+	if err := db.RunMigrations(sqlDB2); err != nil {
+		t.Fatalf("RunMigrations2 failed: %v", err)
+	}
+	store2 := db.NewStore(sqlDB2)
+	importSvc2 := NewVaultImportService(store2.ImportExport, store2.Entries, store2.Projects, store2.Artifacts)
+	if err := importSvc2.Import(ctx, exportPath); err != nil {
+		t.Fatalf("Import failed: %v", err)
+	}
+
+	got, err := NewEntryService(store2.Entries, store2.Projects, store2.Artifacts).GetEntry(ctx, result.Entry.Entry.ID)
+	if err != nil {
+		t.Fatalf("GetEntry after import failed: %v", err)
+	}
+	if got.Entry.Entry.Purpose != domain.PurposeLearning {
+		t.Errorf("imported purpose = %q, want LEARNING", got.Entry.Entry.Purpose)
 	}
 }
