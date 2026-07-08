@@ -285,6 +285,7 @@ func runCLI(cmd string) {
 			Project: flags.Project,
 			Tags:    cli.TagItems(flags.Tags),
 			Status:  flags.Status,
+			Purpose: flags.Purpose,
 		})
 		if err != nil {
 			cli.PrintError(err)
@@ -344,9 +345,15 @@ func runCLI(cmd string) {
 			typePtr = &flags.Type
 		}
 
+		var purposePtr *string
+		if flags.Purpose != "" {
+			purposePtr = &flags.Purpose
+		}
+
 		results, err := svc.entrySvc.SearchEntries(ctx, flags.Query, domain.SearchQuery{
 			ProjectID:       projectID,
 			Type:            typePtr,
+			Purpose:         purposePtr,
 			IncludeArchived: flags.IncludeArchived,
 			Limit:           flags.Limit,
 		})

@@ -50,6 +50,14 @@ func ValidateStatus(s string) error {
 	return nil
 }
 
+func ValidatePurpose(p string) error {
+	pu := Purpose(p)
+	if !pu.IsValid() {
+		return fmt.Errorf("invalid purpose: %q (expected one of: WORK, KNOWLEDGE, LEARNING, RELATIONSHIP, STATE, or empty)", p)
+	}
+	return nil
+}
+
 func ValidateArtifactType(t string) error {
 	at := ArtifactType(t)
 	if !at.IsValid() {

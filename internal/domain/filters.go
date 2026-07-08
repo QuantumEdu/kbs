@@ -5,6 +5,7 @@ type SearchQuery struct {
 	ProjectID       *string
 	SeriesID        *string
 	Type            *string
+	Purpose         *string
 	Tags            []string
 	IncludeArchived bool
 	Limit           int

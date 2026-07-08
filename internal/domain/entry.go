@@ -2,6 +2,25 @@ package domain
 
 import "time"
 
+type Purpose string
+
+const (
+	PurposeWork         Purpose = "WORK"
+	PurposeKnowledge    Purpose = "KNOWLEDGE"
+	PurposeLearning     Purpose = "LEARNING"
+	PurposeRelationship Purpose = "RELATIONSHIP"
+	PurposeState        Purpose = "STATE"
+)
+
+func (p Purpose) IsValid() bool {
+	switch p {
+	case PurposeWork, PurposeKnowledge, PurposeLearning,
+		PurposeRelationship, PurposeState, "":
+		return true
+	}
+	return false
+}
+
 type EntryType string
 
 const (
@@ -53,6 +72,7 @@ type Entry struct {
 	Title        string
 	Slug         string
 	Type         EntryType
+	Purpose      Purpose
 	Summary      string
 	BodyOptional string
 	Status       Status

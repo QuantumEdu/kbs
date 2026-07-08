@@ -996,3 +996,83 @@ func saveTestEntry(t *testing.T, reg *ToolRegistry, title, typ string) string {
 	}
 	return extractEntryID(t, result)
 }
+
+func TestSaveEntryMCPPurpose(t *testing.T) {
+	reg, projectSvc, cleanup := setupMCPServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "testproj"})
+
+	result, err := reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "Knowledge Entry",
+		"type":    "reference",
+		"summary": "Entry with purpose",
+		"project": "testproj",
+		"purpose": "KNOWLEDGE",
+	})
+	if err != nil {
+		t.Fatalf("save_entry with purpose failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("save_entry with purpose returned error: %s", result.Content[0].Text)
+	}
+
+	text := result.Content[0].Text
+	lines := strings.Split(text, "\n")
+	idLine := strings.TrimSpace(lines[0])
+	id := strings.TrimPrefix(idLine, "Saved: ")
+
+	getResult, err := reg.Call(ctx, "get_entry", map[string]interface{}{"id": id})
+	if err != nil {
+		t.Fatalf("get_entry failed: %v", err)
+	}
+	if getResult.IsError {
+		t.Fatalf("get_entry returned error: %s", getResult.Content[0].Text)
+	}
+	// get_entry doesn't currently show purpose in output, but the entry is persisted.
+	// The real test is that it doesn't error — persistence is verified in app_test.go.
+	_ = getResult
+}
+
+func TestSearchEntriesMCPPurposeFilter(t *testing.T) {
+	reg, projectSvc, cleanup := setupMCPServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "testproj"})
+
+	reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "Work Entry",
+		"type":    "reference",
+		"summary": "A work entry",
+		"project": "testproj",
+		"purpose": "WORK",
+	})
+	reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "Knowledge Entry",
+		"type":    "reference",
+		"summary": "A knowledge entry",
+		"project": "testproj",
+		"purpose": "KNOWLEDGE",
+	})
+
+	result, err := reg.Call(ctx, "search_entries", map[string]interface{}{
+		"query":   "Entry",
+		"limit":   float64(10),
+		"project": "testproj",
+		"purpose": "WORK",
+	})
+	if err != nil {
+		t.Fatalf("search_entries with purpose filter failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("search_entries with purpose filter returned error: %s", result.Content[0].Text)
+	}
+	if !strings.Contains(result.Content[0].Text, "Work Entry") {
+		t.Errorf("expected 'Work Entry' in results, got: %s", result.Content[0].Text)
+	}
+	if strings.Contains(result.Content[0].Text, "Knowledge Entry") {
+		t.Error("should NOT find 'Knowledge Entry' when filtering by WORK purpose")
+	}
+}
