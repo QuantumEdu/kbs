@@ -15,21 +15,21 @@ Chain strategy: feature-branch-chain
 
 ## Phase 1: Domain (PR A)
 
-- [ ] 1.1 RED: Add `TestPurpose_IsValid` + `TestValidatePurpose` in `internal/domain/validation_test.go`.
-- [ ] 1.2 GREEN: Add `Purpose` type, 5 constants, `IsValid()` in `internal/domain/entry.go`. Add `ValidatePurpose()` in `internal/domain/validation.go`. Add `Purpose` to `Entry`. Add `Purpose *string` to `SearchQuery` in `filters.go`. Exclude `EntryFilter` (gate #2).
+- [x] 1.1 RED: Add `TestPurpose_IsValid` + `TestValidatePurpose` in `internal/domain/validation_test.go`.
+- [x] 1.2 GREEN: Add `Purpose` type, 5 constants, `IsValid()` in `internal/domain/entry.go`. Add `ValidatePurpose()` in `internal/domain/validation.go`. Add `Purpose` to `Entry`. Add `Purpose *string` to `SearchQuery` in `filters.go`. Exclude `EntryFilter` (gate #2).
 
 ## Phase 2: Database (PR A)
 
-- [ ] 2.1 RED: Purpose persistence round-trip test in `internal/app/app_test.go`.
-- [ ] 2.2 GREEN: Create `internal/db/migrations/007_purpose.sql` — explicit column list `INSERT INTO entries_new (..., purpose) SELECT ..., '' FROM entries`. Recreate indexes + FTS5. Add `purpose TEXT DEFAULT ''` + index to `internal/db/schema.sql`.
-- [ ] 2.3 GREEN: Update `internal/db/entries_store.go`: add `purpose` to `Save()` INSERT/ON CONFLICT, to `Get()`/`Search()`/`List()`/`SearchByTags()` SELECTs. Add `AND e.purpose = ?` in `Search()` when filter present.
-- [ ] 2.4 GREEN: Update `internal/db/import_export_store.go`: add `purpose` to `exportEntries()` SELECT and `ImportAll()` entry INSERT. Bump `exportSchemaVersion` to 3.
+- [x] 2.1 RED: Purpose persistence round-trip test in `internal/app/app_test.go`.
+- [x] 2.2 GREEN: Create `internal/db/migrations/007_purpose.sql` — explicit column list `INSERT INTO entries_new (..., purpose) SELECT ..., '' FROM entries`. Recreate indexes + FTS5. Add `purpose TEXT DEFAULT ''` + index to `internal/db/schema.sql`.
+- [x] 2.3 GREEN: Update `internal/db/entries_store.go`: add `purpose` to `Save()` INSERT/ON CONFLICT, to `Get()`/`Search()`/`List()`/`SearchByTags()` SELECTs. Add `AND e.purpose = ?` in `Search()` when filter present.
+- [x] 2.4 GREEN: Update `internal/db/import_export_store.go`: add `purpose` to `exportEntries()` SELECT and `ImportAll()` entry INSERT. Bump `exportSchemaVersion` to 3.
 
 ## Phase 3: App + CLI + MCP (PR A)
 
-- [ ] 3.1 GREEN: Add `Purpose` to `SaveEntryInput` in `internal/app/entries.go`. Validate non-empty in `SaveEntry()`, set on Entry. Pass through `SearchEntries()`.
-- [ ] 3.2 GREEN: Add `Purpose` to `AddEntryFlags`/`SearchFlags` in `internal/cli/commands.go` + `--purpose` flag. Test in `internal/cli/cli_test.go`.
-- [ ] 3.3 GREEN: Add `purpose` param to `save_entry`/`search_entries` MCP schemas in `internal/mcp/tools.go`. Extract in handlers.
+- [x] 3.1 GREEN: Add `Purpose` to `SaveEntryInput` in `internal/app/entries.go`. Validate non-empty in `SaveEntry()`, set on Entry. Pass through `SearchEntries()`.
+- [x] 3.2 GREEN: Add `Purpose` to `AddEntryFlags`/`SearchFlags` in `internal/cli/commands.go` + `--purpose` flag. Test in `internal/cli/cli_test.go`.
+- [x] 3.3 GREEN: Add `purpose` param to `save_entry`/`search_entries` MCP schemas in `internal/mcp/tools.go`. Extract in handlers.
 
 ## Phase 4: Run Bridge + MCP (PR B)
 
