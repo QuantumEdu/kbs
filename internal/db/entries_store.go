@@ -40,8 +40,8 @@ func (s *sqliteEntryStore) Save(ctx context.Context, entry domain.Entry, tags []
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO entries (id, name, title, slug, type, content, summary, body_optional, status, project_id, artifact_id, external_ref, tags_denorm, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		INSERT INTO entries (id, name, title, slug, type, content, summary, body_optional, purpose, status, project_id, artifact_id, external_ref, tags_denorm, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(id) DO UPDATE SET
 			name=excluded.name,
 			title=excluded.title,
@@ -50,13 +50,14 @@ func (s *sqliteEntryStore) Save(ctx context.Context, entry domain.Entry, tags []
 			content=excluded.content,
 			summary=excluded.summary,
 			body_optional=excluded.body_optional,
+			purpose=excluded.purpose,
 			status=excluded.status,
 			project_id=excluded.project_id,
 			artifact_id=excluded.artifact_id,
 			external_ref=excluded.external_ref,
 			tags_denorm=excluded.tags_denorm,
 			updated_at=CURRENT_TIMESTAMP
-	`, entry.ID, entry.Title, entry.Title, entry.Slug, string(entry.Type), entry.BodyOptional, entry.Summary, entry.BodyOptional, string(entry.Status), projectID, artifactID, entry.ExternalRef, tagsDenorm)
+	`, entry.ID, entry.Title, entry.Title, entry.Slug, string(entry.Type), entry.BodyOptional, entry.Summary, entry.BodyOptional, string(entry.Purpose), string(entry.Status), projectID, artifactID, entry.ExternalRef, tagsDenorm)
 	if err != nil {
 		return fmt.Errorf("upsert entry: %w", err)
 	}
@@ -86,10 +87,10 @@ func (s *sqliteEntryStore) Get(ctx context.Context, id string, includeArchived b
 	var status string
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, title, slug, type, project_id, summary, body_optional, status, artifact_id, COALESCE(external_ref,'')
+		SELECT id, title, slug, type, purpose, project_id, summary, body_optional, status, artifact_id, COALESCE(external_ref,'')
 		FROM entries WHERE (id = ? OR slug = ?)
 	`, id, id).Scan(&result.Entry.ID, &result.Entry.Title, &result.Entry.Slug, &result.Entry.Type,
-		&projectID, &summary, &bodyOptional, &status, &artifactID, &result.Entry.ExternalRef)
+		&result.Entry.Purpose, &projectID, &summary, &bodyOptional, &status, &artifactID, &result.Entry.ExternalRef)
 	if err == sql.ErrNoRows {
 		return result, fmt.Errorf("entry %q not found", id)
 	}
@@ -140,7 +141,7 @@ func (s *sqliteEntryStore) Search(ctx context.Context, q domain.SearchQuery) ([]
 		args = append(args, q.Query)
 	}
 
-	query := `SELECT e.id, e.title, e.slug, e.type, e.project_id, e.summary, e.body_optional, e.status, e.artifact_id, COALESCE(e.external_ref,'')
+	query := `SELECT e.id, e.title, e.slug, e.type, e.purpose, e.project_id, e.summary, e.body_optional, e.status, e.artifact_id, COALESCE(e.external_ref,'')
 		FROM entries_fts e_fts
 		JOIN entries e ON e.id = e_fts.id`
 
@@ -165,6 +166,10 @@ func (s *sqliteEntryStore) Search(ctx context.Context, q domain.SearchQuery) ([]
 			query += " AND e.type = ?"
 			args = append(args, *q.Type)
 		}
+		if q.Purpose != nil && *q.Purpose != "" {
+			query += " AND e.purpose = ?"
+			args = append(args, *q.Purpose)
+		}
 	}
 
 	query += " ORDER BY rank"
@@ -186,7 +191,7 @@ func (s *sqliteEntryStore) Search(ctx context.Context, q domain.SearchQuery) ([]
 		var summary sql.NullString
 		var bodyOptional sql.NullString
 		var status string
-		if err := rows.Scan(&r.Entry.ID, &r.Entry.Title, &r.Entry.Slug, &r.Entry.Type, &projectID,
+		if err := rows.Scan(&r.Entry.ID, &r.Entry.Title, &r.Entry.Slug, &r.Entry.Type, &r.Entry.Purpose, &projectID,
 			&summary, &bodyOptional, &status, &artifactID, &r.Entry.ExternalRef); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
@@ -236,7 +241,7 @@ func (s *sqliteEntryStore) SearchByTags(ctx context.Context, tags []string, matc
 		limit = 20
 	}
 
-	query := "SELECT e.id, e.title, e.slug, e.type, e.project_id, e.summary, e.body_optional, e.status, e.artifact_id, COALESCE(e.external_ref,'') FROM entries e JOIN entry_tags et ON e.id = et.entry_id WHERE e.status != 'archived' AND et.tag IN (" + placeholders(len(tags)) + ")"
+	query := "SELECT e.id, e.title, e.slug, e.type, e.purpose, e.project_id, e.summary, e.body_optional, e.status, e.artifact_id, COALESCE(e.external_ref,'') FROM entries e JOIN entry_tags et ON e.id = et.entry_id WHERE e.status != 'archived' AND et.tag IN (" + placeholders(len(tags)) + ")"
 	var args []interface{}
 	for _, t := range tags {
 		args = append(args, t)
@@ -280,7 +285,7 @@ func (s *sqliteEntryStore) SearchByTags(ctx context.Context, tags []string, matc
 
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.result.Entry.ID, &r.result.Entry.Title, &r.result.Entry.Slug, &r.result.Entry.Type,
+		if err := rows.Scan(&r.result.Entry.ID, &r.result.Entry.Title, &r.result.Entry.Slug, &r.result.Entry.Type, &r.result.Entry.Purpose,
 			&r.projectID, &r.summary, &r.bodyOptional, &r.status, &r.artifactID, &r.result.Entry.ExternalRef); err != nil {
 			return nil, fmt.Errorf("scan search by tags: %w", err)
 		}
@@ -348,7 +353,7 @@ func (s *sqliteEntryStore) Archive(ctx context.Context, id string) error {
 }
 
 func (s *sqliteEntryStore) List(ctx context.Context, filter domain.EntryFilter) ([]domain.EntryListResult, error) {
-	query := "SELECT e.id, e.title, e.slug, e.type, e.project_id, e.summary, e.body_optional, e.status, e.artifact_id, COALESCE(e.external_ref,'') FROM entries e WHERE 1=1"
+	query := "SELECT e.id, e.title, e.slug, e.type, e.purpose, e.project_id, e.summary, e.body_optional, e.status, e.artifact_id, COALESCE(e.external_ref,'') FROM entries e WHERE 1=1"
 	var args []interface{}
 
 	if !filter.IncludeArchived {
@@ -383,7 +388,7 @@ func (s *sqliteEntryStore) List(ctx context.Context, filter domain.EntryFilter) 
 
 	for rows.Next() {
 		var r row
-		if err := rows.Scan(&r.entry.Entry.ID, &r.entry.Entry.Title, &r.entry.Entry.Slug, &r.entry.Entry.Type,
+		if err := rows.Scan(&r.entry.Entry.ID, &r.entry.Entry.Title, &r.entry.Entry.Slug, &r.entry.Entry.Type, &r.entry.Entry.Purpose,
 			&r.projID, &r.summary, &r.bodyOptional, &r.status, &r.artifactID, &r.entry.Entry.ExternalRef); err != nil {
 			return nil, fmt.Errorf("scan entry: %w", err)
 		}
