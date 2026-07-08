@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS entries (
             type            TEXT NOT NULL CHECK(type IN ('prompt','skill','workflow_note','reference','user','feedback','project_state','session','decision','artifact_summary','handoff','routing')),
     summary         TEXT DEFAULT '',
     body_optional   TEXT DEFAULT '',
+    purpose         TEXT DEFAULT '',
     status          TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('draft','active','archived','deprecated','canonical')),
     project_id      TEXT REFERENCES projects(id),
     artifact_id     TEXT,
@@ -156,6 +157,7 @@ CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(type);
 CREATE INDEX IF NOT EXISTS idx_entries_project_id ON entries(project_id);
 CREATE INDEX IF NOT EXISTS idx_entries_status ON entries(status) WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS idx_entries_slug ON entries(slug);
+CREATE INDEX IF NOT EXISTS idx_entries_purpose ON entries(purpose);
 CREATE INDEX IF NOT EXISTS idx_projects_slug ON projects(slug);
 CREATE INDEX IF NOT EXISTS idx_tags_slug ON tags(slug);
 CREATE INDEX IF NOT EXISTS idx_entry_tags_tag ON entry_tags(tag);
