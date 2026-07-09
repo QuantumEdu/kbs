@@ -620,6 +620,31 @@ func ParseRouteFlags(args []string) (*RouteFlags, error) {
 	return flags, nil
 }
 
+// StatsFlags holds parsed stats command flags.
+type StatsFlags struct {
+	WorkflowRuns bool
+	JSON         bool
+}
+
+// ParseStatsFlags parses stats-specific flags from args.
+func ParseStatsFlags(args []string) (*StatsFlags, error) {
+	flags := &StatsFlags{}
+
+	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
+	fs.BoolVar(&flags.WorkflowRuns, "workflow-runs", false, "Include workflow run analytics")
+	fs.BoolVar(&flags.JSON, "json", false, "Output as JSON")
+
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 2 {
+		if err := fs.Parse(args[2:]); err != nil {
+			return nil, fmt.Errorf("parse stats flags: %w", err)
+		}
+	}
+
+	return flags, nil
+}
+
 // nullWriter discards writes (used to suppress flag package errors).
 type nullWriter struct{}
 

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/quantum-6/skillvault/internal/db"
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
@@ -155,5 +156,57 @@ func TestFormatStats_WithToday(t *testing.T) {
 	t.Logf("Stats output: %s", out)
 	if out == "" {
 		t.Error("FormatStats returned empty string")
+	}
+}
+
+type mockWorkflowRunStore struct {
+	stats *db.WorkflowRunStats
+}
+
+func (m *mockWorkflowRunStore) GetRunStats(ctx context.Context, workflowID *string) (*db.WorkflowRunStats, error) {
+	return m.stats, nil
+}
+
+// Task 1.8: TestGetStats_WorkflowRunsPopulated
+func TestGetStats_WorkflowRunsPopulated(t *testing.T) {
+	mockWRS := &mockWorkflowRunStore{
+		stats: &db.WorkflowRunStats{
+			TotalRuns:     10,
+			CompletedRuns: 7,
+			FailedRuns:    2,
+		},
+	}
+	svc := NewStatsService(&mockEntryStore{}, &mockArtifactStore{}, &mockProjectStore{})
+	svc.WithWorkflowRunStore(mockWRS)
+
+	stats, err := svc.GetStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetStats: %v", err)
+	}
+	if stats.WorkflowRuns == nil {
+		t.Fatal("WorkflowRuns should be populated, got nil")
+	}
+	if stats.WorkflowRuns.TotalRuns != 10 {
+		t.Errorf("WorkflowRuns.TotalRuns = %d, want 10", stats.WorkflowRuns.TotalRuns)
+	}
+	if stats.WorkflowRuns.CompletedRuns != 7 {
+		t.Errorf("WorkflowRuns.CompletedRuns = %d, want 7", stats.WorkflowRuns.CompletedRuns)
+	}
+	if stats.WorkflowRuns.FailedRuns != 2 {
+		t.Errorf("WorkflowRuns.FailedRuns = %d, want 2", stats.WorkflowRuns.FailedRuns)
+	}
+}
+
+// Task 1.9: TestGetStats_NoWorkflowRunsWhenStoreNil
+func TestGetStats_NoWorkflowRunsWhenStoreNil(t *testing.T) {
+	svc := NewStatsService(&mockEntryStore{}, &mockArtifactStore{}, &mockProjectStore{})
+	// Do NOT call WithWorkflowRunStore — workflowRunStore stays nil.
+
+	stats, err := svc.GetStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetStats: %v", err)
+	}
+	if stats.WorkflowRuns != nil {
+		t.Errorf("WorkflowRuns should be nil without store, got %+v", stats.WorkflowRuns)
 	}
 }
