@@ -502,6 +502,7 @@ func ParseExportPackFlags(args []string) (*ExportPackFlags, error) {
 	flags := &ExportPackFlags{Pack: true, OutputPath: "skillvault-pack.svpack"}
 
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
+	fs.BoolVar(&flags.Pack, "pack", true, "Export as a skill pack (.svpack) with metadata")
 	fs.StringVar(&flags.Author, "author", "", "Pack author (required)")
 	fs.StringVar(&flags.Version, "version", "", "Pack version (required)")
 	fs.StringVar(&flags.Description, "description", "", "Pack description")

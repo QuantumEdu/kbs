@@ -644,13 +644,15 @@ func runCLI(cmd string) {
 		fmt.Printf("  Learnings: %d\n", len(input.Learnings))
 
 	case "export":
-		flags, err := cli.ParseExportFlags(os.Args)
-		if err != nil {
-			cli.PrintError(err)
-			os.Exit(1)
+		packMode := false
+		for _, a := range os.Args {
+			if a == "--pack" {
+				packMode = true
+				break
+			}
 		}
 
-		if flags.Pack {
+		if packMode {
 			packFlags, err := cli.ParseExportPackFlags(os.Args)
 			if err != nil {
 				cli.PrintError(err)
@@ -667,6 +669,12 @@ func runCLI(cmd string) {
 			}
 			fmt.Printf("Pack exported to %s\n", packFlags.OutputPath)
 			return
+		}
+
+		flags, err := cli.ParseExportFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
 		}
 
 		if err := svc.exportSvc.Export(ctx, flags.OutputPath); err != nil {
