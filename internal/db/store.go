@@ -30,12 +30,41 @@ type WorkflowStore interface {
 	List(ctx context.Context, includeArchived bool) ([]domain.Workflow, error)
 }
 
+// WorkflowRunStats holds aggregated run analytics.
+type WorkflowRunStats struct {
+	TotalRuns       int
+	CompletedRuns   int
+	FailedRuns      int
+	AvgDurationSecs float64
+	MaxDurationSecs float64
+	MinDurationSecs float64
+	FailedStepCount int
+	PerWorkflow     []WorkflowRunPerWorkflow
+}
+
+// WorkflowRunPerWorkflow holds per-workflow aggregate metrics.
+type WorkflowRunPerWorkflow struct {
+	WorkflowID      string
+	TotalRuns       int
+	CompletedRuns   int
+	AvgDurationSecs float64
+}
+
+// RunProgress holds step completion progress for a single run.
+type RunProgress struct {
+	RunID          string
+	CompletedSteps int
+	TotalSteps     int
+}
+
 type WorkflowRunStore interface {
 	CreateRun(ctx context.Context, run domain.WorkflowRun, steps []domain.WorkflowRunStep) error
 	GetRun(ctx context.Context, id string) (domain.WorkflowRun, []domain.WorkflowRunStep, error)
 	ListRuns(ctx context.Context, workflowID string, limit int) ([]domain.WorkflowRun, error)
 	UpdateStepStatus(ctx context.Context, stepID string, status domain.RunStatus, output string) error
 	UpdateRunStatus(ctx context.Context, runID string, status domain.RunStatus, output string) error
+	GetRunStats(ctx context.Context, workflowID *string) (*WorkflowRunStats, error)
+	ListAllRuns(ctx context.Context, workflowID *string, limit, offset int) ([]domain.WorkflowRun, []RunProgress, error)
 }
 
 type SeriesStore interface {
