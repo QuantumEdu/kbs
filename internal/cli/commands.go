@@ -102,6 +102,8 @@ func ParseCommand(args []string) (string, error) {
 		return sub, nil
 	case "save-result":
 		return sub, nil
+	case "update":
+		return sub, nil
 	case "sync":
 		if len(args) < 3 {
 			return "", fmt.Errorf("sync requires a subcommand (push, pull)")
@@ -752,6 +754,30 @@ func ParseStatsFlags(args []string) (*StatsFlags, error) {
 	if len(args) > 2 {
 		if err := fs.Parse(args[2:]); err != nil {
 			return nil, fmt.Errorf("parse stats flags: %w", err)
+		}
+	}
+
+	return flags, nil
+}
+
+// UpdateFlags holds parsed update command flags.
+type UpdateFlags struct {
+	Repo        string
+	InstallPath string
+}
+
+// ParseUpdateFlags parses update-specific flags from args.
+func ParseUpdateFlags(args []string) (*UpdateFlags, error) {
+	flags := &UpdateFlags{}
+
+	fs := flag.NewFlagSet("update", flag.ContinueOnError)
+	fs.StringVar(&flags.Repo, "repo", "", "Path to local git repo (overrides SKILLVAULT_REPO)")
+	fs.StringVar(&flags.InstallPath, "install-path", "", "Path to install the rebuilt binary (overrides SKILLVAULT_INSTALL_PATH)")
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 2 {
+		if err := fs.Parse(args[2:]); err != nil {
+			return nil, fmt.Errorf("parse update flags: %w", err)
 		}
 	}
 

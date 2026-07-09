@@ -65,6 +65,10 @@ func TestParseSubcommand(t *testing.T) {
 		// TUI command
 		{"tui", []string{"skillvault", "tui"}, "tui", false},
 
+		// Update command
+		{"update", []string{"skillvault", "update"}, "update", false},
+		{"update with flags", []string{"skillvault", "update", "--repo", "/tmp/kbs", "--install-path", "/tmp/sv"}, "update", false},
+
 		// Route command
 		{"route", []string{"skillvault", "route", "research"}, "route", false},
 		{"route no arg", []string{"skillvault", "route"}, "route", false},
@@ -1051,5 +1055,56 @@ func TestParseImportFlagsWithPrefix(t *testing.T) {
 	}
 	if !flags.Pack {
 		t.Error("expected Pack=true")
+	}
+}
+
+func TestParseUpdateFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		want    UpdateFlags
+		wantErr bool
+	}{
+		{
+			name: "no flags",
+			args: []string{"skillvault", "update"},
+			want: UpdateFlags{},
+		},
+		{
+			name: "with repo flag",
+			args: []string{"skillvault", "update", "--repo", "/tmp/kbs"},
+			want: UpdateFlags{Repo: "/tmp/kbs"},
+		},
+		{
+			name: "with install-path flag",
+			args: []string{"skillvault", "update", "--install-path", "/home/ubuntu/tools/skillvault"},
+			want: UpdateFlags{InstallPath: "/home/ubuntu/tools/skillvault"},
+		},
+		{
+			name: "both flags",
+			args: []string{"skillvault", "update", "--repo", "/opt/source", "--install-path", "/opt/bin/sv"},
+			want: UpdateFlags{Repo: "/opt/source", InstallPath: "/opt/bin/sv"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flags, err := ParseUpdateFlags(tt.args)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseUpdateFlags failed: %v", err)
+			}
+			if flags.Repo != tt.want.Repo {
+				t.Errorf("Repo = %q, want %q", flags.Repo, tt.want.Repo)
+			}
+			if flags.InstallPath != tt.want.InstallPath {
+				t.Errorf("InstallPath = %q, want %q", flags.InstallPath, tt.want.InstallPath)
+			}
+		})
 	}
 }

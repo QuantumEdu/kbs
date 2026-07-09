@@ -111,6 +111,10 @@ skillvault version
 
 That's it. One binary. No daemon, no database server, no frameworks.
 
+> **Self-update**: Use `skillvault update` to rebuild and reinstall from source.
+> Configure the source repo with `SKILLVAULT_REPO` env var and target path with
+> `SKILLVAULT_INSTALL_PATH`. See `skillvault update --help` for details.
+
 ---
 
 ## Quickstart
@@ -255,6 +259,7 @@ cmd/skillvault/
 | `version` | Show vault version | `skillvault version` |
 | `compare-entries` | Vector similarity between two entries | `skillvault compare-entries e1 e2` |
 | `stats` | Show vault statistics and entry counts | `skillvault stats [--workflow-runs] [--json]` |
+| `update` | Rebuild and reinstall binary from source | `skillvault update [--repo <path>] [--install-path <path>]` |
 
 ---
 

@@ -1,4 +1,4 @@
-# CLI Reference — 36 commands
+# CLI Reference — 37 commands
 
 All entries use **slugs** as identifiers. A slug is the title in kebab-case: `"Clean Architecture Review"` → `clean-architecture-review`.
 
@@ -592,6 +592,41 @@ With `--workflow-runs`, the output appends a workflow run summary: total runs, r
 With `--json`, all statistics are printed as a single JSON object (workflow run analytics are included automatically — no separate flag needed).
 
 **MCP equivalent:** `get_stats`, `list_workflow_runs`, `get_run` (see [`docs/mcp.md`](mcp.md)).
+
+---
+
+## `update`
+
+Rebuild and reinstall the skillvault binary from the local git repo.
+
+```bash
+skillvault update
+skillvault update --repo /opt/kbs --install-path ~/tools/skillvault
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--repo` | ❌ | Path to local git repo (overrides `SKILLVAULT_REPO`) |
+| `--install-path` | ❌ | Path to install the rebuilt binary (overrides `SKILLVAULT_INSTALL_PATH`) |
+
+**Environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `SKILLVAULT_REPO` | Path to the local git repo (default: `/home/ubuntu/dev/kbs`) |
+| `SKILLVAULT_INSTALL_PATH` | Path where the rebuilt binary will be installed (default: current executable path) |
+
+**Resolution order** (first non-empty value wins):
+
+1. **Repo path**: `--repo` flag → `SKILLVAULT_REPO` env → parent of current executable if it is inside a `kbs` git repo → `/home/ubuntu/dev/kbs`
+2. **Install path**: `--install-path` flag → `SKILLVAULT_INSTALL_PATH` env → `os.Executable()` → `/home/ubuntu/tools/skillvault`
+
+**Steps performed:**
+
+1. Validate the repo is a git repository (`git rev-parse --git-dir`)
+2. Pull latest changes (`git pull`)
+3. Build the binary with stripped debug info (`go build -ldflags="-s -w"`)
+4. Atomically replace the current binary (`os.Rename`)
 
 ---
 

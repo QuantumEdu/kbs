@@ -53,7 +53,7 @@ Orquesta el dominio y los stores. Cada servicio expone operaciones de alto nivel
 
 Tres formas de hablar con SkillVault:
 
-1. **CLI** (`internal/cli/`) — 25+ comandos planos con `flag` de stdlib. Sin Cobra, sin frameworks. Incluye `import-workflow` (importación YAML desde workflow-builder) y `route` para enrutamiento de escenarios.
+1. **CLI** (`internal/cli/`) — 37 comandos planos con `flag` de stdlib.
 2. **MCP** (`internal/mcp/`) — Servidor JSON-RPC 2.0 sobre stdio. 24 herramientas. Expone `run_workflow` (ejecución estructurada con inputs por step), `route_scenario` (resolución de escenarios), `get_stats` (estadísticas del vault), `list_workflow_runs` (historial de ejecuciones), `get_run` (detalle de ejecución), `list_entry_versions` (historial de versiones de una entrada), y `restore_entry_version` (restaurar entrada a una versión previa). El CLI `run` se mantiene stdin/stdout para pipelines.
 3. **HTTP API** (`internal/api/`) — Esqueleto vacío. Futuro.
 
@@ -181,7 +181,7 @@ Dos modos:
 | Decisión | Razón |
 |----------|-------|
 | Sin ORM | SQLite queries son simples, el overhead de un ORM no aporta |
-| Sin Cobra | `flag` de stdlib alcanza para 25+ comandos planos |
+| Sin Cobra | `flag` de stdlib alcanza para 37 comandos planos |
 | Slugs como IDs | Legibles, estables, se pueden usar en URLs y MCP |
 | Soft delete | No se pierde history; `archived` excluye de context |
 | `modernc.org/sqlite` | Única dependencia externa. Sin CGO. Binario portable. |

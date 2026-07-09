@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
@@ -63,6 +64,7 @@ var commandDescs = map[string]string{
 	"entry-history":        "Show version history for an entry",
 	"entry-restore":        "Restore an entry to a previous version",
 	"tui":                  "Start the interactive Bubble Tea terminal UI",
+	"update":              "Rebuild and reinstall the skillvault binary from source",
 }
 
 func traceCmd(cmd string) {
@@ -143,6 +145,9 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Fprintln(os.Stderr, "[sk-vault] HTTP API server shut down.")
+	case "update":
+		traceCmd("update")
+		runUpdate()
 	default:
 		traceCmd(cmd)
 		runCLI(cmd)
@@ -189,6 +194,106 @@ func runInit() {
 	}
 
 	fmt.Println("SkillVault initialized at", vd)
+}
+
+func runUpdate() {
+	flags, err := cli.ParseUpdateFlags(os.Args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[sk-vault] error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Resolve repo path in order of priority:
+	//   1. --repo flag  2. SKILLVAULT_REPO env  3. Parent dir of executable if it's inside a kbs git repo  4. Default
+	repoPath := flags.Repo
+	if repoPath == "" {
+		repoPath = os.Getenv("SKILLVAULT_REPO")
+	}
+	if repoPath == "" {
+		if execPath, err := os.Executable(); err == nil {
+			absExec, _ := filepath.Abs(execPath)
+			parent := filepath.Dir(absExec)
+			if info, err := os.Stat(filepath.Join(parent, ".git")); err == nil && info.IsDir() {
+				repoPath = parent
+			}
+		}
+	}
+	if repoPath == "" {
+		repoPath = "/home/ubuntu/dev/kbs"
+	}
+
+	// Resolve install path in order of priority:
+	//   1. --install-path flag  2. SKILLVAULT_INSTALL_PATH env  3. Current executable path  4. Default
+	installPath := flags.InstallPath
+	if installPath == "" {
+		installPath = os.Getenv("SKILLVAULT_INSTALL_PATH")
+	}
+	if installPath == "" {
+		if execPath, err := os.Executable(); err == nil {
+			installPath = execPath
+		}
+	}
+	if installPath == "" {
+		installPath = "/home/ubuntu/tools/skillvault"
+	}
+
+	// Step 1: Validate repo exists and is a git repo.
+	if err := exec.Command("git", "-C", repoPath, "rev-parse", "--git-dir").Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "[sk-vault] error: %s is not a git repository\n", repoPath)
+		os.Exit(1)
+	}
+
+	// Step 2: Pull latest changes.
+	fmt.Fprintf(os.Stderr, "[sk-vault] pulling latest from %s ...\n", repoPath)
+	pullCmd := exec.Command("git", "-C", repoPath, "pull")
+	pullCmd.Stdout = os.Stdout
+	pullCmd.Stderr = os.Stderr
+	if err := pullCmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "[sk-vault] error: git pull failed in %s: %v\n", repoPath, err)
+		os.Exit(1)
+	}
+
+	// Step 3: Build to a temporary path (same directory as install target for atomic rename).
+	installDir := filepath.Dir(installPath)
+	tmpFile, err := os.CreateTemp(installDir, ".skillvault-build-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[sk-vault] error: create temp file in %s: %v\n", installDir, err)
+		os.Exit(1)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+
+	fmt.Fprintf(os.Stderr, "[sk-vault] building from %s ...\n", repoPath)
+	buildCmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", tmpPath, "./cmd/skillvault")
+	buildCmd.Dir = repoPath
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		os.Remove(tmpPath)
+		fmt.Fprintf(os.Stderr, "[sk-vault] error: go build failed: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Step 4: Make temp binary executable.
+	if err := os.Chmod(tmpPath, 0755); err != nil {
+		os.Remove(tmpPath)
+		fmt.Fprintf(os.Stderr, "[sk-vault] error: chmod temp binary: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Step 5: Atomically replace install path with temp binary.
+	if err := os.Rename(tmpPath, installPath); err != nil {
+		os.Remove(tmpPath)
+		fmt.Fprintf(os.Stderr, "[sk-vault] error: install to %s: %v\n", installPath, err)
+		os.Exit(1)
+	}
+
+	// Step 6: Print success message with new version.
+	verCmd := exec.Command(installPath, "version")
+	verCmd.Stdout = os.Stdout
+	verCmd.Stderr = os.Stderr
+	_ = verCmd.Run()
+	fmt.Printf("[sk-vault] update: rebuilt and installed to %s\n", installPath)
 }
 
 func openVault() *vaultServices {
