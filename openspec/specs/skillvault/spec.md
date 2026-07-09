@@ -223,7 +223,7 @@ See spec §9 (§9.1–§9.2).
 | ID | Requirement | Strength |
 |----|-------------|----------|
 | REQ-CLI-01 | Binary name: `skillvault` | MUST |
-| REQ-CLI-02 | Required commands: `init`, `add-entry`, `search`, `get`, `save-artifact`, `save-result`, `get-context`, `add-project`, `list-projects`, `archive`, `add-workflow`, `render-workflow`, `run`, `session-wrap`, `export`, `import`, `sync`, `tui`, `version`, `compare-entries`, `setup-vectors`, `reindex-embeddings`, `stats` | MUST |
+| REQ-CLI-02 | Required commands: `init`, `add-entry`, `search`, `get`, `save-artifact`, `save-result`, `get-context`, `add-project`, `list-projects`, `archive`, `add-workflow`, `render-workflow`, `run`, `session-wrap`, `export`, `import`, `sync`, `tui`, `version`, `compare-entries`, `setup-vectors`, `reindex-embeddings`, `stats`, `entry history`, `entry restore` | MUST |
 | REQ-CLI-03 | `init` creates `~/.skillvault/vault.db`, `objects/`, `exports/`, `cache/` | MUST |
 | REQ-CLI-04 | `add-entry` accepts `--title`, `--type`, `--summary` (required), `--body`, `--project`, `--tags`, `--status`, `--purpose` (optional) | MUST |
 | REQ-CLI-05 | `save-artifact` accepts `--title`, `--type`, `--file` (required), `--project`, `--summary`, `--tags`, `--source` (optional) | MUST |
@@ -260,16 +260,18 @@ See spec §9 (§9.1–§9.2).
 - GIVEN no routing entries match the scenario, WHEN `skillvault route nonexistent` runs, THEN message shows "No routing entries found" with creation hint (`add-entry --type routing`) AND exit code is non-zero.
 - GIVEN two routing entries: one with invalid YAML, one valid matching the scenario, WHEN `skillvault route <scenario>` runs, THEN malformed entry is skipped with stderr warning AND valid entry resolves and displays.
 - GIVEN routing entry references a deleted workflow slug, WHEN `skillvault route <scenario>` runs, THEN warning "Referenced workflow X not found" prints AND resolution continues to other entries.
+- GIVEN entry E with 3 versions, WHEN `skillvault entry history <E>` runs, THEN version list is printed with version_number, title, saved_at.
+- GIVEN entry E exists with version 1, WHEN `skillvault entry restore <E> --version 1` runs, THEN version 1 content is restored and a new version captures the pre-restore state.
 
 ---
 
-## Capability 12: MCP Tools (22)
+## Capability 12: MCP Tools (24)
 
 See spec §10 (§10.1–§10.12).
 
 | ID | Requirement | Strength |
 |----|-------------|----------|
-| REQ-MCP-01 | 22 MCP tools: `save_entry`, `search_entries`, `get_entry`, `save_artifact`, `get_context`, `compose_series`, `render_workflow`, `session_wrap`, `archive_entry`, `list_projects`, `search_by_tags`, `get_context_bundle`, `save_entry_ref`, `list_entry_refs`, `get_entry_graph`, `compare_entries`, `save_result`, `run_workflow`, `route_scenario`, `get_stats`, `list_workflow_runs`, `get_run` | MUST |
+| REQ-MCP-01 | 24 MCP tools: `save_entry`, `search_entries`, `get_entry`, `save_artifact`, `get_context`, `compose_series`, `render_workflow`, `session_wrap`, `archive_entry`, `list_projects`, `search_by_tags`, `get_context_bundle`, `save_entry_ref`, `list_entry_refs`, `get_entry_graph`, `compare_entries`, `save_result`, `run_workflow`, `route_scenario`, `get_stats`, `list_workflow_runs`, `get_run`, `list_entry_versions`, `restore_entry_version` | MUST |
 | REQ-MCP-02 | `save_entry`: `title`, `type`, `summary`, `body`(opt), `project`(opt), `tags`, `status`, `purpose`(opt); rejects secrets | MUST |
 | REQ-MCP-03 | `search_entries`: `query`, `type`(opt), `project`(opt), `tags`, `purpose`(opt), `include_archived`(default false), `limit`(default 10), `vector`(opt bool, default false) | MUST |
 | REQ-MCP-04 | `get_entry`: returns entry by ID/slug with artifact ref if linked | MUST |
@@ -309,6 +311,8 @@ See spec §10 (§10.1–§10.12).
 - GIVEN run_id "nonexistent", WHEN `get_run` called, THEN error: run not found.
 - GIVEN valid `save_result` call with `name` and `content`, WHEN invoked, THEN returns `entry_id`, `name`, `type`, `project_id`.
 - GIVEN `save_result` call missing `name` or `content`, WHEN invoked, THEN returns validation error with context.
+- GIVEN entry E has 2 versions, WHEN MCP `list_entry_versions` is called with `entry_id=E`, THEN versions returned in descending order with version_number, title, saved_at.
+- GIVEN entry E has version 1, WHEN MCP `restore_entry_version` is called with `entry_id=E, version=1`, THEN version 1 content becomes current and a new version captures pre-restore state.
 
 ---
 
@@ -680,6 +684,43 @@ Aggregate run metrics and progress tracking from existing `runs`/`run_steps`. No
 
 ---
 
+## Capability 32: Entry Versioning
+
+> Source: `skillvault-versioning-pack` delta spec (PRs #33-#36).
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-VER-01 | `entry_versions` table with columns: `version_id` TEXT PK, `entry_id` TEXT NOT NULL REFERENCES entries(id), `version_number` INTEGER NOT NULL, `title` TEXT NOT NULL, `summary` TEXT DEFAULT '', `body_optional` TEXT DEFAULT '', `saved_at` DATETIME DEFAULT CURRENT_TIMESTAMP. UNIQUE on `(entry_id, version_number)`. | MUST |
+| REQ-VER-02 | `ListVersions(entry_id)` returns all versions for an entry ordered by `version_number` DESC. Each result includes `version_id`, `entry_id`, `version_number`, `title`, `summary`, `body_optional`, `saved_at`. | MUST |
+| REQ-VER-03 | `RestoreVersion(entry_id, version_number)` retrieves version content (title, summary, body_optional) and calls `Save()` to create a new current version with that content. The restore itself auto-creates a new version row capturing the state before restore. | MUST |
+
+**Scenarios**:
+- GIVEN entry E exists, WHEN migration 009 runs, THEN `entry_versions` table is created with correct schema.
+- GIVEN entry E is saved twice with title changes, WHEN `entry_versions` is queried by E's `entry_id`, THEN two version rows exist with `version_number` 1 and 2.
+- GIVEN entry E has 3 versions, WHEN `skillvault entry history <E>` is called, THEN versions are listed in descending order showing version number, title, and saved_at.
+- GIVEN entry E has 0 versions (never updated), WHEN `ListVersions` is called, THEN empty list returned with no error.
+- GIVEN entry E has version 1 (title "A") and current version 2 (title "B"), WHEN `skillvault entry restore <E> --version 1` runs, THEN current title is "A", AND a new version 3 is created recording "B" as previous state.
+- GIVEN version 99 does not exist for entry E, WHEN `restore --version 99` is called, THEN error: "version 99 not found for entry <E>".
+
+---
+
+## Capability 33: Skill Pack Export/Import
+
+> Source: `skillvault-versioning-pack` delta spec (PRs #33-#36).
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-PACK-01 | `VaultPackExport` struct wraps `VaultExport` with additional fields: `pack_id` (unique, auto-generated), `author`, `version` (semver string), `description`, `exported_at` (RFC 3339). Output JSON has top-level `pack` key containing pack metadata and nested `data` key with `VaultExport`. CLI: `skillvault export --pack "Name" --author "user" --version "1.0" --output pack.svpack`. When `--pack` is omitted, export produces bare `VaultExport` (existing behavior). | MUST |
+| REQ-PACK-02 | Import detects pack format by the presence of a `pack` key at the top level. When `pack` is present: entry IDs, project IDs, and all foreign key references are prefixed with the `--prefix` value (e.g., `"shared/"`). When `pack` is absent, import proceeds as bare `VaultExport` (backward compat). CLI: `skillvault import --pack pack.svpack --prefix "imported/"`. Prefix default: `""` (no prefix). Slug conflict resolution applies after prefixing. | MUST |
+
+**Scenarios**:
+- GIVEN vault with 5 entries and 1 project, WHEN `skillvault export --pack "My Pack" --author "alice" --version "1.0" --output pack.svpack`, THEN output JSON has `pack` key with `pack_id`, `author`, `version`, `description`, `exported_at`, and nested `data` matching `VaultExport`.
+- GIVEN pack file with entry ID `abc-123`, WHEN `skillvault import --pack pack.svpack --prefix "shared/"` runs, THEN imported entry ID becomes `shared/abc-123`, AND all foreign keys referencing `abc-123` are rewritten to `shared/abc-123`.
+- GIVEN bare export file `bare.json` (no `pack` key), WHEN `skillvault import bare.json` runs, THEN import proceeds as bare `VaultExport` with no prefixing (backward compat).
+- GIVEN pack import with empty prefix, WHEN import runs, THEN entry IDs are imported as-is (no namespace).
+
+---
+
 ## Coverage Summary
 
 | Capability | Requirements | Scenarios |
@@ -694,8 +735,8 @@ Aggregate run metrics and progress tracking from existing `runs`/`run_steps`. No
 | EntryLink + Relation Types | 5 | 3 |
 | Multi-Status Model | 7 | 3 |
 | Hermes Context Layer (7 Modes) | 11 | 3 |
-| CLI Commands | 15 | 20 |
-| MCP Tools | 19 | 20 |
+| CLI Commands | 15 | 22 |
+| MCP Tools | 19 | 22 |
 | Secret Detection | 7 | 5 |
 | Search (FTS5 + Vector) | 5 | 3 |
 | Workflow Rendering | 4 | 4 |
@@ -715,6 +756,8 @@ Aggregate run metrics and progress tracking from existing `runs`/`run_steps`. No
 | HTTP API Key Authentication | 1 | 4 |
 | Graceful Shutdown | 1 | 2 |
 | Documentation | 2 | 2 |
-| **Total** | **181** | **141** |
+| Entry Versioning | 3 | 6 |
+| Skill Pack Export/Import | 2 | 4 |
+| **Total** | **186** | **155** |
 **Edge cases**: secret detection rejection, duplicate slug import conflict, archived exclusion in context and search, empty tag rejection, self-referencing link rejection, missing content/file_path on artifact save, max_chars truncation, TUI rebuild message on non-tagged build, sanitized credential logging on sync errors, auth bypass on `/health` endpoint, save_result missing required fields.
 **Error states**: invalid entry type, invalid relation type, invalid schema version on import, secret detected warning, missing required fields on CLI, unknown sync subcommand, TUI startup with no terminal (TTY check), 401 on missing/wrong API key, validation error on missing save_result required params.
