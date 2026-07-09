@@ -223,7 +223,7 @@ See spec §9 (§9.1–§9.2).
 | ID | Requirement | Strength |
 |----|-------------|----------|
 | REQ-CLI-01 | Binary name: `skillvault` | MUST |
-| REQ-CLI-02 | Required commands: `init`, `add-entry`, `search`, `get`, `save-artifact`, `save-result`, `get-context`, `add-project`, `list-projects`, `archive`, `add-workflow`, `render-workflow`, `run`, `session-wrap`, `export`, `import`, `sync`, `tui`, `version`, `compare-entries`, `setup-vectors`, `reindex-embeddings` | MUST |
+| REQ-CLI-02 | Required commands: `init`, `add-entry`, `search`, `get`, `save-artifact`, `save-result`, `get-context`, `add-project`, `list-projects`, `archive`, `add-workflow`, `render-workflow`, `run`, `session-wrap`, `export`, `import`, `sync`, `tui`, `version`, `compare-entries`, `setup-vectors`, `reindex-embeddings`, `stats` | MUST |
 | REQ-CLI-03 | `init` creates `~/.skillvault/vault.db`, `objects/`, `exports/`, `cache/` | MUST |
 | REQ-CLI-04 | `add-entry` accepts `--title`, `--type`, `--summary` (required), `--body`, `--project`, `--tags`, `--status`, `--purpose` (optional) | MUST |
 | REQ-CLI-05 | `save-artifact` accepts `--title`, `--type`, `--file` (required), `--project`, `--summary`, `--tags`, `--source` (optional) | MUST |
@@ -234,6 +234,8 @@ See spec §9 (§9.1–§9.2).
 | REQ-CLI-10 | `import` imports valid SkillVault JSON; conflict handling on duplicate slugs | MUST |
 | REQ-CLI-11 | `search` supports `--query`, `--type`, `--project`, `--tags`, `--include-archived`, `--limit`, `--vector`, `--purpose` | MUST |
 | REQ-CLI-12 | `run` executes workflows: `skillvault run <workflow> <file> [--save output.md]`. Input from file or stdin (`-`). Output to stdout or `--save` path. Sequential pipeline execution. Pre-flight validates entry existence and status. | MUST |
+| REQ-CLI-13 | `stats --workflow-runs` SHALL display per-workflow run metrics: total runs, success rate, avg duration, step completion ratio. | MUST |
+| REQ-CLI-14 | `stats --json` SHALL output all stats including workflow run analytics as structured JSON. | MUST |
 
 **Scenarios**:
 - GIVEN no vault exists, WHEN `skillvault init` runs, THEN `vault.db` plus `objects/`, `exports/`, `cache/` directories are created under `~/.skillvault/`.
@@ -250,16 +252,18 @@ See spec §9 (§9.1–§9.2).
 - GIVEN a running vault, WHEN `skillvault add-entry --title "Bad" --type reference --purpose INVALID`, THEN command exits with validation error indicating unrecognized purpose value.
 - GIVEN entries with purposes WORK, KNOWLEDGE, and empty, WHEN `skillvault search --purpose KNOWLEDGE`, THEN only KNOWLEDGE entries returned.
 - GIVEN entries with various purposes, WHEN `skillvault search --query "patterns"` without `--purpose`, THEN all matching entries returned regardless of purpose.
+- GIVEN workflow "research" has 5 runs, WHEN `skillvault stats --workflow-runs` runs, THEN per-workflow total_runs, success_rate, avg_duration, step_ratio displayed.
+- GIVEN vault with entries and workflow runs, WHEN `skillvault stats --json` runs, THEN valid JSON returned with `workflow_runs` block containing totals and per-workflow metrics.
 
 ---
 
-## Capability 12: MCP Tools (19)
+## Capability 12: MCP Tools (22)
 
 See spec §10 (§10.1–§10.12).
 
 | ID | Requirement | Strength |
 |----|-------------|----------|
-| REQ-MCP-01 | 19 MCP tools: `save_entry`, `search_entries`, `get_entry`, `save_artifact`, `get_context`, `compose_series`, `render_workflow`, `session_wrap`, `archive_entry`, `list_projects`, `search_by_tags`, `get_context_bundle`, `save_entry_ref`, `list_entry_refs`, `get_entry_graph`, `compare_entries`, `save_result`, `run_workflow`, `route_scenario` | MUST |
+| REQ-MCP-01 | 22 MCP tools: `save_entry`, `search_entries`, `get_entry`, `save_artifact`, `get_context`, `compose_series`, `render_workflow`, `session_wrap`, `archive_entry`, `list_projects`, `search_by_tags`, `get_context_bundle`, `save_entry_ref`, `list_entry_refs`, `get_entry_graph`, `compare_entries`, `save_result`, `run_workflow`, `route_scenario`, `get_stats`, `list_workflow_runs`, `get_run` | MUST |
 | REQ-MCP-02 | `save_entry`: `title`, `type`, `summary`, `body`(opt), `project`(opt), `tags`, `status`, `purpose`(opt); rejects secrets | MUST |
 | REQ-MCP-03 | `search_entries`: `query`, `type`(opt), `project`(opt), `tags`, `purpose`(opt), `include_archived`(default false), `limit`(default 10), `vector`(opt bool, default false) | MUST |
 | REQ-MCP-04 | `get_entry`: returns entry by ID/slug with artifact ref if linked | MUST |
@@ -274,6 +278,9 @@ See spec §10 (§10.1–§10.12).
 | REQ-MCP-13 | `get_context_bundle`: `project`(opt). Returns structured JSON — project info, entries grouped by type, artifact refs. Cross-refs Hermes Context Layer (Capability 10). | MUST |
 | REQ-MCP-18 | `run_workflow` MCP tool: delegates to `RunPipelineStructured`. Input: `workflow` (slug or ID, required), `steps` (map of step index → input text, required). Output: structured run result with `run_id`, `workflow_id`, `workflow_slug`, `status`, `steps` array (each with `step_index`, `status`, `output`, `error`), `started_at`, `finished_at`. All values JSON-RPC-compatible. | MUST |
 | REQ-MCP-19 | `route_scenario` MCP tool: wraps `EntryService.RouteScenario`. Input: `scenario` (string, required). Output: matched workflow (ID, slug, name, steps) and skill/entry metadata as JSON. Empty scenario rejected with validation error. No-match returns meaningful error. | MUST |
+| REQ-MCP-20 | `get_stats` SHALL return vault statistics with `workflow_runs` block: total_runs, success_rate, avg/max/min duration, failed_step_count, per-workflow metrics. | MUST |
+| REQ-MCP-21 | `list_workflow_runs` SHALL accept optional `workflow_id` and `limit` (default 20), returning run id, workflow_id, status, timestamps, and step completion ratio per run. | MUST |
+| REQ-MCP-22 | `get_run` SHALL accept `run_id` and return run metadata plus all run_steps with step_index, status, entry_id, output, and error (if failed). | MUST |
 
 **Scenarios**:
 - GIVEN `search_entries` with filters, WHEN results match, THEN entries returned with full metadata.
@@ -289,6 +296,10 @@ See spec §10 (§10.1–§10.12).
 - GIVEN step references a missing entry, WHEN `run_workflow` is called, THEN pre-flight validation rejects before any execution.
 - GIVEN routing entry associates scenario "write spec" with workflow "spec-plan-task", WHEN `route_scenario(scenario: "write spec")` is called, THEN response includes workflow slug "spec-plan-task" and related metadata.
 - GIVEN no routing entry matches "unknown task", WHEN `route_scenario(scenario: "unknown task")` is called, THEN response is error indicating no workflow matched.
+- GIVEN vault with entries, artifacts, projects, and workflow runs, WHEN `get_stats` called, THEN response includes entry/artifact/project counts AND `workflow_runs` analytics block.
+- GIVEN 10 runs across 2 workflows, WHEN `list_workflow_runs(workflow_id: "wf-1", limit: 5)` called, THEN up to 5 runs for wf-1 returned with status and step_ratio.
+- GIVEN run R with 3 steps, WHEN `get_run(run_id: "R")` called, THEN run metadata and steps array returned, each with status and output/error.
+- GIVEN run_id "nonexistent", WHEN `get_run` called, THEN error: run not found.
 
 ---
 
@@ -522,16 +533,16 @@ See delta spec `skillvault-v3-workflow-pipelines`.
 
 ## Capability 25: Entry Purpose Taxonomy
 
-The `purpose` field classifies entries by LifeOS purpose, orthogonal to entry type. Five values represent the v7.6 purpose model (minus OBSERVABILITY, deferred). Empty purpose is backward-compatible.
+The `purpose` field classifies entries by LifeOS purpose, orthogonal to entry type. Six values represent the v7.6 purpose model. Empty purpose is backward-compatible.
 
 | ID | Requirement | Strength |
 |----|-------------|----------|
-| REQ-PUR-01 | The system SHALL support five purpose values: `WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`. | MUST |
+| REQ-PUR-01 | The system SHALL support six purpose values: `WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`, `OBSERVABILITY`. | MUST |
 | REQ-PUR-02 | Empty purpose (`""`) SHALL be valid and represent "unset" — backward-compatible default for all existing entries and calls without purpose. | MUST |
 | REQ-PUR-03 | The system SHALL reject any purpose value not in the allowed set with a validation error naming the invalid value. | MUST |
 | REQ-PUR-04 | `search` CLI command and `search_entries` MCP tool SHALL accept an optional `--purpose` / `purpose` filter that returns only entries matching the given purpose value. | MUST |
-| REQ-PUR-05 | `add-entry` CLI SHALL accept optional `--purpose` flag accepting one of the five values. | MUST |
-| REQ-PUR-06 | `save_entry` MCP tool SHALL accept an optional `purpose` parameter accepting one of the five values or empty. | MUST |
+| REQ-PUR-05 | `add-entry` CLI SHALL accept optional `--purpose` flag accepting one of the six values. | MUST |
+| REQ-PUR-06 | `save_entry` MCP tool SHALL accept an optional `purpose` parameter accepting one of the six values or empty. | MUST |
 | REQ-PUR-07 | Export SHALL include the `purpose` field for each entry. Import SHALL restore it — full round-trip fidelity. | MUST |
 | REQ-PUR-08 | Purpose SHALL be stored as a `TEXT` column in the entries table, defaulting to empty string (`""`), added via migration 007. | MUST |
 
@@ -544,6 +555,8 @@ The `purpose` field classifies entries by LifeOS purpose, orthogonal to entry ty
 - GIVEN a running vault, WHEN `skillvault add-entry --title "Review" --type reference --purpose LEARNING`, THEN the entry is persisted with purpose LEARNING.
 - GIVEN an export containing entries with purposes WORK, KNOWLEDGE, and empty, WHEN the export is imported into a fresh vault, THEN all entries retain their original purpose values.
 - GIVEN entries with purposes WORK, KNOWLEDGE, LEARNING, and an empty-purpose entry, WHEN `skillvault search --purpose WORK`, THEN only WORK entries appear in results.
+- GIVEN OBSERVABILITY is a valid purpose, WHEN `save_entry` called with `purpose: "OBSERVABILITY"`, THEN entry persisted successfully.
+- GIVEN valid purposes now include OBSERVABILITY, WHEN `save_entry` called with `purpose: "INVALID_VALUE"`, THEN rejected with validation error.
 
 ---
 
@@ -592,6 +605,25 @@ Expose the existing `RouteScenario` capability (from PR #16) as an MCP tool. The
 
 ---
 
+## Capability 28: Workflow Analytics
+
+Aggregate run metrics and progress tracking from existing `runs`/`run_steps`. No schema changes.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-WFA-01 | Compute total_runs, success_rate (completed/total), avg/max/min duration, and failed_step_count from runs/run_steps | MUST |
+| REQ-WFA-02 | Compute completed/total step ratio per run for progress tracking | MUST |
+| REQ-WFA-03 | All metrics SHALL support per-workflow filtering | MUST |
+| REQ-WFA-04 | Empty data SHALL return zero values, not errors | MUST |
+
+**Scenarios**:
+- GIVEN 10 runs: 7 completed, 2 failed, 1 running, WHEN analytics queried, THEN total_runs=10, success_rate=0.7, failed_steps=count of run_steps with status 'failed'.
+- GIVEN workflow A has 5 runs, workflow B has 2 runs, WHEN analytics queried for workflow A, THEN metrics scoped to A only.
+- GIVEN no runs exist, WHEN analytics queried, THEN all metrics=0, no error.
+- GIVEN run R: 5 steps (3 completed, 2 pending), WHEN progress queried for R, THEN completed=3, total=5, ratio=0.6.
+
+---
+
 ## Coverage Summary
 
 | Capability | Requirements | Scenarios |
@@ -606,8 +638,8 @@ Expose the existing `RouteScenario` capability (from PR #16) as an MCP tool. The
 | EntryLink + Relation Types | 5 | 3 |
 | Multi-Status Model | 7 | 3 |
 | Hermes Context Layer (7 Modes) | 11 | 3 |
-| CLI Commands | 12 | 13 |
-| MCP Tools | 15 | 14 |
+| CLI Commands | 14 | 15 |
+| MCP Tools | 18 | 18 |
 | Secret Detection | 7 | 5 |
 | Search (FTS5 + Vector) | 5 | 3 |
 | Workflow Rendering | 4 | 4 |
@@ -620,9 +652,10 @@ Expose the existing `RouteScenario` capability (from PR #16) as an MCP tool. The
 | TUI (Build-Tag Gated) | 1 | 5 |
 | Vector Search (GloVe 300d) | 7 | 4 |
 | Entry Diff | 4 | 3 |
-| Entry Purpose Taxonomy | 8 | 8 |
+| Entry Purpose Taxonomy | 8 | 10 |
 | Workflow Run Bridge | 8 | 5 |
 | MCP Route Tool | 6 | 4 |
-| **Total** | **168** | **117** |
+| Workflow Analytics | 4 | 4 |
+| **Total** | **175** | **124** |
 **Edge cases**: secret detection rejection, duplicate slug import conflict, archived exclusion in context and search, empty tag rejection, self-referencing link rejection, missing content/file_path on artifact save, max_chars truncation, TUI rebuild message on non-tagged build, sanitized credential logging on sync errors.
 **Error states**: invalid entry type, invalid relation type, invalid schema version on import, secret detected warning, missing required fields on CLI, unknown sync subcommand, TUI startup with no terminal (TTY check).
