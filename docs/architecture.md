@@ -28,7 +28,7 @@ cmd/skillvault/main.go
 Capa más interna. No importa nada del proyecto.
 
 - 12 tipos de entrada (EntryType), incluyendo `routing` para enrutamiento de escenarios
-- Taxonomía `purpose` alineada con LifeOS: `WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`
+- Taxonomía `purpose` alineada con LifeOS: `WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`, `OBSERVABILITY` (6 valores)
 - 5 estados (Status)
 - Value objects: Entry, Artifact, Project, Workflow, Series, Tag, EntryLink
 - Validadores: `ValidateEntry()`, `ValidateProject()`, etc.
@@ -54,7 +54,7 @@ Orquesta el dominio y los stores. Cada servicio expone operaciones de alto nivel
 Tres formas de hablar con SkillVault:
 
 1. **CLI** (`internal/cli/`) — 25+ comandos planos con `flag` de stdlib. Sin Cobra, sin frameworks. Incluye `import-workflow` (importación YAML desde workflow-builder) y `route` para enrutamiento de escenarios.
-2. **MCP** (`internal/mcp/`) — Servidor JSON-RPC 2.0 sobre stdio. 19 herramientas. Expone `run_workflow` (ejecución estructurada con inputs por step) y `route_scenario` (resolución de escenarios). El CLI `run` se mantiene stdin/stdout para pipelines.
+2. **MCP** (`internal/mcp/`) — Servidor JSON-RPC 2.0 sobre stdio. 22 herramientas. Expone `run_workflow` (ejecución estructurada con inputs por step), `route_scenario` (resolución de escenarios), `get_stats` (estadísticas del vault), `list_workflow_runs` (historial de ejecuciones), y `get_run` (detalle de ejecución). El CLI `run` se mantiene stdin/stdout para pipelines.
 3. **HTTP API** (`internal/api/`) — Esqueleto vacío. Futuro.
 
 Todos los adapters llaman a los mismos `internal/app/` services.

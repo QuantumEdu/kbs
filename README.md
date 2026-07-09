@@ -14,7 +14,7 @@ Store, search, and retrieve prompts, skills, workflows, decisions, project memor
 ```
 
 **Codename:** Qu@ntum  
-**Status:** v3 — Workflow bridge + LifeOS-aligned purpose taxonomy
+**Status:** v3 — Workflow bridge + LifeOS taxonomy + workflow analytics
 **Binary size:** ~7 MB  
 **Dependencies:** Zero frameworks. Only `modernc.org/sqlite`.  
 **Language:** Go 1.26+
@@ -39,7 +39,7 @@ Store, search, and retrieve prompts, skills, workflows, decisions, project memor
 SkillVault is a local knowledge and workflow layer for humans and AI agents:
 
 - Store reusable prompts, skills, references, decisions, session summaries, and workflow notes.
-- Classify entries by **type** and by LifeOS-aligned **purpose** (`WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`).
+- Classify entries by **type** and by LifeOS-aligned **purpose** (`WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`, `OBSERVABILITY`).
 - Import workflow-builder YAML into SkillVault workflows and phase-skill entries.
 - Route natural scenarios to the right workflow or skill with `skillvault route <scenario>`.
 - Run workflows from the CLI or via MCP with structured JSON-RPC-compatible output.
@@ -195,7 +195,7 @@ DB decides. Disk remembers. Qu@ntum delivers.
 ```
 cmd/skillvault/
 ├── internal/cli/         # 25+ CLI commands (stdlib, no Cobra)
-├── internal/mcp/         # 19 MCP tools over stdio JSON-RPC 2.0
+├── internal/mcp/         # 22 MCP tools over stdio JSON-RPC 2.0
 ├── internal/api/         # HTTP API (local only)
 ├── internal/app/         # Use cases: save, search, context, session, refs, memory, pipeline
 ├── internal/domain/      # Pure entities + validators
@@ -252,10 +252,11 @@ cmd/skillvault/
 | `import` | Import vault from JSON | `skillvault import vault.json` |
 | `version` | Show vault version | `skillvault version` |
 | `compare-entries` | Vector similarity between two entries | `skillvault compare-entries e1 e2` |
+| `stats` | Show vault statistics and entry counts | `skillvault stats [--workflow-runs] [--json]` |
 
 ---
 
-## MCP Tools (19)
+## MCP Tools (22)
 
 For AI agents (Claude Code, OpenCode, etc.):
 
@@ -280,6 +281,9 @@ For AI agents (Claude Code, OpenCode, etc.):
 | `get_context_bundle` | Get structured project context bundle with entries grouped by type |
 | `run_workflow` | Run a workflow with structured step inputs and JSON results |
 | `route_scenario` | Resolve a scenario to a workflow or skill route |
+| `get_stats` | Return vault statistics including workflow run analytics |
+| `list_workflow_runs` | List workflow runs with optional workflow filter and step progress |
+| `get_run` | Get a single workflow run with step details |
 
 ### MCP Setup (Claude Code / OpenCode)
 
@@ -335,6 +339,7 @@ Purpose is orthogonal to entry type. Use it to organize memory by why it exists,
 | `LEARNING` | Lessons, skill development, retrospectives |
 | `RELATIONSHIP` | People, organizations, stakeholder context |
 | `STATE` | Current state snapshots, project status, handoffs |
+| `OBSERVABILITY` | Logs, metrics, monitoring dashboards, workflow analytics |
 
 Examples:
 
@@ -497,6 +502,7 @@ Test pyramid:
 | Scenario routing (`route`, `route_scenario`) | ✅ Active |
 | LifeOS purpose taxonomy | ✅ Active |
 | Structured MCP workflow runs (`run_workflow`) | ✅ Active |
+| Workflow run analytics (`get_stats`, `list_workflow_runs`, `get_run`) | ✅ Active |
 
 ---
 

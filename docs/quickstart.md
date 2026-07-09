@@ -161,6 +161,7 @@ Purpose is orthogonal to entry type. Use it to organize memory by why it exists:
 | `LEARNING` | Lessons, skill development, retrospectives |
 | `RELATIONSHIP` | People, organizations, stakeholder context |
 | `STATE` | Current state snapshots, project status, handoffs |
+| `OBSERVABILITY` | Logs, metrics, monitoring dashboards, workflow analytics |
 
 ```bash
 skillvault add-entry --title "ISO checklist" --type reference --purpose KNOWLEDGE --summary "..."

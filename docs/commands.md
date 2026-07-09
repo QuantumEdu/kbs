@@ -1,4 +1,4 @@
-# CLI Reference — 33 commands
+# CLI Reference — 34 commands
 
 All entries use **slugs** as identifiers. A slug is the title in kebab-case: `"Clean Architecture Review"` → `clean-architecture-review`.
 
@@ -36,7 +36,7 @@ skillvault add-entry \
 |------|----------|-------------|
 | `--title` | ✅ | Entry title (generates slug automatically) |
 | `--type` | ❌ | Type (default: `reference`): `prompt`, `skill`, `workflow_note`, `reference`, `user`, `feedback`, `project_state`, `session`, `decision`, `artifact_summary`, `handoff`, `routing` |
-| `--purpose` | ❌ | LifeOS-aligned purpose: `WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE` |
+| `--purpose` | ❌ | LifeOS-aligned purpose: `WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`, `OBSERVABILITY` |
 | `--summary` | ✅ | Short summary (indexed in FTS5) |
 | `--body` | ❌ | Long-form body (optional if you only want the summary) |
 | `--project` | ❌ | Slug of the project |
@@ -56,6 +56,7 @@ Purpose is orthogonal to entry type — classify memory by why it exists, not ju
 | `LEARNING` | Lessons, skill development, retrospectives |
 | `RELATIONSHIP` | People, organizations, stakeholder context |
 | `STATE` | Current state snapshots, project status, handoffs |
+| `OBSERVABILITY` | Logs, metrics, monitoring dashboards, workflow analytics |
 
 ---
 
@@ -70,7 +71,7 @@ skillvault search "grid css" --type skill --purpose KNOWLEDGE --project web --st
 | Flag | Description |
 |------|-------------|
 | `--type` | Filter by entry type |
-| `--purpose` | Filter by purpose (`WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`) |
+| `--purpose` | Filter by purpose (`WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`, `OBSERVABILITY`) |
 | `--project` | Filter by project |
 | `--tag` | Filter by individual tag |
 | `--include-archived` | Include archived entries |
@@ -478,6 +479,36 @@ Show vault version.
 skillvault version
 # SkillVault v3
 ```
+
+---
+
+## `stats`
+
+Show vault statistics and entry counts. Three output variants.
+
+```bash
+# Default: human-readable summary (entry counts, projects, totals)
+skillvault stats
+
+# Include workflow run analytics (total runs, run history summary)
+skillvault stats --workflow-runs
+
+# Machine-readable JSON output (includes all stats including workflow runs)
+skillvault stats --json
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--workflow-runs` | ❌ | Include workflow run analytics in output |
+| `--json` | ❌ | Output as JSON |
+
+Default output shows summary counts: total entries, entry type breakdown, active/archived/draft status counts, project count, artifact count, and workflow count.
+
+With `--workflow-runs`, the output appends a workflow run summary: total runs, runs per workflow, and recent run history.
+
+With `--json`, all statistics are printed as a single JSON object (workflow run analytics are included automatically — no separate flag needed).
+
+**MCP equivalent:** `get_stats`, `list_workflow_runs`, `get_run` (see [`docs/mcp.md`](mcp.md)).
 
 ---
 

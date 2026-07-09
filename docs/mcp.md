@@ -1,4 +1,4 @@
-# MCP Server — 19 tools for AI agents
+# MCP Server — 22 tools for AI agents
 
 SkillVault runs as an MCP (Model Context Protocol) server over stdio JSON-RPC 2.0. This lets agents like Claude Code, OpenCode, or any MCP client read and write directly to your vault.
 
@@ -61,7 +61,7 @@ Save any type of entry in the vault.
 - `project` (string, optional) — Project slug
 - `tags` (string[], optional) — Tags
 - `status` (string, optional) — `draft`, `active`, `archived`, `deprecated`, `canonical`
-- `purpose` (string, optional) — LifeOS-aligned purpose: `WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`
+- `purpose` (string, optional) — LifeOS-aligned purpose: `WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`, `OBSERVABILITY`
 
 **Example (from agent):**
 ```json
@@ -98,7 +98,7 @@ Full-text search with filters.
 - `type` (string, optional) — Filter by type
 - `project` (string, optional) — Filter by project
 - `tags` (string[], optional) — Filter by tags
-- `purpose` (string, optional) — Filter by purpose (`WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`)
+- `purpose` (string, optional) — Filter by purpose (`WORK`, `KNOWLEDGE`, `LEARNING`, `RELATIONSHIP`, `STATE`, `OBSERVABILITY`)
 - `status` (string, optional) — Filter by status
 - `include_archived` (bool, optional) — Include archived (default: false)
 - `limit` (int, optional) — Max results
@@ -352,6 +352,67 @@ Resolve a free-text scenario to a matching workflow or skill.
 
 ---
 
+### `get_stats`
+
+Return vault statistics including workflow run analytics.
+
+**Parameters:** none.
+
+**Response:** JSON object with summary counts (total entries, type breakdown, status counts, projects, artifacts, workflows) and optional workflow run statistics (total runs, runs per workflow).
+
+**Example (from agent):**
+```json
+{
+  "method": "get_stats",
+  "params": {}
+}
+```
+
+---
+
+### `list_workflow_runs`
+
+List workflow runs with optional workflow filter and step progress.
+
+**Parameters:**
+- `workflow_id` (string, optional) — Filter by workflow ID
+- `limit` (number, optional) — Max results (default: 20)
+
+**Response:** JSON array of workflow runs, each with `id`, `workflow_id`, `status` (completed|failed), `started_at`, and progress fields (`completed_steps`, `total_steps`, `step_ratio`). Input/output fields are included when present.
+
+**Example (from agent):**
+```json
+{
+  "method": "list_workflow_runs",
+  "params": {
+    "limit": 10
+  }
+}
+```
+
+---
+
+### `get_run`
+
+Get a single workflow run with its step details.
+
+**Parameters:**
+- `run_id` (string, required) — Workflow run ID
+
+**Response:** JSON object with `run` (id, workflow_id, status, started_at, finished_at, input, output) and `steps` (array of step objects with id, step_index, entry_id, status, output, timestamps).
+
+**Example (from agent):**
+```json
+{
+  "method": "get_run",
+  "params": {
+    "run_id": "run-abc123"
+  }
+}
+```
+
+---
+
 ## Typical Agent Flow
 
 ```
@@ -364,13 +425,22 @@ Resolve a free-text scenario to a matching workflow or skill.
 3. Targeted search → search_by_tags(tags=["go","tdd"], match="all")
    → Find exact entries by tags
 
-4. Scenario routing → route_scenario(scenario="research")
+4. Vault health → get_stats()
+   → Check entry counts, project stats, workflow run analytics
+
+5. Scenario routing → route_scenario(scenario="research")
    → Resolve what workflow or skill handles the scenario
 
-5. Execute workflow → run_workflow(workflow="research-workflow", steps={...})
+6. Execute workflow → run_workflow(workflow="research-workflow", steps={...})
    → Run the pipeline with structured inputs
 
-6. Session close → session_wrap(project, summary, decisions, pending, learnings)
+7. Inspect runs → list_workflow_runs(workflow_id="research-workflow")
+   → Browse run history with step progress
+
+8. Run detail → get_run(run_id="run-abc123")
+   → Drill into a specific run's step details
+
+9. Session close → session_wrap(project, summary, decisions, pending, learnings)
    → Persist session state for the next one
 ```
 
