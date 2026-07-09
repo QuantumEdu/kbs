@@ -282,6 +282,7 @@ See spec §10 (§10.1–§10.12).
 | REQ-MCP-11 | `list_projects`: lists projects and statuses | MUST |
 | REQ-MCP-12 | `search_by_tags`: `tags`(array, req), `match`(`all`/`any`, default `all`), `type`(opt), `project`(opt), `limit`(default 20). Returns id, title, type, summary, project, status, tags. Uses REQ-TQR-01/02. | MUST |
 | REQ-MCP-13 | `get_context_bundle`: `project`(opt). Returns structured JSON — project info, entries grouped by type, artifact refs. Cross-refs Hermes Context Layer (Capability 10). | MUST |
+| REQ-MCP-14 | `save_result`: `name` (required), `content` (required), `type`, `category`, `tags`, `project_id`, `source_prompt_id`, `model`. Returns `entry_id`, `name`, `type`, `project_id`. Wraps `SavePromptResultService`. | MUST |
 | REQ-MCP-18 | `run_workflow` MCP tool: delegates to `RunPipelineStructured`. Input: `workflow` (slug or ID, required), `steps` (map of step index → input text, required). Output: structured run result with `run_id`, `workflow_id`, `workflow_slug`, `status`, `steps` array (each with `step_index`, `status`, `output`, `error`), `started_at`, `finished_at`. All values JSON-RPC-compatible. | MUST |
 | REQ-MCP-19 | `route_scenario` MCP tool: wraps `EntryService.RouteScenario`. Input: `scenario` (string, required). Output: matched workflow (ID, slug, name, steps) and skill/entry metadata as JSON. Empty scenario rejected with validation error. No-match returns meaningful error. | MUST |
 | REQ-MCP-20 | `get_stats` SHALL return vault statistics with `workflow_runs` block: total_runs, success_rate, avg/max/min duration, failed_step_count, per-workflow metrics. | MUST |
@@ -306,6 +307,8 @@ See spec §10 (§10.1–§10.12).
 - GIVEN 10 runs across 2 workflows, WHEN `list_workflow_runs(workflow_id: "wf-1", limit: 5)` called, THEN up to 5 runs for wf-1 returned with status and step_ratio.
 - GIVEN run R with 3 steps, WHEN `get_run(run_id: "R")` called, THEN run metadata and steps array returned, each with status and output/error.
 - GIVEN run_id "nonexistent", WHEN `get_run` called, THEN error: run not found.
+- GIVEN valid `save_result` call with `name` and `content`, WHEN invoked, THEN returns `entry_id`, `name`, `type`, `project_id`.
+- GIVEN `save_result` call missing `name` or `content`, WHEN invoked, THEN returns validation error with context.
 
 ---
 
@@ -630,6 +633,53 @@ Aggregate run metrics and progress tracking from existing `runs`/`run_steps`. No
 
 ---
 
+## Capability 29: HTTP API Key Authentication
+
+> Source: `service-hardening` delta spec (PR #12).
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-HTTP-01 | HTTP server supports optional API key auth via `--api-key` flag. When set, all write endpoints require `Authorization: Bearer <key>`. `/health` remains unauthenticated. When unset, all endpoints work as before (backward compat). | MUST |
+
+**Auth-gated endpoints** (when key is set): POST/PUT/DELETE on `/entries`, `/entries/*`, `/artifacts`, `/context`, `/projects`, `/sessions/wrap`, `/workflows`, `/workflows/*`, `/export`, `/import`.
+
+**Scenarios**:
+- GIVEN no `--api-key` set, WHEN any endpoint is called, THEN all endpoints respond normally (backward compatible).
+- GIVEN `--api-key` set to `my-secret`, WHEN `/health` is called without auth header, THEN returns 200.
+- GIVEN `--api-key` set, WHEN POST `/entries` is called without `Authorization` header, THEN returns 401.
+- GIVEN `--api-key` set, WHEN POST `/entries` is called with `Authorization: Bearer my-secret`, THEN returns 200.
+
+---
+
+## Capability 30: Graceful Shutdown
+
+> Source: `service-hardening` delta spec (PR #12). Augments existing Code Integrity REQ-CI-02 and REQ-CI-03 with specific signal-handling mechanics.
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-GRACE-01 | HTTP server `Start()` wraps `srv.ListenAndServe` with signal handling (SIGINT/SIGTERM). On signal, calls `s.Shutdown(ctx)` with 5s timeout. Both MCP and HTTP servers shut down gracefully. | MUST |
+
+**Scenarios**:
+- GIVEN HTTP server running with active connections, WHEN SIGTERM received, THEN server stops accepting new connections, drains existing ones, and exits within 5s.
+- GIVEN MCP server with active tool calls, WHEN SIGTERM received, THEN in-flight calls complete, server exits cleanly within 5s.
+
+---
+
+## Capability 31: Documentation
+
+> Source: `service-hardening` delta spec (PR #12).
+
+| ID | Requirement | Strength |
+|----|-------------|----------|
+| REQ-DOCS-01 | `docs/vars.md` documents: frontmatter parsing (`---\nkey: value\n---`), `{{variable}}` detection/injection, `--vars` flag, inline vs in-place replace (`-i`). | MUST |
+| REQ-DOCS-02 | `docs/commands.md` reflects 21+ commands with: `entry history`, `entry restore`, `setup-vectors`, `reindex-embeddings`, `compare-entries`, `graph`, `memory index/reindex/list-external`, `entry ref add/list/remove`, `run`, pack flags (`export --pack --author --version --description`, `import --pack --prefix`). | MUST |
+
+**Scenarios**:
+- GIVEN a developer wants to use variable injection, WHEN they read `docs/vars.md`, THEN they find frontmatter format, `{{key}}` syntax, `--vars` flag usage, and `-i` in-place replace with examples.
+- GIVEN a user wants to discover commands, WHEN they read `docs/commands.md`, THEN all 21+ commands are documented with their flags and usage patterns.
+
+---
+
 ## Coverage Summary
 
 | Capability | Requirements | Scenarios |
@@ -645,7 +695,7 @@ Aggregate run metrics and progress tracking from existing `runs`/`run_steps`. No
 | Multi-Status Model | 7 | 3 |
 | Hermes Context Layer (7 Modes) | 11 | 3 |
 | CLI Commands | 15 | 20 |
-| MCP Tools | 18 | 18 |
+| MCP Tools | 19 | 20 |
 | Secret Detection | 7 | 5 |
 | Search (FTS5 + Vector) | 5 | 3 |
 | Workflow Rendering | 4 | 4 |
@@ -662,6 +712,9 @@ Aggregate run metrics and progress tracking from existing `runs`/`run_steps`. No
 | Workflow Run Bridge | 8 | 5 |
 | MCP Route Tool | 6 | 4 |
 | Workflow Analytics | 4 | 4 |
-| **Total** | **176** | **129** |
-**Edge cases**: secret detection rejection, duplicate slug import conflict, archived exclusion in context and search, empty tag rejection, self-referencing link rejection, missing content/file_path on artifact save, max_chars truncation, TUI rebuild message on non-tagged build, sanitized credential logging on sync errors.
-**Error states**: invalid entry type, invalid relation type, invalid schema version on import, secret detected warning, missing required fields on CLI, unknown sync subcommand, TUI startup with no terminal (TTY check).
+| HTTP API Key Authentication | 1 | 4 |
+| Graceful Shutdown | 1 | 2 |
+| Documentation | 2 | 2 |
+| **Total** | **181** | **141** |
+**Edge cases**: secret detection rejection, duplicate slug import conflict, archived exclusion in context and search, empty tag rejection, self-referencing link rejection, missing content/file_path on artifact save, max_chars truncation, TUI rebuild message on non-tagged build, sanitized credential logging on sync errors, auth bypass on `/health` endpoint, save_result missing required fields.
+**Error states**: invalid entry type, invalid relation type, invalid schema version on import, secret detected warning, missing required fields on CLI, unknown sync subcommand, TUI startup with no terminal (TTY check), 401 on missing/wrong API key, validation error on missing save_result required params.
