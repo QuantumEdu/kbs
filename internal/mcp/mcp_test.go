@@ -37,8 +37,9 @@ func setupMCPServices(t *testing.T) (*ToolRegistry, *app.ProjectService, func())
 	sessionSvc := app.NewSessionService(entrySvc, artifactSvc, projectSvc, store.Entries, store.Artifacts, store.Projects)
 	workflowRunSvc := app.NewWorkflowRunService(store.Workflows, store.WorkflowRuns, store.Entries)
 	entrySvc.SetWorkflowStore(store.Workflows)
+	entryVersionSvc := app.NewEntryVersionService(store.EntryVersions, store.Entries)
 
-	reg := NewServiceToolRegistry(entrySvc, artifactSvc, contextSvc, seriesSvc, workflowSvc, sessionSvc, projectSvc).WithEntryRefService(entryRefSvc).WithWorkflowRunService(workflowRunSvc)
+	reg := NewServiceToolRegistry(entrySvc, artifactSvc, contextSvc, seriesSvc, workflowSvc, sessionSvc, projectSvc).WithEntryRefService(entryRefSvc).WithWorkflowRunService(workflowRunSvc).WithEntryVersionService(entryVersionSvc)
 	cleanup := func() { sqlDB.Close() }
 	return reg, projectSvc, cleanup
 }
@@ -65,7 +66,7 @@ func TestServerInitialize(t *testing.T) {
 	}
 }
 
-func TestToolsListReturns19Tools(t *testing.T) {
+func TestToolsListReturns24Tools(t *testing.T) {
 	reg := NewToolRegistry(nil)
 	s := NewServer(reg)
 	ctx := context.Background()
@@ -96,8 +97,8 @@ func TestToolsListReturns19Tools(t *testing.T) {
 	default:
 		t.Fatalf("tools is not an array: %T", toolsRaw)
 	}
-	if toolCount != 22 {
-		t.Errorf("expected 22 tools, got %d", toolCount)
+	if toolCount != 24 {
+		t.Errorf("expected 24 tools, got %d", toolCount)
 	}
 }
 
@@ -307,6 +308,8 @@ func TestToolNamesAreCorrect(t *testing.T) {
 		"get_stats",
 		"list_workflow_runs",
 		"get_run",
+		"list_entry_versions",
+		"restore_entry_version",
 	}
 
 	if len(names) != len(expected) {
@@ -1245,15 +1248,15 @@ func TestToolCountIncludesNewTools(t *testing.T) {
 	reg := NewToolRegistry(nil)
 	tools := reg.List()
 
-	// Should be 22 tools: 19 existing + get_stats + list_workflow_runs + get_run
-	if len(tools) != 22 {
-		t.Errorf("expected 22 tools, got %d", len(tools))
+	// Should be 24 tools: 22 existing + list_entry_versions + restore_entry_version
+	if len(tools) != 24 {
+		t.Errorf("expected 24 tools, got %d", len(tools))
 	}
 	names := make(map[string]bool)
 	for _, tool := range tools {
 		names[tool.Name] = true
 	}
-	for _, name := range []string{"run_workflow", "route_scenario", "get_stats", "list_workflow_runs", "get_run"} {
+	for _, name := range []string{"run_workflow", "route_scenario", "get_stats", "list_workflow_runs", "get_run", "list_entry_versions", "restore_entry_version"} {
 		if !names[name] {
 			t.Errorf("expected tool %q to be registered", name)
 		}
@@ -1489,5 +1492,154 @@ func TestGetRunMCP(t *testing.T) {
 	result2, _ := reg.Call(ctx, "get_run", map[string]interface{}{"run_id": "nonexistent-xyz"})
 	if !result2.IsError || !strings.Contains(result2.Content[0].Text, "not found") {
 		t.Errorf("expected not-found error: %s", result2.Content[0].Text)
+	}
+}
+
+func TestListEntryVersionsWithDirectStore(t *testing.T) {
+	sqlDB, err := db.OpenDB(":memory:")
+	if err != nil {
+		t.Fatalf("OpenDB failed: %v", err)
+	}
+	defer sqlDB.Close()
+	if err := db.RunMigrations(sqlDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+	store := db.NewStore(sqlDB)
+	entryVersionSvc := app.NewEntryVersionService(store.EntryVersions, store.Entries)
+
+	ctx := context.Background()
+
+	// Create and update entry to generate version history.
+	e := domain.Entry{
+		ID: "vt-1", Title: "v1 Title", Slug: "vt-1",
+		Type: domain.EntryTypeSkill, Summary: "v1", BodyOptional: "b1",
+		Status: domain.StatusActive,
+	}
+	if err := store.Entries.Save(ctx, e, nil); err != nil {
+		t.Fatalf("save v1: %v", err)
+	}
+	e.Title = "v2 Title"
+	e.Summary = "v2"
+	if err := store.Entries.Save(ctx, e, nil); err != nil {
+		t.Fatalf("save v2: %v", err)
+	}
+
+	// Now wire up the MCP registry with the version service and test the tool.
+	entrySvc := app.NewEntryService(store.Entries, store.Projects, store.Artifacts)
+	reg := NewServiceToolRegistry(entrySvc, nil, nil, nil, nil, nil, nil).WithEntryVersionService(entryVersionSvc)
+
+	result, err := reg.Call(ctx, "list_entry_versions", map[string]interface{}{
+		"entry_id": "vt-1",
+	})
+	if err != nil {
+		t.Fatalf("list_entry_versions failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("list_entry_versions returned error: %s", result.Content[0].Text)
+	}
+
+	raw := result.Content[0].Text
+	if !strings.Contains(raw, "version_number") {
+		t.Errorf("expected JSON with version_number: %s", raw)
+	}
+	if !strings.Contains(raw, "v1 Title") {
+		t.Errorf("expected v1 Title in result: %s", raw)
+	}
+}
+
+func TestRestoreEntryVersionWithDirectStore(t *testing.T) {
+	sqlDB, err := db.OpenDB(":memory:")
+	if err != nil {
+		t.Fatalf("OpenDB failed: %v", err)
+	}
+	defer sqlDB.Close()
+	if err := db.RunMigrations(sqlDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+	store := db.NewStore(sqlDB)
+	entryVersionSvc := app.NewEntryVersionService(store.EntryVersions, store.Entries)
+
+	ctx := context.Background()
+
+	// Create entry and update to create version history.
+	e := domain.Entry{
+		ID: "rt-1", Title: "Original", Slug: "rt-1",
+		Type: domain.EntryTypePrompt, Summary: "Original summary",
+		BodyOptional: "Original body", Status: domain.StatusActive,
+	}
+	if err := store.Entries.Save(ctx, e, nil); err != nil {
+		t.Fatalf("save v1: %v", err)
+	}
+	e.Title = "Updated"
+	e.Summary = "Updated summary"
+	e.BodyOptional = "Updated body"
+	if err := store.Entries.Save(ctx, e, nil); err != nil {
+		t.Fatalf("save v2: %v", err)
+	}
+
+	entrySvc := app.NewEntryService(store.Entries, store.Projects, store.Artifacts)
+	reg := NewServiceToolRegistry(entrySvc, nil, nil, nil, nil, nil, nil).WithEntryVersionService(entryVersionSvc)
+
+	result, err := reg.Call(ctx, "restore_entry_version", map[string]interface{}{
+		"entry_id":       "rt-1",
+		"version_number": float64(1),
+	})
+	if err != nil {
+		t.Fatalf("restore_entry_version failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("restore_entry_version returned error: %s", result.Content[0].Text)
+	}
+
+	// Verify restored content.
+	current, err := store.Entries.Get(ctx, "rt-1", false)
+	if err != nil {
+		t.Fatalf("Get after restore failed: %v", err)
+	}
+	if current.Entry.Title != "Original" {
+		t.Errorf("expected restored title 'Original', got %q", current.Entry.Title)
+	}
+	if current.Entry.Summary != "Original summary" {
+		t.Errorf("expected restored summary, got %q", current.Entry.Summary)
+	}
+
+	// Restoring non-existent version should error.
+	badResult, _ := reg.Call(ctx, "restore_entry_version", map[string]interface{}{
+		"entry_id":       "rt-1",
+		"version_number": float64(99),
+	})
+	if !badResult.IsError {
+		t.Error("expected error for non-existent version")
+	}
+}
+
+func TestListEntryVersionsEmptyForNewEntry(t *testing.T) {
+	sqlDB, err := db.OpenDB(":memory:")
+	if err != nil {
+		t.Fatalf("OpenDB failed: %v", err)
+	}
+	defer sqlDB.Close()
+	if err := db.RunMigrations(sqlDB); err != nil {
+		t.Fatalf("RunMigrations failed: %v", err)
+	}
+	store := db.NewStore(sqlDB)
+	entryVersionSvc := app.NewEntryVersionService(store.EntryVersions, store.Entries)
+	entrySvc := app.NewEntryService(store.Entries, store.Projects, store.Artifacts)
+
+	reg := NewServiceToolRegistry(entrySvc, nil, nil, nil, nil, nil, nil).WithEntryVersionService(entryVersionSvc)
+	ctx := context.Background()
+
+	result, err := reg.Call(ctx, "list_entry_versions", map[string]interface{}{
+		"entry_id": "no-such-entry",
+	})
+	if err != nil {
+		t.Fatalf("list_entry_versions failed: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("list_entry_versions should not error for non-existent entry: %s", result.Content[0].Text)
+	}
+	raw := result.Content[0].Text
+	if !strings.Contains(raw, "[") || !strings.Contains(raw, "]") {
+		t.Errorf("expected JSON array ([]): %s", raw)
 	}
 }
