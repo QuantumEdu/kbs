@@ -49,26 +49,26 @@ Chain strategy: feature-branch-chain
 
 ## Phase 5: PR B — RED: CLI Tests
 
-- [ ] 2.1 Write `TestParseStatsFlags_WorkflowRuns` in `internal/cli/cli_test.go` — table-driven: `--workflow-runs` true, `--json` true, defaults false
+- [x] 2.1 Write `TestParseStatsFlags_WorkflowRuns` in `internal/cli/cli_test.go` — table-driven: `--workflow-runs` true, `--json` true, defaults false
 
 ## Phase 6: PR B — GREEN: CLI Surface
 
-- [ ] 2.2 Add `StatsFlags{WorkflowRuns, JSON bool}` and `ParseStatsFlags()` in `internal/cli/commands.go`
-- [ ] 2.3 Wire `stats` case in `cmd/skillvault/main.go` — when `--workflow-runs`, call `GetRunStats(nil)` on StatsService; `--json` outputs JSON with `workflow_runs` block; default prints `FormatStats`
+- [x] 2.2 Add `StatsFlags{WorkflowRuns, JSON bool}` and `ParseStatsFlags()` in `internal/cli/commands.go`
+- [x] 2.3 Wire `stats` case in `cmd/skillvault/main.go` — when `--workflow-runs`, call `GetRunStats(nil)` on StatsService; `--json` outputs JSON with `workflow_runs` block; default prints `FormatStats`
 
 ## Phase 7: PR B — RED: MCP Tests
 
-- [ ] 2.4 Write `TestGetStatsMCP` in `internal/mcp/mcp_test.go` — seed DB with runs; call `get_stats`; assert JSON has `workflow_runs` block with total/completed/duration
-- [ ] 2.5 Write `TestListWorkflowRunsMCP` in `internal/mcp/mcp_test.go` — seed runs across 2 workflows; call `list_workflow_runs(workflow_id, limit=5)`; assert count=5, step_ratio present
-- [ ] 2.6 Write `TestGetRunMCP` in `internal/mcp/mcp_test.go` — seed run with 3 steps; call `get_run(run_id)`; assert steps array with status/output
-- [ ] 2.7 Write `TestGetRunMCP_NotFound` in `internal/mcp/mcp_test.go` — call `get_run` with nonexistent ID; assert IsError
+- [x] 2.4 Write `TestGetStatsMCP` in `internal/mcp/mcp_test.go` — seed DB with runs; call `get_stats`; assert JSON has `workflow_runs` block with total/completed/duration
+- [x] 2.5 Write `TestListWorkflowRunsMCP` in `internal/mcp/mcp_test.go` — seed runs across 2 workflows; call `list_workflow_runs(workflow_id, limit=5)`; assert count=5, step_ratio present
+- [x] 2.6 Write `TestGetRunMCP` in `internal/mcp/mcp_test.go` — seed run with 3 steps; call `get_run(run_id)`; assert steps array with status/output (includes not-found case from 2.7)
+- [x] 2.7 Write `TestGetRunMCP_NotFound` in `internal/mcp/mcp_test.go` — merged into 2.6
 
 ## Phase 8: PR B — GREEN: MCP Tools
 
-- [ ] 2.8 Add 3 tool definitions to `registerV2Tools()` in `internal/mcp/tools.go`: `get_stats` (no args), `list_workflow_runs` (opt workflow_id, limit), `get_run` (run_id required)
-- [ ] 2.9 Add `statsSvc *app.StatsService`, `WithStatsService()`, and 3 handler methods in `internal/mcp/tools.go`
-- [ ] 2.10 Add 3 `dispatch` cases; wire `statsSvc` chained in `runMCP()` in `cmd/skillvault/main.go`
-- [ ] 2.11 Update `TestToolsListReturns19Tools` and `TestToolCountIncludesNewTools` in `internal/mcp/mcp_test.go` to expect 22 tools
+- [x] 2.8 Add 3 tool definitions to `registerV2Tools()` in `internal/mcp/tools.go`: `get_stats` (no args), `list_workflow_runs` (opt workflow_id, limit), `get_run` (run_id required)
+- [x] 2.9 Add `statsSvc *app.StatsService`, `WithStatsService()`, and 3 handler methods in `internal/mcp/tools.go`
+- [x] 2.10 Add 3 `dispatch` cases; wire `statsSvc` chained in `runMCP()` in `cmd/skillvault/main.go`
+- [x] 2.11 Update `TestToolsListReturns19Tools` and `TestToolCountIncludesNewTools` in `internal/mcp/mcp_test.go` to expect 22 tools
 
 ## Phase 9: PR C — RED: Domain Tests
 
