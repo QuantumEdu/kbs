@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/quantum-6/skillvault/internal/db"
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
@@ -19,13 +20,15 @@ type VaultStats struct {
 	TodayArtifacts int
 	TodayChars     int // sum of body + summary lengths for today's entries
 	TokenEstimate  int // TotalChars / 4 (rough heuristic)
+	WorkflowRuns   *db.WorkflowRunStats `json:"workflow_runs,omitempty"`
 }
 
 // StatsService provides vault-level aggregation.
 type StatsService struct {
-	entryStore    EntryStore
-	artifactStore ArtifactStore
-	projectStore  ProjectStore
+	entryStore       EntryStore
+	artifactStore    ArtifactStore
+	projectStore     ProjectStore
+	workflowRunStore WorkflowRunStore
 }
 
 // NewStatsService creates a StatsService.
@@ -35,6 +38,12 @@ func NewStatsService(entryStore EntryStore, artifactStore ArtifactStore, project
 		artifactStore: artifactStore,
 		projectStore:  projectStore,
 	}
+}
+
+// WithWorkflowRunStore attaches an optional WorkflowRunStore for run analytics.
+func (s *StatsService) WithWorkflowRunStore(store WorkflowRunStore) *StatsService {
+	s.workflowRunStore = store
+	return s
 }
 
 // GetStats aggregates vault statistics.
@@ -85,6 +94,15 @@ func (s *StatsService) GetStats(ctx context.Context) (*VaultStats, error) {
 
 	stats.TokenEstimate = stats.TotalChars / 4
 
+	// Workflow run analytics (optional — only when store is wired).
+	if s.workflowRunStore != nil {
+		runStats, err := s.workflowRunStore.GetRunStats(ctx, nil)
+		if err != nil {
+			return nil, fmt.Errorf("get run stats: %w", err)
+		}
+		stats.WorkflowRuns = runStats
+	}
+
 	return stats, nil
 }
 
@@ -134,7 +152,13 @@ type ProjectStore interface {
 	List(ctx context.Context, includeArchived bool) ([]domain.Project, error)
 }
 
+// WorkflowRunStore is the subset of db.WorkflowRunStore needed by StatsService.
+type WorkflowRunStore interface {
+	GetRunStats(ctx context.Context, workflowID *string) (*db.WorkflowRunStats, error)
+}
+
 // Compile-time interface checks.
 var _ EntryStore = (EntryStore)(nil)
 var _ ArtifactStore = (ArtifactStore)(nil)
 var _ ProjectStore = (ProjectStore)(nil)
+var _ WorkflowRunStore = (WorkflowRunStore)(nil)
