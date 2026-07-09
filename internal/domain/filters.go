@@ -34,3 +34,21 @@ type VaultData struct {
 	Artifacts        []Artifact        `json:"artifacts"`
 	EntryLinks       []EntryLink       `json:"entry_links"`
 }
+
+// VaultPackExport wraps a VaultExport with pack metadata for sharing
+// curated vault content between instances. The JSON structure uses a
+// top-level "pack" key containing metadata, with "data" holding the
+// standard VaultExport payload.
+type VaultPackExport struct {
+	Pack PackMetadata `json:"pack"`
+	Data VaultExport  `json:"data"`
+}
+
+// PackMetadata holds identifying information for a skill pack export.
+type PackMetadata struct {
+	PackID      string `json:"pack_id"`
+	Author      string `json:"author"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+	ExportedAt  string `json:"exported_at"`
+}
