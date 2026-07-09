@@ -236,6 +236,7 @@ See spec §9 (§9.1–§9.2).
 | REQ-CLI-12 | `run` executes workflows: `skillvault run <workflow> <file> [--save output.md]`. Input from file or stdin (`-`). Output to stdout or `--save` path. Sequential pipeline execution. Pre-flight validates entry existence and status. | MUST |
 | REQ-CLI-13 | `stats --workflow-runs` SHALL display per-workflow run metrics: total runs, success rate, avg duration, step completion ratio. | MUST |
 | REQ-CLI-14 | `stats --json` SHALL output all stats including workflow run analytics as structured JSON. | MUST |
+| REQ-CLI-ROUTE | Route scenario resolution via `route <scenario>` command. Resolution cascade: FTS5 search (type=routing) → tag fallback (`workflow-route`) → YAML body key match → `WorkflowService.Get()` verification. Default output human-readable; `--json` flag for machine-parseable output. Malformed YAML in one entry MUST NOT block resolution of others (warn to stderr, continue). Stale workflow references SHALL warn and continue. | MUST |
 
 **Scenarios**:
 - GIVEN no vault exists, WHEN `skillvault init` runs, THEN `vault.db` plus `objects/`, `exports/`, `cache/` directories are created under `~/.skillvault/`.
@@ -254,6 +255,11 @@ See spec §9 (§9.1–§9.2).
 - GIVEN entries with various purposes, WHEN `skillvault search --query "patterns"` without `--purpose`, THEN all matching entries returned regardless of purpose.
 - GIVEN workflow "research" has 5 runs, WHEN `skillvault stats --workflow-runs` runs, THEN per-workflow total_runs, success_rate, avg_duration, step_ratio displayed.
 - GIVEN vault with entries and workflow runs, WHEN `skillvault stats --json` runs, THEN valid JSON returned with `workflow_runs` block containing totals and per-workflow metrics.
+- GIVEN a routing entry with YAML body mapping `research: {workflow: research-workflow}`, WHEN `skillvault route research` runs, THEN workflow name, description, and steps are displayed AND exit code is 0.
+- GIVEN a routing entry mapping `onboarding: {skill: onboarding-skill}`, WHEN `skillvault route --json onboarding` runs, THEN valid JSON prints with fields: scenario, type, target, description AND exit code is 0.
+- GIVEN no routing entries match the scenario, WHEN `skillvault route nonexistent` runs, THEN message shows "No routing entries found" with creation hint (`add-entry --type routing`) AND exit code is non-zero.
+- GIVEN two routing entries: one with invalid YAML, one valid matching the scenario, WHEN `skillvault route <scenario>` runs, THEN malformed entry is skipped with stderr warning AND valid entry resolves and displays.
+- GIVEN routing entry references a deleted workflow slug, WHEN `skillvault route <scenario>` runs, THEN warning "Referenced workflow X not found" prints AND resolution continues to other entries.
 
 ---
 
@@ -638,7 +644,7 @@ Aggregate run metrics and progress tracking from existing `runs`/`run_steps`. No
 | EntryLink + Relation Types | 5 | 3 |
 | Multi-Status Model | 7 | 3 |
 | Hermes Context Layer (7 Modes) | 11 | 3 |
-| CLI Commands | 14 | 15 |
+| CLI Commands | 15 | 20 |
 | MCP Tools | 18 | 18 |
 | Secret Detection | 7 | 5 |
 | Search (FTS5 + Vector) | 5 | 3 |
@@ -656,6 +662,6 @@ Aggregate run metrics and progress tracking from existing `runs`/`run_steps`. No
 | Workflow Run Bridge | 8 | 5 |
 | MCP Route Tool | 6 | 4 |
 | Workflow Analytics | 4 | 4 |
-| **Total** | **175** | **124** |
+| **Total** | **176** | **129** |
 **Edge cases**: secret detection rejection, duplicate slug import conflict, archived exclusion in context and search, empty tag rejection, self-referencing link rejection, missing content/file_path on artifact save, max_chars truncation, TUI rebuild message on non-tagged build, sanitized credential logging on sync errors.
 **Error states**: invalid entry type, invalid relation type, invalid schema version on import, secret detected warning, missing required fields on CLI, unknown sync subcommand, TUI startup with no terminal (TTY check).
