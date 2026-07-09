@@ -303,6 +303,30 @@ func TestValidatePurpose(t *testing.T) {
 	}
 }
 
+func TestPurpose_OBSERVABILITY_valid(t *testing.T) {
+	if !PurposeObservability.IsValid() {
+		t.Error("PurposeObservability.IsValid() = false, want true")
+	}
+
+	if err := ValidatePurpose("OBSERVABILITY"); err != nil {
+		t.Errorf("ValidatePurpose(OBSERVABILITY) = %v, want nil", err)
+	}
+}
+
+func TestPurpose_OBSERVABILITY_invalid(t *testing.T) {
+	if Purpose("obs").IsValid() {
+		t.Error(`Purpose("obs").IsValid() = true, want false`)
+	}
+
+	err := ValidatePurpose("INVALID")
+	if err == nil {
+		t.Error("ValidatePurpose(INVALID) = nil, want error")
+	}
+	if err != nil && !strings.Contains(err.Error(), "OBSERVABILITY") {
+		t.Errorf("error message missing OBSERVABILITY: %s", err.Error())
+	}
+}
+
 func strPtr(s string) *string {
 	return &s
 }

@@ -10,12 +10,13 @@ const (
 	PurposeLearning     Purpose = "LEARNING"
 	PurposeRelationship Purpose = "RELATIONSHIP"
 	PurposeState        Purpose = "STATE"
+	PurposeObservability Purpose = "OBSERVABILITY"
 )
 
 func (p Purpose) IsValid() bool {
 	switch p {
 	case PurposeWork, PurposeKnowledge, PurposeLearning,
-		PurposeRelationship, PurposeState, "":
+		PurposeRelationship, PurposeState, PurposeObservability, "":
 		return true
 	}
 	return false

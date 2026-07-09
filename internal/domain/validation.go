@@ -53,7 +53,7 @@ func ValidateStatus(s string) error {
 func ValidatePurpose(p string) error {
 	pu := Purpose(p)
 	if !pu.IsValid() {
-		return fmt.Errorf("invalid purpose: %q (expected one of: WORK, KNOWLEDGE, LEARNING, RELATIONSHIP, STATE, or empty)", p)
+		return fmt.Errorf("invalid purpose: %q (expected one of: WORK, KNOWLEDGE, LEARNING, RELATIONSHIP, STATE, OBSERVABILITY, or empty)", p)
 	}
 	return nil
 }
