@@ -109,7 +109,44 @@ skillvault session-wrap \
   --pending "Add refresh token rotation"
 ```
 
-### 7. Execute a workflow pipeline
+### 7. Versioning: track and restore entry history
+
+Every time you update an entry's content, a version snapshot is automatically saved. You can browse the history and restore any previous version.
+
+```bash
+# Save an initial entry
+skillvault add-entry \
+  --title "Architecture Notes" \
+  --type reference \
+  --purpose KNOWLEDGE \
+  --summary "Initial architecture decisions" \
+  --project myapp
+
+# Later, update the entry with new decisions
+skillvault add-entry \
+  --title "Architecture Notes" \
+  --type reference \
+  --purpose KNOWLEDGE \
+  --summary "Revised architecture after review" \
+  --project myapp
+
+# This updates the same entry (matched by slug). Check the version history:
+skillvault entry history architecture-notes
+
+# Output:
+# Version history for entry architecture-notes:
+#   #  | Title                | Saved At
+#   ---+----------------------+-------------------
+#   2  | Architecture Notes   | 2026-07-01
+#   1  | Architecture Notes   | 2026-06-28
+
+# Restore to version 1 if you change your mind:
+skillvault entry restore architecture-notes --version 1
+
+# The current state is preserved as a new version before restoring.
+```
+
+### 8. Execute a workflow pipeline
 
 ```bash
 # Create a workflow with entry_slug in steps

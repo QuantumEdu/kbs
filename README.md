@@ -14,7 +14,7 @@ Store, search, and retrieve prompts, skills, workflows, decisions, project memor
 ```
 
 **Codename:** Qu@ntum  
-**Status:** v3 — Workflow bridge + LifeOS taxonomy + workflow analytics
+**Status:** v3 — Workflow bridge + LifeOS taxonomy + workflow analytics + entry versioning + skill pack export
 **Binary size:** ~7 MB  
 **Dependencies:** Zero frameworks. Only `modernc.org/sqlite`.  
 **Language:** Go 1.26+
@@ -195,7 +195,7 @@ DB decides. Disk remembers. Qu@ntum delivers.
 ```
 cmd/skillvault/
 ├── internal/cli/         # 25+ CLI commands (stdlib, no Cobra)
-├── internal/mcp/         # 22 MCP tools over stdio JSON-RPC 2.0
+├── internal/mcp/         # 24 MCP tools over stdio JSON-RPC 2.0
 ├── internal/api/         # HTTP API (local only)
 ├── internal/app/         # Use cases: save, search, context, session, refs, memory, pipeline
 ├── internal/domain/      # Pure entities + validators
@@ -247,16 +247,18 @@ cmd/skillvault/
 | `graph` | Visualize entry graph | `skillvault graph --entry e1 --format mermaid` |
 | `ref` | Manage graph edges (alias) | `skillvault ref add e1 e2 depends_on` |
 | `entry ref add/list/remove` | Manage graph edges | `skillvault entry ref add e1 e2 depends_on` |
+| `entry history` | Show version history for an entry | `skillvault entry history clean-architecture-review` |
+| `entry restore` | Restore an entry to a previous version | `skillvault entry restore clean-architecture-review --version 2` |
 | `memory index/reindex/list-external` | Index pi-memory.md files | `skillvault memory index --path ~/memory --project myapp` |
-| `export` | Export vault to JSON | `skillvault export vault.json` |
-| `import` | Import vault from JSON | `skillvault import vault.json` |
+| `export` | Export vault to JSON or skill pack (`.svpack`) | `skillvault export vault.json [--pack --author ...]` |
+| `import` | Import vault from JSON or skill pack | `skillvault import vault.json [--pack --prefix ns/]` |
 | `version` | Show vault version | `skillvault version` |
 | `compare-entries` | Vector similarity between two entries | `skillvault compare-entries e1 e2` |
 | `stats` | Show vault statistics and entry counts | `skillvault stats [--workflow-runs] [--json]` |
 
 ---
 
-## MCP Tools (22)
+## MCP Tools (24)
 
 For AI agents (Claude Code, OpenCode, etc.):
 
@@ -284,6 +286,8 @@ For AI agents (Claude Code, OpenCode, etc.):
 | `get_stats` | Return vault statistics including workflow run analytics |
 | `list_workflow_runs` | List workflow runs with optional workflow filter and step progress |
 | `get_run` | Get a single workflow run with step details |
+| `list_entry_versions` | List version history for an entry (descending by version number) |
+| `restore_entry_version` | Restore an entry to a previous version by version number |
 
 ### MCP Setup (Claude Code / OpenCode)
 

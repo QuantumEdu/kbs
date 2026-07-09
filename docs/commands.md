@@ -1,4 +1,4 @@
-# CLI Reference — 34 commands
+# CLI Reference — 36 commands
 
 All entries use **slugs** as identifiers. A slug is the title in kebab-case: `"Clean Architecture Review"` → `clean-architecture-review`.
 
@@ -419,9 +419,55 @@ Shows a line-based LCS diff of both entries' full text representations (title + 
 
 ---
 
+## `entry history`
+
+Show the version history for an entry. Every time an entry's content (title, summary, or body) is updated, the previous version is automatically archived into the `entry_versions` table.
+
+```bash
+skillvault entry history clean-architecture-review
+```
+
+| Positional | Required | Description |
+|------|----------|-------------|
+| `<id>` | ✅ | Entry ID or slug |
+
+Output is a table listing each version number, title at that point in time, and save timestamp:
+
+```
+Version history for entry clean-architecture-review:
+  #  | Title                    | Saved At
+  ---+--------------------------+-------------------
+  3  | Clean Architecture v3    | 2026-07-01
+  2  | Clean Architecture v2    | 2026-06-28
+  1  | Clean Architecture Rules | 2026-06-20
+```
+
+Versions are shown in descending order (newest first).
+
+---
+
+## `entry restore`
+
+Restore an entry to a previous version. The current state is preserved as a new version before restoring, so no history is lost.
+
+```bash
+skillvault entry restore clean-architecture-review --version 2
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `<id>` | ✅ | Entry ID or slug (positional, first argument after `restore`) |
+| `--version` | ✅ | Version number to restore (must be >= 1) |
+
+A restore creates a new version snapshot of the current state, then copies the target version's title, summary, and body back into the entry. The restored entry continues forward from the latest version number.
+
+---
+
 ## `export`
 
-Export the entire vault to a JSON file.
+Export the vault to a JSON file or as a skill pack (`.svpack`).
+
+### Full vault export (default)
 
 ```bash
 skillvault export backup.json
@@ -431,20 +477,57 @@ skillvault export --output export.json   # explicit
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--output` | ❌ | Output path (default: `skillvault-export.json`) |
+| `--pack` | ❌ | Export as a skill pack instead of a full vault |
 
 Includes all entry types, projects, workflows, series, tags, entry_links, and artifact metadata.
+
+### Skill pack export
+
+```bash
+skillvault export --pack \
+  --author "Alice" \
+  --version "1.0.0" \
+  --description "My curated skill pack" \
+  --output my-pack.svpack
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--author` | ✅ (pack mode) | Pack author name |
+| `--version` | ✅ (pack mode) | Pack version (e.g. `1.0.0`) |
+| `--description` | ❌ | Pack description |
+| `--output` | ❌ | Output file path (default: `skillvault-pack.svpack`) |
+
+In pack mode, the vault exports a portable `.svpack` file containing the vault contents plus identifying metadata. The receiver imports it with `import --pack`.
 
 ---
 
 ## `import`
 
-Import a vault from a JSON file.
+Import a vault from a JSON file or skill pack (`.svpack`).
+
+### Full vault import (default)
 
 ```bash
 skillvault import backup.json
 ```
 
 Resolves slug conflicts automatically (appends numeric suffix to duplicates).
+
+### Skill pack import
+
+```bash
+skillvault import my-pack.svpack --pack --prefix ns/
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--pack` | ❌ | Import as a skill pack |
+| `--prefix` | ❌ | Prefix all imported entity IDs (e.g. `ns/`) |
+
+When `--pack` is used with `--prefix`, imported entries are namespaced to avoid collisions with existing vault content.
+
+Bare import without `--pack` remains fully backward-compatible.
 
 ---
 

@@ -1,4 +1,4 @@
-# MCP Server — 22 tools for AI agents
+# MCP Server — 24 tools for AI agents
 
 SkillVault runs as an MCP (Model Context Protocol) server over stdio JSON-RPC 2.0. This lets agents like Claude Code, OpenCode, or any MCP client read and write directly to your vault.
 
@@ -407,6 +407,57 @@ Get a single workflow run with its step details.
   "method": "get_run",
   "params": {
     "run_id": "run-abc123"
+  }
+}
+```
+
+---
+
+### `list_entry_versions`
+
+List version history for an entry in descending order (newest first). Every content update to an entry automatically creates a version snapshot.
+
+**Parameters:**
+- `entry_id` (string, required) — Entry ID
+
+**Response:** JSON array of version objects, each with `version_number`, `title`, `summary`, and `saved_at`. Returns an empty array if the entry has no version history.
+
+**Example (from agent):**
+```json
+{
+  "method": "list_entry_versions",
+  "params": {
+    "entry_id": "clean-architecture-review"
+  }
+}
+```
+
+---
+
+### `restore_entry_version`
+
+Restore an entry to a previous version by version number. The current state is preserved as a new version before restoring.
+
+**Parameters:**
+- `entry_id` (string, required) — Entry ID
+- `version_number` (number, required) — Version number to restore (must be >= 1)
+
+**Response:**
+```json
+{
+  "entry_id": "clean-architecture-review",
+  "version_number": 2,
+  "status": "restored"
+}
+```
+
+**Example (from agent):**
+```json
+{
+  "method": "restore_entry_version",
+  "params": {
+    "entry_id": "clean-architecture-review",
+    "version_number": 2
   }
 }
 ```
