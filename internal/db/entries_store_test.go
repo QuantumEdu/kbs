@@ -321,3 +321,137 @@ func TestSaveEntryRemovesOldTags(t *testing.T) {
 		t.Error("tag 'c' should be present")
 	}
 }
+
+func TestSaveArchivesBeforeUpdate(t *testing.T) {
+	store, cleanup := setupEntryStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	entry := domain.Entry{
+		ID:           "version-test",
+		Title:        "Original Title",
+		Slug:         "version-test",
+		Type:         domain.EntryTypeSkill,
+		Summary:      "Original summary",
+		BodyOptional: "Original body",
+		Status:       domain.StatusActive,
+	}
+	if err := store.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("first Save failed: %v", err)
+	}
+
+	// Update title only — should archive.
+	entry.Title = "Updated Title"
+	if err := store.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("update Save failed: %v", err)
+	}
+
+	// Verify current entry has new title.
+	result, err := store.Get(ctx, "version-test", false)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if result.Entry.Title != "Updated Title" {
+		t.Errorf("current title = %q, want 'Updated Title'", result.Entry.Title)
+	}
+}
+
+func TestSaveNoArchiveWhenUnchanged(t *testing.T) {
+	store, cleanup := setupEntryStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	entry := domain.Entry{
+		ID:           "no-change",
+		Title:        "Stable",
+		Slug:         "no-change",
+		Type:         domain.EntryTypePrompt,
+		Summary:      "same",
+		BodyOptional: "same",
+		Status:       domain.StatusActive,
+	}
+	if err := store.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("first Save failed: %v", err)
+	}
+
+	// Save again with identical content but different tags.
+	if err := store.Save(ctx, entry, []string{"a", "b"}); err != nil {
+		t.Fatalf("second Save failed: %v", err)
+	}
+
+	// The entry should still exist and be valid.
+	result, err := store.Get(ctx, "no-change", false)
+	if err != nil {
+		t.Fatalf("Get after identical save failed: %v", err)
+	}
+	if result.Entry.Title != "Stable" {
+		t.Errorf("title = %q, want 'Stable'", result.Entry.Title)
+	}
+	if len(result.Tags) != 2 {
+		t.Errorf("expected 2 tags, got %d", len(result.Tags))
+	}
+}
+
+func TestSaveArchivesSummaryChange(t *testing.T) {
+	store, cleanup := setupEntryStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	entry := domain.Entry{
+		ID:           "summary-test",
+		Title:        "Title",
+		Slug:         "summary-test",
+		Type:         domain.EntryTypeReference,
+		Summary:      "Initial summary",
+		BodyOptional: "Body",
+		Status:       domain.StatusActive,
+	}
+	if err := store.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("first Save failed: %v", err)
+	}
+
+	entry.Summary = "Updated summary"
+	if err := store.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("update Save failed: %v", err)
+	}
+
+	result, err := store.Get(ctx, "summary-test", false)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if result.Entry.Summary != "Updated summary" {
+		t.Errorf("summary = %q, want 'Updated summary'", result.Entry.Summary)
+	}
+}
+
+func TestSaveArchivesBodyChange(t *testing.T) {
+	store, cleanup := setupEntryStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	entry := domain.Entry{
+		ID:           "body-test",
+		Title:        "Title",
+		Slug:         "body-test",
+		Type:         domain.EntryTypeSession,
+		Summary:      "Summary",
+		BodyOptional: "Initial body",
+		Status:       domain.StatusActive,
+	}
+	if err := store.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("first Save failed: %v", err)
+	}
+
+	entry.BodyOptional = "Updated body"
+	if err := store.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("update Save failed: %v", err)
+	}
+
+	result, err := store.Get(ctx, "body-test", false)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if result.Entry.BodyOptional != "Updated body" {
+		t.Errorf("body = %q, want 'Updated body'", result.Entry.BodyOptional)
+	}
+}
