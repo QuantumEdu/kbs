@@ -35,6 +35,7 @@ type WorkflowRunStats struct {
 	TotalRuns       int                      `json:"total_runs"`
 	CompletedRuns   int                      `json:"completed_runs"`
 	FailedRuns      int                      `json:"failed_runs"`
+	SuccessRate     float64                  `json:"success_rate"`
 	AvgDurationSecs float64                  `json:"avg_duration_secs"`
 	MaxDurationSecs float64                  `json:"max_duration_secs"`
 	MinDurationSecs float64                  `json:"min_duration_secs"`
@@ -47,14 +48,16 @@ type WorkflowRunPerWorkflow struct {
 	WorkflowID      string  `json:"workflow_id"`
 	TotalRuns       int     `json:"total_runs"`
 	CompletedRuns   int     `json:"completed_runs"`
+	SuccessRate     float64 `json:"success_rate"`
 	AvgDurationSecs float64 `json:"avg_duration_secs"`
 }
 
 // RunProgress holds step completion progress for a single run.
 type RunProgress struct {
-	RunID          string
-	CompletedSteps int
-	TotalSteps     int
+	RunID          string  `json:"run_id"`
+	CompletedSteps int     `json:"completed_steps"`
+	TotalSteps     int     `json:"total_steps"`
+	StepRatio      float64 `json:"step_ratio"`
 }
 
 type WorkflowRunStore interface {

@@ -88,6 +88,9 @@ func (s *sqliteWorkflowRunStore) GetRun(ctx context.Context, id string) (domain.
 		}
 		steps = append(steps, step)
 	}
+	if err := rows.Err(); err != nil {
+		return run, nil, fmt.Errorf("iterate run steps: %w", err)
+	}
 
 	if steps == nil {
 		steps = []domain.WorkflowRunStep{}
@@ -117,6 +120,9 @@ func (s *sqliteWorkflowRunStore) ListRuns(ctx context.Context, workflowID string
 			run.FinishedAt = &finishedAt.Time
 		}
 		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate runs: %w", err)
 	}
 
 	if runs == nil {
@@ -169,6 +175,9 @@ func (s *sqliteWorkflowRunStore) GetRunStats(ctx context.Context, workflowID *st
 	if err != nil {
 		return nil, fmt.Errorf("get run stats: %w", err)
 	}
+	if stats.TotalRuns > 0 {
+		stats.SuccessRate = float64(stats.CompletedRuns) / float64(stats.TotalRuns)
+	}
 
 	// Failed step count across all runs (respects workflow filter via runs subquery).
 	err = s.db.QueryRowContext(ctx, `
@@ -189,9 +198,10 @@ func (s *sqliteWorkflowRunStore) GetRunStats(ctx context.Context, workflowID *st
 			COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0),
 			COALESCE(AVG(CASE WHEN finished_at IS NOT NULL THEN julianday(finished_at) - julianday(started_at) END) * 86400, 0)
 		FROM runs
+		WHERE (? IS NULL OR workflow_id = ?)
 		GROUP BY workflow_id
 		ORDER BY workflow_id
-	`)
+	`, workflowID, workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("get per-workflow stats: %w", err)
 	}
@@ -202,7 +212,13 @@ func (s *sqliteWorkflowRunStore) GetRunStats(ctx context.Context, workflowID *st
 		if err := rows.Scan(&pw.WorkflowID, &pw.TotalRuns, &pw.CompletedRuns, &pw.AvgDurationSecs); err != nil {
 			return nil, fmt.Errorf("scan per-workflow: %w", err)
 		}
+		if pw.TotalRuns > 0 {
+			pw.SuccessRate = float64(pw.CompletedRuns) / float64(pw.TotalRuns)
+		}
 		stats.PerWorkflow = append(stats.PerWorkflow, pw)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate per-workflow stats: %w", err)
 	}
 
 	return stats, nil
@@ -260,11 +276,19 @@ func (s *sqliteWorkflowRunStore) ListAllRuns(ctx context.Context, workflowID *st
 			run.FinishedAt = &rwp.FinishedAt.Time
 		}
 		runs = append(runs, run)
+		stepRatio := 0.0
+		if rwp.TotalSteps > 0 {
+			stepRatio = float64(rwp.CompletedSteps) / float64(rwp.TotalSteps)
+		}
 		progresses = append(progresses, RunProgress{
 			RunID:          run.ID,
 			CompletedSteps: rwp.CompletedSteps,
 			TotalSteps:     rwp.TotalSteps,
+			StepRatio:      stepRatio,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate runs with progress: %w", err)
 	}
 
 	if runs == nil {

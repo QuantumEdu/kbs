@@ -382,6 +382,9 @@ func TestGetRunStats_MixedStatuses(t *testing.T) {
 	if stats.FailedRuns != 2 {
 		t.Errorf("FailedRuns = %d, want 2", stats.FailedRuns)
 	}
+	if stats.SuccessRate != 0.7 {
+		t.Errorf("SuccessRate = %f, want 0.7", stats.SuccessRate)
+	}
 	if stats.FailedStepCount != 2 {
 		t.Errorf("FailedStepCount = %d, want 2", stats.FailedStepCount)
 	}
@@ -417,6 +420,9 @@ func TestGetRunStats_Empty(t *testing.T) {
 	}
 	if stats.FailedRuns != 0 {
 		t.Errorf("FailedRuns = %d, want 0", stats.FailedRuns)
+	}
+	if stats.SuccessRate != 0 {
+		t.Errorf("SuccessRate = %f, want 0", stats.SuccessRate)
 	}
 	if stats.FailedStepCount != 0 {
 		t.Errorf("FailedStepCount = %d, want 0", stats.FailedStepCount)
@@ -474,6 +480,15 @@ func TestGetRunStats_PerWorkflow(t *testing.T) {
 	if statsA.CompletedRuns != 3 {
 		t.Errorf("CompletedRuns for wf-a = %d, want 3", statsA.CompletedRuns)
 	}
+	if statsA.SuccessRate != 1 {
+		t.Errorf("SuccessRate for wf-a = %f, want 1", statsA.SuccessRate)
+	}
+	if len(statsA.PerWorkflow) != 1 || statsA.PerWorkflow[0].WorkflowID != "wf-a" {
+		t.Fatalf("PerWorkflow for wf-a = %+v, want only wf-a", statsA.PerWorkflow)
+	}
+	if statsA.PerWorkflow[0].SuccessRate != 1 {
+		t.Errorf("PerWorkflow[0].SuccessRate = %f, want 1", statsA.PerWorkflow[0].SuccessRate)
+	}
 
 	// Query per-workflow: filter B.
 	wfB := "wf-b"
@@ -486,6 +501,9 @@ func TestGetRunStats_PerWorkflow(t *testing.T) {
 	}
 	if statsB.CompletedRuns != 2 {
 		t.Errorf("CompletedRuns for wf-b = %d, want 2", statsB.CompletedRuns)
+	}
+	if len(statsB.PerWorkflow) != 1 || statsB.PerWorkflow[0].WorkflowID != "wf-b" {
+		t.Fatalf("PerWorkflow for wf-b = %+v, want only wf-b", statsB.PerWorkflow)
 	}
 }
 
@@ -538,5 +556,8 @@ func TestListAllRuns_WithProgress(t *testing.T) {
 	}
 	if p.TotalSteps != 5 {
 		t.Errorf("TotalSteps = %d, want 5", p.TotalSteps)
+	}
+	if p.StepRatio != 0.6 {
+		t.Errorf("StepRatio = %f, want 0.6", p.StepRatio)
 	}
 }

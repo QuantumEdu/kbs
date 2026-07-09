@@ -140,7 +140,7 @@ func FormatStats(s *VaultStats) string {
 // FormatWorkflowRunStats produces a summary of workflow run analytics.
 func FormatWorkflowRunStats(s *db.WorkflowRunStats) string {
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("\nWorkflow Runs: %d total (%d completed, %d failed)\n", s.TotalRuns, s.CompletedRuns, s.FailedRuns))
+	b.WriteString(fmt.Sprintf("\nWorkflow Runs: %d total (%d completed, %d failed, %.0f%% success)\n", s.TotalRuns, s.CompletedRuns, s.FailedRuns, s.SuccessRate*100))
 	if s.AvgDurationSecs > 0 || s.MaxDurationSecs > 0 || s.MinDurationSecs > 0 {
 		b.WriteString(fmt.Sprintf("  Duration: avg %.1fs, max %.1fs, min %.1fs\n", s.AvgDurationSecs, s.MaxDurationSecs, s.MinDurationSecs))
 	}
@@ -150,8 +150,8 @@ func FormatWorkflowRunStats(s *db.WorkflowRunStats) string {
 	if len(s.PerWorkflow) > 0 {
 		b.WriteString("\nPer Workflow:\n")
 		for _, pw := range s.PerWorkflow {
-			b.WriteString(fmt.Sprintf("  %s: %d runs, %d completed, avg %.1fs\n",
-				pw.WorkflowID, pw.TotalRuns, pw.CompletedRuns, pw.AvgDurationSecs))
+			b.WriteString(fmt.Sprintf("  %s: %d runs, %d completed, %.0f%% success, avg %.1fs\n",
+				pw.WorkflowID, pw.TotalRuns, pw.CompletedRuns, pw.SuccessRate*100, pw.AvgDurationSecs))
 		}
 	}
 	return b.String()

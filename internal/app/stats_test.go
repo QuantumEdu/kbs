@@ -174,6 +174,7 @@ func TestGetStats_WorkflowRunsPopulated(t *testing.T) {
 			TotalRuns:     10,
 			CompletedRuns: 7,
 			FailedRuns:    2,
+			SuccessRate:   0.7,
 		},
 	}
 	svc := NewStatsService(&mockEntryStore{}, &mockArtifactStore{}, &mockProjectStore{})
@@ -194,6 +195,9 @@ func TestGetStats_WorkflowRunsPopulated(t *testing.T) {
 	}
 	if stats.WorkflowRuns.FailedRuns != 2 {
 		t.Errorf("WorkflowRuns.FailedRuns = %d, want 2", stats.WorkflowRuns.FailedRuns)
+	}
+	if stats.WorkflowRuns.SuccessRate != 0.7 {
+		t.Errorf("WorkflowRuns.SuccessRate = %f, want 0.7", stats.WorkflowRuns.SuccessRate)
 	}
 }
 

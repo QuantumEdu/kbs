@@ -1069,6 +1069,9 @@ func (r *ToolRegistry) handleRouteScenario(ctx context.Context, args map[string]
 }
 
 func (r *ToolRegistry) handleGetStats(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.statsSvc == nil {
+		return errResult("Error: stats service not available"), nil
+	}
 	stats, err := r.statsSvc.GetStats(ctx)
 	if err != nil {
 		return errResult("Error: " + err.Error()), nil
@@ -1077,6 +1080,9 @@ func (r *ToolRegistry) handleGetStats(ctx context.Context, args map[string]inter
 }
 
 func (r *ToolRegistry) handleListWorkflowRuns(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.workflowRunSvc == nil {
+		return errResult("Error: workflow run service not available"), nil
+	}
 	workflowID := strArg(args, "workflow_id")
 	limit := intArg(args, "limit")
 	if limit <= 0 {
@@ -1108,6 +1114,7 @@ func (r *ToolRegistry) handleListWorkflowRuns(ctx context.Context, args map[stri
 		if i < len(progress) {
 			r["completed_steps"] = progress[i].CompletedSteps
 			r["total_steps"] = progress[i].TotalSteps
+			r["step_ratio"] = progress[i].StepRatio
 		}
 		results = append(results, r)
 	}
@@ -1115,6 +1122,9 @@ func (r *ToolRegistry) handleListWorkflowRuns(ctx context.Context, args map[stri
 }
 
 func (r *ToolRegistry) handleGetRun(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.workflowRunSvc == nil {
+		return errResult("Error: workflow run service not available"), nil
+	}
 	runID := strArg(args, "run_id")
 	if runID == "" {
 		return errResult("Error: run_id is required"), nil

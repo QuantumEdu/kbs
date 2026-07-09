@@ -1382,6 +1382,34 @@ func TestGetStatsMCP(t *testing.T) {
 	if !strings.Contains(raw, `"total_runs":1`) || !strings.Contains(raw, `"completed_runs":1`) {
 		t.Errorf("expected total_runs=1, completed_runs=1: %s", raw)
 	}
+	if !strings.Contains(raw, `"success_rate":1`) {
+		t.Errorf("expected success_rate=1: %s", raw)
+	}
+}
+
+func TestAnalyticsMCPHandlersReturnErrorsWhenServicesMissing(t *testing.T) {
+	reg, _, cleanup := setupMCPServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	result, err := reg.Call(ctx, "get_stats", nil)
+	if err != nil {
+		t.Fatalf("get_stats: %v", err)
+	}
+	if !result.IsError || !strings.Contains(result.Content[0].Text, "stats service not available") {
+		t.Fatalf("expected missing stats service error, got %+v", result)
+	}
+
+	reg.workflowRunSvc = nil
+	for _, name := range []string{"list_workflow_runs", "get_run"} {
+		result, err := reg.Call(ctx, name, map[string]interface{}{"run_id": "run-missing"})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !result.IsError || !strings.Contains(result.Content[0].Text, "workflow run service not available") {
+			t.Fatalf("expected missing workflow run service error for %s, got %+v", name, result)
+		}
+	}
 }
 
 func TestListWorkflowRunsMCP(t *testing.T) {
@@ -1412,6 +1440,9 @@ func TestListWorkflowRunsMCP(t *testing.T) {
 	}
 	if !strings.Contains(raw, `"completed_steps"`) {
 		t.Errorf("missing completed_steps: %s", raw)
+	}
+	if !strings.Contains(raw, `"step_ratio"`) {
+		t.Errorf("missing step_ratio: %s", raw)
 	}
 
 	// Filtered by workflow_id

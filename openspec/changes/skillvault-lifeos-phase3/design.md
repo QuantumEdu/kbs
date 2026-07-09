@@ -150,7 +150,7 @@ GROUP BY workflow_id;
 SELECT COUNT(*) FROM run_steps WHERE status = 'failed';
 
 -- Progress per run (completed/total steps):
-SELECT rs.run_id, 
+SELECT rs.run_id,
        SUM(CASE WHEN rs.status='completed' THEN 1 ELSE 0 END) AS completed,
        COUNT(*) AS total
 FROM run_steps rs
