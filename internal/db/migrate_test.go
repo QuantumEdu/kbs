@@ -285,8 +285,8 @@ func TestMigrationIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to count migrations: %v", err)
 	}
-	if count != 8 {
-		t.Errorf("expected 8 migration records (v1..v8), got %d", count)
+	if count != 9 {
+		t.Errorf("expected 9 migration records (v1..v9), got %d", count)
 	}
 }
 

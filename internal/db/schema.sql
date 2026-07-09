@@ -1,7 +1,7 @@
--- SkillVault Schema Reference (v3 Workflow Pipelines) + Sprint 1 entry_refs + handoff + external_ref + routing
+-- SkillVault Schema Reference (v3 Workflow Pipelines) + Sprint 1 entry_refs + handoff + external_ref + routing + entry_versions
 -- This file is the consolidated reference schema.
 -- Keep in sync with internal/db/migrations/002_entry_refs_and_handoff.sql, 003_hermes.sql,
--- 004_workflow_pipelines.sql, and 006_routing_and_import.sql.
+-- 004_workflow_pipelines.sql, 006_routing_and_import.sql, and 009_entry_versions.sql.
 
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version     INTEGER PRIMARY KEY,
@@ -173,6 +173,19 @@ CREATE INDEX IF NOT EXISTS idx_entry_links_to ON entry_links(to_entry_id);
 CREATE INDEX IF NOT EXISTS idx_entry_links_active ON entry_links(active) WHERE active = 1;
 CREATE INDEX IF NOT EXISTS idx_runs_workflow ON runs(workflow_id);
 CREATE INDEX IF NOT EXISTS idx_run_steps_run ON run_steps(run_id);
+
+CREATE TABLE IF NOT EXISTS entry_versions (
+    version_id      TEXT PRIMARY KEY,
+    entry_id        TEXT NOT NULL REFERENCES entries(id),
+    version_number  INTEGER NOT NULL,
+    title           TEXT NOT NULL DEFAULT '',
+    summary         TEXT NOT NULL DEFAULT '',
+    body_optional   TEXT NOT NULL DEFAULT '',
+    saved_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(entry_id, version_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entry_versions_entry_id ON entry_versions(entry_id);
 
 CREATE TABLE IF NOT EXISTS entry_embeddings (
     entry_id    TEXT PRIMARY KEY REFERENCES entries(id),
