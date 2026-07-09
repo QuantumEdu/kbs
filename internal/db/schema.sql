@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS entries (
             type            TEXT NOT NULL CHECK(type IN ('prompt','skill','workflow_note','reference','user','feedback','project_state','session','decision','artifact_summary','handoff','routing')),
     summary         TEXT DEFAULT '',
     body_optional   TEXT DEFAULT '',
-    purpose         TEXT DEFAULT '',
+    purpose         TEXT DEFAULT '' CHECK(purpose IN ('', 'WORK', 'KNOWLEDGE', 'LEARNING', 'RELATIONSHIP', 'STATE', 'OBSERVABILITY')),
     status          TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('draft','active','archived','deprecated','canonical')),
     project_id      TEXT REFERENCES projects(id),
     artifact_id     TEXT,

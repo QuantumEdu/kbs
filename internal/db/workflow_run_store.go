@@ -88,6 +88,9 @@ func (s *sqliteWorkflowRunStore) GetRun(ctx context.Context, id string) (domain.
 		}
 		steps = append(steps, step)
 	}
+	if err := rows.Err(); err != nil {
+		return run, nil, fmt.Errorf("iterate run steps: %w", err)
+	}
 
 	if steps == nil {
 		steps = []domain.WorkflowRunStep{}
@@ -118,6 +121,9 @@ func (s *sqliteWorkflowRunStore) ListRuns(ctx context.Context, workflowID string
 		}
 		runs = append(runs, run)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate runs: %w", err)
+	}
 
 	if runs == nil {
 		runs = []domain.WorkflowRun{}
@@ -145,4 +151,150 @@ func (s *sqliteWorkflowRunStore) UpdateRunStatus(ctx context.Context, runID stri
 		return fmt.Errorf("update run status: %w", err)
 	}
 	return nil
+}
+
+// GetRunStats returns aggregate run analytics, optionally filtered by workflow ID.
+func (s *sqliteWorkflowRunStore) GetRunStats(ctx context.Context, workflowID *string) (*WorkflowRunStats, error) {
+	stats := &WorkflowRunStats{}
+
+	// Aggregate: total, completed, failed, avg/max/min duration (only finished runs for duration).
+	err := s.db.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status = 'failed'    THEN 1 ELSE 0 END), 0),
+			COALESCE(AVG(CASE WHEN finished_at IS NOT NULL THEN julianday(finished_at) - julianday(started_at) END) * 86400, 0),
+			COALESCE(MAX(CASE WHEN finished_at IS NOT NULL THEN julianday(finished_at) - julianday(started_at) END) * 86400, 0),
+			COALESCE(MIN(CASE WHEN finished_at IS NOT NULL THEN julianday(finished_at) - julianday(started_at) END) * 86400, 0)
+		FROM runs
+		WHERE (? IS NULL OR workflow_id = ?)
+	`, workflowID, workflowID).Scan(
+		&stats.TotalRuns, &stats.CompletedRuns, &stats.FailedRuns,
+		&stats.AvgDurationSecs, &stats.MaxDurationSecs, &stats.MinDurationSecs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get run stats: %w", err)
+	}
+	if stats.TotalRuns > 0 {
+		stats.SuccessRate = float64(stats.CompletedRuns) / float64(stats.TotalRuns)
+	}
+
+	// Failed step count across all runs (respects workflow filter via runs subquery).
+	err = s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM run_steps
+		WHERE status = 'failed'
+		  AND run_id IN (SELECT id FROM runs WHERE (? IS NULL OR workflow_id = ?))
+	`, workflowID, workflowID).Scan(&stats.FailedStepCount)
+	if err != nil {
+		return nil, fmt.Errorf("get failed step count: %w", err)
+	}
+
+	// Per-workflow breakdown.
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			workflow_id,
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END), 0),
+			COALESCE(AVG(CASE WHEN finished_at IS NOT NULL THEN julianday(finished_at) - julianday(started_at) END) * 86400, 0)
+		FROM runs
+		WHERE (? IS NULL OR workflow_id = ?)
+		GROUP BY workflow_id
+		ORDER BY workflow_id
+	`, workflowID, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("get per-workflow stats: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var pw WorkflowRunPerWorkflow
+		if err := rows.Scan(&pw.WorkflowID, &pw.TotalRuns, &pw.CompletedRuns, &pw.AvgDurationSecs); err != nil {
+			return nil, fmt.Errorf("scan per-workflow: %w", err)
+		}
+		if pw.TotalRuns > 0 {
+			pw.SuccessRate = float64(pw.CompletedRuns) / float64(pw.TotalRuns)
+		}
+		stats.PerWorkflow = append(stats.PerWorkflow, pw)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate per-workflow stats: %w", err)
+	}
+
+	return stats, nil
+}
+
+// ListAllRuns returns runs with step completion progress, optionally filtered by workflow ID.
+func (s *sqliteWorkflowRunStore) ListAllRuns(ctx context.Context, workflowID *string, limit, offset int) ([]domain.WorkflowRun, []RunProgress, error) {
+	// Query runs with progress via LEFT JOIN on a step-aggregate subquery.
+	type runWithProgress struct {
+		domain.WorkflowRun
+		FinishedAt     sql.NullTime
+		CompletedSteps int
+		TotalSteps     int
+	}
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT
+			r.id, r.workflow_id,
+			COALESCE(r.input, ''), COALESCE(r.output, ''),
+			r.status, r.started_at, r.finished_at,
+			COALESCE(rs_progress.completed, 0) AS completed_steps,
+			COALESCE(rs_progress.total, 0)   AS total_steps
+		FROM runs r
+		LEFT JOIN (
+			SELECT run_id,
+				SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
+				COUNT(*) AS total
+			FROM run_steps
+			GROUP BY run_id
+		) rs_progress ON r.id = rs_progress.run_id
+		WHERE (? IS NULL OR r.workflow_id = ?)
+		ORDER BY r.started_at DESC
+		LIMIT ? OFFSET ?
+	`, workflowID, workflowID, limit, offset)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list all runs: %w", err)
+	}
+	defer rows.Close()
+
+	var runs []domain.WorkflowRun
+	var progresses []RunProgress
+
+	for rows.Next() {
+		var rwp runWithProgress
+		if err := rows.Scan(
+			&rwp.ID, &rwp.WorkflowID,
+			&rwp.Input, &rwp.Output,
+			&rwp.Status, &rwp.StartedAt, &rwp.FinishedAt,
+			&rwp.CompletedSteps, &rwp.TotalSteps,
+		); err != nil {
+			return nil, nil, fmt.Errorf("scan run with progress: %w", err)
+		}
+		run := rwp.WorkflowRun
+		if rwp.FinishedAt.Valid {
+			run.FinishedAt = &rwp.FinishedAt.Time
+		}
+		runs = append(runs, run)
+		stepRatio := 0.0
+		if rwp.TotalSteps > 0 {
+			stepRatio = float64(rwp.CompletedSteps) / float64(rwp.TotalSteps)
+		}
+		progresses = append(progresses, RunProgress{
+			RunID:          run.ID,
+			CompletedSteps: rwp.CompletedSteps,
+			TotalSteps:     rwp.TotalSteps,
+			StepRatio:      stepRatio,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("iterate runs with progress: %w", err)
+	}
+
+	if runs == nil {
+		runs = []domain.WorkflowRun{}
+		progresses = []RunProgress{}
+	}
+
+	return runs, progresses, nil
 }

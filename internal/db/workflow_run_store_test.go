@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/quantum-6/skillvault/internal/domain"
@@ -305,4 +306,258 @@ func parseStepID(t *testing.T, idStr string) int64 {
 		}
 	}
 	return id
+}
+
+// createSeededRun is a helper that creates an entry, workflow, and runs with given counts.
+func createSeededRun(t *testing.T, ctx context.Context, estore EntryStore, wstore WorkflowStore, rstore WorkflowRunStore, runID, entryID, wfID string, status domain.RunStatus, stepStatuses []domain.RunStatus) {
+	t.Helper()
+	gotSteps, err := wstore.GetSteps(ctx, wfID)
+	if err != nil {
+		t.Fatalf("GetSteps: %v", err)
+	}
+	var rs []domain.WorkflowRunStep
+	for i, ss := range stepStatuses {
+		if i >= len(gotSteps) {
+			t.Fatalf("need %d workflow steps but only %d exist", len(stepStatuses), len(gotSteps))
+		}
+		rs = append(rs, domain.WorkflowRunStep{
+			ID:      fmt.Sprintf("%s-step%d", runID, i),
+			RunID:   runID,
+			StepID:  parseStepID(t, gotSteps[i].ID),
+			EntryID: entryID,
+			Status:  ss,
+		})
+	}
+	run := domain.WorkflowRun{ID: runID, WorkflowID: wfID}
+	if err := rstore.CreateRun(ctx, run, rs); err != nil {
+		t.Fatalf("CreateRun %s: %v", runID, err)
+	}
+	if status != domain.RunStatusPending {
+		if err := rstore.UpdateRunStatus(ctx, runID, status, ""); err != nil {
+			t.Fatalf("UpdateRunStatus %s: %v", runID, err)
+		}
+	}
+}
+
+// Task 1.1: TestGetRunStats_MixedStatuses
+func TestGetRunStats_MixedStatuses(t *testing.T) {
+	estore, wstore, rstore, cleanup := setupRunStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create entry + workflow with 2 steps.
+	entry := domain.Entry{ID: "entry-mix", Title: "E", Slug: "entry-mix", Type: domain.EntryTypePrompt, BodyOptional: "body", Status: domain.StatusActive}
+	if err := estore.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("Save entry: %v", err)
+	}
+	wf := domain.Workflow{ID: "wf-mix", Name: "W", Slug: "wf-mix", Status: domain.StatusActive}
+	wfSteps := []domain.WorkflowStep{
+		{ID: "ws1", WorkflowID: "wf-mix", OrderIndex: 1, Title: "S1", Instruction: "Step", EntrySlug: "entry-mix"},
+		{ID: "ws2", WorkflowID: "wf-mix", OrderIndex: 2, Title: "S2", Instruction: "Step", EntrySlug: "entry-mix"},
+	}
+	if err := wstore.Save(ctx, wf, wfSteps); err != nil {
+		t.Fatalf("Save workflow: %v", err)
+	}
+
+	// Seed: 7 completed, 2 failed, 1 running (pending).
+	for i := 1; i <= 7; i++ {
+		createSeededRun(t, ctx, estore, wstore, rstore, fmt.Sprintf("run-mix-c%d", i), "entry-mix", "wf-mix", domain.RunStatusCompleted, []domain.RunStatus{domain.RunStatusCompleted})
+	}
+	for i := 1; i <= 2; i++ {
+		createSeededRun(t, ctx, estore, wstore, rstore, fmt.Sprintf("run-mix-f%d", i), "entry-mix", "wf-mix", domain.RunStatusFailed, []domain.RunStatus{domain.RunStatusFailed})
+	}
+	createSeededRun(t, ctx, estore, wstore, rstore, "run-mix-p1", "entry-mix", "wf-mix", domain.RunStatusPending, []domain.RunStatus{domain.RunStatusPending})
+
+	stats, err := rstore.GetRunStats(ctx, nil)
+	if err != nil {
+		t.Fatalf("GetRunStats: %v", err)
+	}
+
+	if stats.TotalRuns != 10 {
+		t.Errorf("TotalRuns = %d, want 10", stats.TotalRuns)
+	}
+	if stats.CompletedRuns != 7 {
+		t.Errorf("CompletedRuns = %d, want 7", stats.CompletedRuns)
+	}
+	if stats.FailedRuns != 2 {
+		t.Errorf("FailedRuns = %d, want 2", stats.FailedRuns)
+	}
+	if stats.SuccessRate != 0.7 {
+		t.Errorf("SuccessRate = %f, want 0.7", stats.SuccessRate)
+	}
+	if stats.FailedStepCount != 2 {
+		t.Errorf("FailedStepCount = %d, want 2", stats.FailedStepCount)
+	}
+	// Duration stats should be populated (completed + failed runs have finished_at).
+	// Duration may be zero when created/completed near-instantly.
+	if stats.AvgDurationSecs < 0 {
+		t.Errorf("AvgDurationSecs = %f, want >= 0", stats.AvgDurationSecs)
+	}
+	if stats.MaxDurationSecs < 0 {
+		t.Errorf("MaxDurationSecs = %f, want >= 0", stats.MaxDurationSecs)
+	}
+	if stats.MinDurationSecs < 0 {
+		t.Errorf("MinDurationSecs = %f, want >= 0", stats.MinDurationSecs)
+	}
+}
+
+// Task 1.2: TestGetRunStats_Empty
+func TestGetRunStats_Empty(t *testing.T) {
+	_, _, rstore, cleanup := setupRunStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	stats, err := rstore.GetRunStats(ctx, nil)
+	if err != nil {
+		t.Fatalf("GetRunStats on empty DB: %v", err)
+	}
+
+	if stats.TotalRuns != 0 {
+		t.Errorf("TotalRuns = %d, want 0", stats.TotalRuns)
+	}
+	if stats.CompletedRuns != 0 {
+		t.Errorf("CompletedRuns = %d, want 0", stats.CompletedRuns)
+	}
+	if stats.FailedRuns != 0 {
+		t.Errorf("FailedRuns = %d, want 0", stats.FailedRuns)
+	}
+	if stats.SuccessRate != 0 {
+		t.Errorf("SuccessRate = %f, want 0", stats.SuccessRate)
+	}
+	if stats.FailedStepCount != 0 {
+		t.Errorf("FailedStepCount = %d, want 0", stats.FailedStepCount)
+	}
+	if stats.AvgDurationSecs != 0 {
+		t.Errorf("AvgDurationSecs = %f, want 0", stats.AvgDurationSecs)
+	}
+	if stats.MaxDurationSecs != 0 {
+		t.Errorf("MaxDurationSecs = %f, want 0", stats.MaxDurationSecs)
+	}
+	if stats.MinDurationSecs != 0 {
+		t.Errorf("MinDurationSecs = %f, want 0", stats.MinDurationSecs)
+	}
+}
+
+// Task 1.3: TestGetRunStats_PerWorkflow
+func TestGetRunStats_PerWorkflow(t *testing.T) {
+	estore, wstore, rstore, cleanup := setupRunStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create entry.
+	entry := domain.Entry{ID: "entry-pw", Title: "E", Slug: "entry-pw", Type: domain.EntryTypePrompt, BodyOptional: "body", Status: domain.StatusActive}
+	if err := estore.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("Save entry: %v", err)
+	}
+
+	// Create two workflows, each with 1 step.
+	for _, pair := range []struct{ wfID, wfName, wfSlug string }{ {"wf-a", "A", "wf-a"}, {"wf-b", "B", "wf-b"} } {
+		wf := domain.Workflow{ID: pair.wfID, Name: pair.wfName, Slug: pair.wfSlug, Status: domain.StatusActive}
+		steps := []domain.WorkflowStep{{ID: "s-" + pair.wfID, WorkflowID: pair.wfID, OrderIndex: 1, Title: "S", Instruction: "Step", EntrySlug: "entry-pw"}}
+		if err := wstore.Save(ctx, wf, steps); err != nil {
+			t.Fatalf("Save workflow %s: %v", pair.wfID, err)
+		}
+	}
+
+	// Workflow A: 3 completed runs.
+	for i := 1; i <= 3; i++ {
+		createSeededRun(t, ctx, estore, wstore, rstore, fmt.Sprintf("run-pw-a%d", i), "entry-pw", "wf-a", domain.RunStatusCompleted, []domain.RunStatus{domain.RunStatusCompleted})
+	}
+	// Workflow B: 2 completed runs.
+	for i := 1; i <= 2; i++ {
+		createSeededRun(t, ctx, estore, wstore, rstore, fmt.Sprintf("run-pw-b%d", i), "entry-pw", "wf-b", domain.RunStatusCompleted, []domain.RunStatus{domain.RunStatusCompleted})
+	}
+
+	// Query per-workflow: filter A.
+	wfA := "wf-a"
+	statsA, err := rstore.GetRunStats(ctx, &wfA)
+	if err != nil {
+		t.Fatalf("GetRunStats(wf-a): %v", err)
+	}
+	if statsA.TotalRuns != 3 {
+		t.Errorf("TotalRuns for wf-a = %d, want 3", statsA.TotalRuns)
+	}
+	if statsA.CompletedRuns != 3 {
+		t.Errorf("CompletedRuns for wf-a = %d, want 3", statsA.CompletedRuns)
+	}
+	if statsA.SuccessRate != 1 {
+		t.Errorf("SuccessRate for wf-a = %f, want 1", statsA.SuccessRate)
+	}
+	if len(statsA.PerWorkflow) != 1 || statsA.PerWorkflow[0].WorkflowID != "wf-a" {
+		t.Fatalf("PerWorkflow for wf-a = %+v, want only wf-a", statsA.PerWorkflow)
+	}
+	if statsA.PerWorkflow[0].SuccessRate != 1 {
+		t.Errorf("PerWorkflow[0].SuccessRate = %f, want 1", statsA.PerWorkflow[0].SuccessRate)
+	}
+
+	// Query per-workflow: filter B.
+	wfB := "wf-b"
+	statsB, err := rstore.GetRunStats(ctx, &wfB)
+	if err != nil {
+		t.Fatalf("GetRunStats(wf-b): %v", err)
+	}
+	if statsB.TotalRuns != 2 {
+		t.Errorf("TotalRuns for wf-b = %d, want 2", statsB.TotalRuns)
+	}
+	if statsB.CompletedRuns != 2 {
+		t.Errorf("CompletedRuns for wf-b = %d, want 2", statsB.CompletedRuns)
+	}
+	if len(statsB.PerWorkflow) != 1 || statsB.PerWorkflow[0].WorkflowID != "wf-b" {
+		t.Fatalf("PerWorkflow for wf-b = %+v, want only wf-b", statsB.PerWorkflow)
+	}
+}
+
+// Task 1.4: TestListAllRuns_WithProgress
+func TestListAllRuns_WithProgress(t *testing.T) {
+	estore, wstore, rstore, cleanup := setupRunStore(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create entry + workflow with 5 steps.
+	entry := domain.Entry{ID: "entry-prog", Title: "E", Slug: "entry-prog", Type: domain.EntryTypePrompt, BodyOptional: "body", Status: domain.StatusActive}
+	if err := estore.Save(ctx, entry, nil); err != nil {
+		t.Fatalf("Save entry: %v", err)
+	}
+	wf := domain.Workflow{ID: "wf-prog", Name: "W", Slug: "wf-prog", Status: domain.StatusActive}
+	wfSteps := make([]domain.WorkflowStep, 5)
+	for i := 0; i < 5; i++ {
+		wfSteps[i] = domain.WorkflowStep{ID: fmt.Sprintf("wsp%d", i), WorkflowID: "wf-prog", OrderIndex: i + 1, Title: fmt.Sprintf("S%d", i+1), Instruction: "Step", EntrySlug: "entry-prog"}
+	}
+	if err := wstore.Save(ctx, wf, wfSteps); err != nil {
+		t.Fatalf("Save workflow: %v", err)
+	}
+
+	// Create run with 5 steps: 3 completed, 2 pending.
+	stepStatuses := []domain.RunStatus{domain.RunStatusCompleted, domain.RunStatusCompleted, domain.RunStatusPending, domain.RunStatusCompleted, domain.RunStatusPending}
+	createSeededRun(t, ctx, estore, wstore, rstore, "run-prog-r1", "entry-prog", "wf-prog", domain.RunStatusPending, stepStatuses)
+
+	runs, progresses, err := rstore.ListAllRuns(ctx, nil, 10, 0)
+	if err != nil {
+		t.Fatalf("ListAllRuns: %v", err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(runs))
+	}
+	if len(progresses) != 1 {
+		t.Fatalf("expected 1 progress, got %d", len(progresses))
+	}
+
+	r := runs[0]
+	p := progresses[0]
+
+	if r.ID != "run-prog-r1" {
+		t.Errorf("run ID = %q, want %q", r.ID, "run-prog-r1")
+	}
+	if p.RunID != "run-prog-r1" {
+		t.Errorf("progress RunID = %q, want %q", p.RunID, "run-prog-r1")
+	}
+	if p.CompletedSteps != 3 {
+		t.Errorf("CompletedSteps = %d, want 3", p.CompletedSteps)
+	}
+	if p.TotalSteps != 5 {
+		t.Errorf("TotalSteps = %d, want 5", p.TotalSteps)
+	}
+	if p.StepRatio != 0.6 {
+		t.Errorf("StepRatio = %f, want 0.6", p.StepRatio)
+	}
 }

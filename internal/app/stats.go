@@ -6,26 +6,29 @@ import (
 	"strings"
 	"time"
 
+	"github.com/quantum-6/skillvault/internal/db"
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
 // VaultStats holds aggregated vault statistics.
 type VaultStats struct {
-	TotalEntries   int
-	TotalArtifacts int
-	TotalProjects  int
-	TotalChars     int // sum of body + summary lengths across all entries
-	TodayEntries   int
-	TodayArtifacts int
-	TodayChars     int // sum of body + summary lengths for today's entries
-	TokenEstimate  int // TotalChars / 4 (rough heuristic)
+	TotalEntries   int                  `json:"total_entries"`
+	TotalArtifacts int                  `json:"total_artifacts"`
+	TotalProjects  int                  `json:"total_projects"`
+	TotalChars     int                  `json:"total_chars"`
+	TodayEntries   int                  `json:"today_entries"`
+	TodayArtifacts int                  `json:"today_artifacts"`
+	TodayChars     int                  `json:"today_chars"`
+	TokenEstimate  int                  `json:"token_estimate"`
+	WorkflowRuns   *db.WorkflowRunStats `json:"workflow_runs,omitempty"`
 }
 
 // StatsService provides vault-level aggregation.
 type StatsService struct {
-	entryStore    EntryStore
-	artifactStore ArtifactStore
-	projectStore  ProjectStore
+	entryStore       EntryStore
+	artifactStore    ArtifactStore
+	projectStore     ProjectStore
+	workflowRunStore WorkflowRunStore
 }
 
 // NewStatsService creates a StatsService.
@@ -35,6 +38,12 @@ func NewStatsService(entryStore EntryStore, artifactStore ArtifactStore, project
 		artifactStore: artifactStore,
 		projectStore:  projectStore,
 	}
+}
+
+// WithWorkflowRunStore attaches an optional WorkflowRunStore for run analytics.
+func (s *StatsService) WithWorkflowRunStore(store WorkflowRunStore) *StatsService {
+	s.workflowRunStore = store
+	return s
 }
 
 // GetStats aggregates vault statistics.
@@ -85,6 +94,15 @@ func (s *StatsService) GetStats(ctx context.Context) (*VaultStats, error) {
 
 	stats.TokenEstimate = stats.TotalChars / 4
 
+	// Workflow run analytics (optional — only when store is wired).
+	if s.workflowRunStore != nil {
+		runStats, err := s.workflowRunStore.GetRunStats(ctx, nil)
+		if err != nil {
+			return nil, fmt.Errorf("get run stats: %w", err)
+		}
+		stats.WorkflowRuns = runStats
+	}
+
 	return stats, nil
 }
 
@@ -119,6 +137,26 @@ func FormatStats(s *VaultStats) string {
 	return b.String()
 }
 
+// FormatWorkflowRunStats produces a summary of workflow run analytics.
+func FormatWorkflowRunStats(s *db.WorkflowRunStats) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("\nWorkflow Runs: %d total (%d completed, %d failed, %.0f%% success)\n", s.TotalRuns, s.CompletedRuns, s.FailedRuns, s.SuccessRate*100))
+	if s.AvgDurationSecs > 0 || s.MaxDurationSecs > 0 || s.MinDurationSecs > 0 {
+		b.WriteString(fmt.Sprintf("  Duration: avg %.1fs, max %.1fs, min %.1fs\n", s.AvgDurationSecs, s.MaxDurationSecs, s.MinDurationSecs))
+	}
+	if s.FailedStepCount > 0 {
+		b.WriteString(fmt.Sprintf("  Failed steps: %d\n", s.FailedStepCount))
+	}
+	if len(s.PerWorkflow) > 0 {
+		b.WriteString("\nPer Workflow:\n")
+		for _, pw := range s.PerWorkflow {
+			b.WriteString(fmt.Sprintf("  %s: %d runs, %d completed, %.0f%% success, avg %.1fs\n",
+				pw.WorkflowID, pw.TotalRuns, pw.CompletedRuns, pw.SuccessRate*100, pw.AvgDurationSecs))
+		}
+	}
+	return b.String()
+}
+
 // EntryStore is the subset of db.EntryStore needed by StatsService.
 type EntryStore interface {
 	List(ctx context.Context, filter domain.EntryFilter) ([]domain.EntryListResult, error)
@@ -134,7 +172,13 @@ type ProjectStore interface {
 	List(ctx context.Context, includeArchived bool) ([]domain.Project, error)
 }
 
+// WorkflowRunStore is the subset of db.WorkflowRunStore needed by StatsService.
+type WorkflowRunStore interface {
+	GetRunStats(ctx context.Context, workflowID *string) (*db.WorkflowRunStats, error)
+}
+
 // Compile-time interface checks.
 var _ EntryStore = (EntryStore)(nil)
 var _ ArtifactStore = (ArtifactStore)(nil)
 var _ ProjectStore = (ProjectStore)(nil)
+var _ WorkflowRunStore = (WorkflowRunStore)(nil)
