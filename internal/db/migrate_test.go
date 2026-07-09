@@ -285,8 +285,8 @@ func TestMigrationIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to count migrations: %v", err)
 	}
-	if count != 7 {
-		t.Errorf("expected 7 migration records (v1..v7), got %d", count)
+	if count != 8 {
+		t.Errorf("expected 8 migration records (v1..v8), got %d", count)
 	}
 }
 
@@ -559,5 +559,128 @@ func TestMigration006UpgradeFromV5(t *testing.T) {
 	err = db.QueryRow("SELECT version FROM schema_migrations WHERE version = 6").Scan(&version)
 	if err != nil {
 		t.Errorf("migration version 6 not recorded after upgrade: %v", err)
+	}
+}
+
+// TestMigration008OBSERVABILITY verifies that migration 008:
+//  1. Preserves all existing entries after the purpose CHECK constraint expands.
+//  2. Accepts OBSERVABILITY as a valid purpose.
+//  3. Rejects invalid purpose values.
+func TestMigration008OBSERVABILITY(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open in-memory DB: %v", err)
+	}
+	defer db.Close()
+
+	// Create schema_migrations table manually for staged migration.
+	if _, err := db.Exec(`CREATE TABLE schema_migrations (
+		version     INTEGER PRIMARY KEY,
+		name        TEXT NOT NULL,
+		applied_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		t.Fatalf("failed to create schema_migrations: %v", err)
+	}
+
+	// Apply migrations 001-007 to simulate an existing vault.
+	for v := 1; v <= 7; v++ {
+		applyMigrationVersion(t, db, v)
+	}
+
+	// Seed entries with various purpose values that exist pre-008.
+	if _, err := db.Exec(`
+		INSERT INTO entries (id, name, title, slug, type, summary, body_optional, purpose, status) VALUES
+		('e-work',     'Work Entry',     'Work Entry',     'work-entry',      'prompt', 'work summary',     '', 'WORK',          'active'),
+		('e-knowledge','Knowledge Entry','Knowledge Entry','knowledge-entry',  'prompt', 'knowledge summary','', 'KNOWLEDGE',     'active'),
+		('e-empty',    'Empty Purpose',  'Empty Purpose',  'empty-purpose',   'prompt', 'empty summary',    '', '',              'active'),
+		('e-state',    'State Entry',    'State Entry',    'state-entry',     'prompt', 'state summary',    '', 'STATE',         'active')
+	`); err != nil {
+		t.Fatalf("failed to seed entries before migration 008: %v", err)
+	}
+
+	// Apply migration 008.
+	applyMigrationVersion(t, db, 8)
+
+	// Verify migration version 8 was recorded.
+	var version int
+	if err := db.QueryRow("SELECT version FROM schema_migrations WHERE version = 8").Scan(&version); err != nil {
+		t.Fatalf("migration version 8 not recorded: %v", err)
+	}
+
+	// --- Data preservation: all 4 seeded entries must still exist ---
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM entries").Scan(&count); err != nil {
+		t.Fatalf("failed to count entries after migration: %v", err)
+	}
+	if count != 4 {
+		t.Errorf("expected 4 preserved entries, got %d", count)
+	}
+
+	// Verify each seeded entry retained its purpose value.
+	rows, err := db.Query("SELECT id, purpose FROM entries ORDER BY id")
+	if err != nil {
+		t.Fatalf("failed to query entries: %v", err)
+	}
+	defer rows.Close()
+
+	expected := map[string]string{
+		"e-empty":    "",
+		"e-knowledge": "KNOWLEDGE",
+		"e-state":    "STATE",
+		"e-work":     "WORK",
+	}
+	for rows.Next() {
+		var id, purpose string
+		if err := rows.Scan(&id, &purpose); err != nil {
+			t.Errorf("failed to scan row: %v", err)
+			continue
+		}
+		if want, ok := expected[id]; ok && purpose != want {
+			t.Errorf("entry %s: purpose = %q, want %q", id, purpose, want)
+		}
+	}
+
+	// --- OBSERVABILITY is now accepted by the CHECK constraint ---
+	obsID := "e-obs"
+	if _, err := db.Exec("INSERT INTO entries (id, name, title, slug, type, summary, body_optional, purpose, status) VALUES (?, ?, ?, ?, 'prompt', 'obs summary', '', 'OBSERVABILITY', 'active')",
+		obsID, "Obs Entry", "Obs Entry", "obs-entry"); err != nil {
+		t.Errorf("CHECK constraint rejected OBSERVABILITY purpose: %v", err)
+	}
+
+	// Verify the OBSERVABILITY entry is retrievable.
+	var obsPurpose string
+	if err := db.QueryRow("SELECT purpose FROM entries WHERE id = ?", obsID).Scan(&obsPurpose); err != nil {
+		t.Errorf("failed to query OBSERVABILITY entry: %v", err)
+	} else if obsPurpose != "OBSERVABILITY" {
+		t.Errorf("expected purpose OBSERVABILITY, got %q", obsPurpose)
+	}
+
+	// --- Invalid purpose is rejected by CHECK constraint ---
+	_, err = db.Exec("INSERT INTO entries (id, name, title, slug, type, summary, body_optional, purpose, status) VALUES ('e-bad', 'Bad', 'Bad', 'bad-entry', 'prompt', 'bad', '', 'INVALID', 'active')")
+	if err == nil {
+		t.Error("CHECK constraint accepted invalid purpose 'INVALID'")
+	}
+	if err != nil && !strings.Contains(err.Error(), "CHECK constraint") {
+		t.Errorf("expected CHECK constraint error, got: %v", err)
+	}
+
+	// --- Type CHECK is unchanged (valid types from 007 still work) ---
+	if _, err := db.Exec("INSERT INTO entries (id, name, title, slug, type, summary, body_optional, purpose, status) VALUES ('e-type', 'Type Test', 'Type Test', 'type-test', 'handoff', 'type summary', '', '', 'active')"); err != nil {
+		t.Errorf("type CHECK regressed — 'handoff' rejected: %v", err)
+	}
+
+	// --- Critical indexes were recreated ---
+	for _, idx := range []string{"idx_entries_type", "idx_entries_project_id", "idx_entries_status", "idx_entries_slug", "idx_entries_active"} {
+		var idxCount int
+		if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?", idx).Scan(&idxCount); err != nil {
+			t.Errorf("failed to check index %s: %v", idx, err)
+		} else if idxCount != 1 {
+			t.Errorf("index %s missing after migration 008", idx)
+		}
+	}
+
+	// --- RunMigrations is idempotent after 008 ---
+	if err := RunMigrations(db); err != nil {
+		t.Errorf("RunMigrations should be idempotent after 008 but failed: %v", err)
 	}
 }
