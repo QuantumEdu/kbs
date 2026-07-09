@@ -32,22 +32,22 @@ type WorkflowStore interface {
 
 // WorkflowRunStats holds aggregated run analytics.
 type WorkflowRunStats struct {
-	TotalRuns       int
-	CompletedRuns   int
-	FailedRuns      int
-	AvgDurationSecs float64
-	MaxDurationSecs float64
-	MinDurationSecs float64
-	FailedStepCount int
-	PerWorkflow     []WorkflowRunPerWorkflow
+	TotalRuns       int                      `json:"total_runs"`
+	CompletedRuns   int                      `json:"completed_runs"`
+	FailedRuns      int                      `json:"failed_runs"`
+	AvgDurationSecs float64                  `json:"avg_duration_secs"`
+	MaxDurationSecs float64                  `json:"max_duration_secs"`
+	MinDurationSecs float64                  `json:"min_duration_secs"`
+	FailedStepCount int                      `json:"failed_step_count"`
+	PerWorkflow     []WorkflowRunPerWorkflow `json:"per_workflow,omitempty"`
 }
 
 // WorkflowRunPerWorkflow holds per-workflow aggregate metrics.
 type WorkflowRunPerWorkflow struct {
-	WorkflowID      string
-	TotalRuns       int
-	CompletedRuns   int
-	AvgDurationSecs float64
+	WorkflowID      string  `json:"workflow_id"`
+	TotalRuns       int     `json:"total_runs"`
+	CompletedRuns   int     `json:"completed_runs"`
+	AvgDurationSecs float64 `json:"avg_duration_secs"`
 }
 
 // RunProgress holds step completion progress for a single run.

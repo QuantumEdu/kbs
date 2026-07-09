@@ -853,6 +853,50 @@ func TestParseAddEntryFlagsPurpose(t *testing.T) {
 	}
 }
 
+func TestParseStatsFlags_WorkflowRuns(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want StatsFlags
+	}{
+		{
+			name: "defaults",
+			args: []string{"skillvault", "stats"},
+			want: StatsFlags{},
+		},
+		{
+			name: "workflow-runs true",
+			args: []string{"skillvault", "stats", "--workflow-runs"},
+			want: StatsFlags{WorkflowRuns: true},
+		},
+		{
+			name: "json true",
+			args: []string{"skillvault", "stats", "--json"},
+			want: StatsFlags{JSON: true},
+		},
+		{
+			name: "both flags",
+			args: []string{"skillvault", "stats", "--workflow-runs", "--json"},
+			want: StatsFlags{WorkflowRuns: true, JSON: true},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			flags, err := ParseStatsFlags(tt.args)
+			if err != nil {
+				t.Fatalf("ParseStatsFlags failed: %v", err)
+			}
+			if flags.WorkflowRuns != tt.want.WorkflowRuns {
+				t.Errorf("WorkflowRuns = %v, want %v", flags.WorkflowRuns, tt.want.WorkflowRuns)
+			}
+			if flags.JSON != tt.want.JSON {
+				t.Errorf("JSON = %v, want %v", flags.JSON, tt.want.JSON)
+			}
+		})
+	}
+}
+
 func TestParseSearchFlagsPurpose(t *testing.T) {
 	// --purpose filter parses correctly.
 	flags, err := ParseSearchFlags([]string{"skillvault", "search", "go", "--purpose", "WORK"})

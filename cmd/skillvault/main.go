@@ -213,7 +213,7 @@ func openVault() *vaultServices {
 	sessionSvc := app.NewSessionService(entrySvc, artifactSvc, projectSvc, store.Entries, store.Artifacts, store.Projects)
 	exportSvc := app.NewVaultExportService(store.ImportExport, store.Artifacts, store.Entries, store.Projects, store.Workflows)
 	importSvc := app.NewVaultImportService(store.ImportExport, store.Entries, store.Projects, store.Artifacts)
-	statsSvc := app.NewStatsService(store.Entries, store.Artifacts, store.Projects)
+	statsSvc := app.NewStatsService(store.Entries, store.Artifacts, store.Projects).WithWorkflowRunStore(store.WorkflowRuns)
 	saveResultSvc := app.NewSavePromptResultService(store.Entries, store.Projects, store.Artifacts)
 	workflowRunSvc := app.NewWorkflowRunService(store.Workflows, store.WorkflowRuns, store.Entries)
 	compareSvc := app.NewVectorService(store.Entries, store.Embeddings)
@@ -783,12 +783,31 @@ func runCLI(cmd string) {
 		}))
 
 	case "stats":
+		flags, err := cli.ParseStatsFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
 		stats, err := svc.statsSvc.GetStats(ctx)
 		if err != nil {
 			cli.PrintError(err)
 			os.Exit(1)
 		}
-		fmt.Println(app.FormatStats(stats))
+
+		if flags.JSON {
+			data, err := json.MarshalIndent(stats, "", "  ")
+			if err != nil {
+				cli.PrintError(fmt.Errorf("marshal stats: %w", err))
+				os.Exit(1)
+			}
+			fmt.Println(string(data))
+		} else {
+			fmt.Println(app.FormatStats(stats))
+			if flags.WorkflowRuns && stats.WorkflowRuns != nil {
+				fmt.Print(app.FormatWorkflowRunStats(stats.WorkflowRuns))
+			}
+		}
 
 	case "memory-index", "memory-reindex", "memory-list-external":
 		flags, err := cli.ParseMemoryIndexFlags(os.Args)
