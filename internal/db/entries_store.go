@@ -39,6 +39,13 @@ func (s *sqliteEntryStore) Save(ctx context.Context, entry domain.Entry, tags []
 			tag, tag, tag)
 	}
 
+	// Archive previous content before UPSERT when the entry exists and
+	// title, summary, or body_optional changed.
+	archiveErr := s.archiveBeforeSave(ctx, tx, entry)
+	if archiveErr != nil {
+		return fmt.Errorf("archive previous version: %w", archiveErr)
+	}
+
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO entries (id, name, title, slug, type, content, summary, body_optional, purpose, status, project_id, artifact_id, external_ref, tags_denorm, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -76,6 +83,55 @@ func (s *sqliteEntryStore) Save(ctx context.Context, entry domain.Entry, tags []
 	}
 
 	return tx.Commit()
+}
+
+// archiveBeforeSave inserts a version row for the current entry content
+// when the entry exists and its title, summary, or body_optional changed.
+// Runs inside the caller's transaction.
+func (s *sqliteEntryStore) archiveBeforeSave(ctx context.Context, tx *sql.Tx, newEntry domain.Entry) error {
+	// Look up the existing entry to compare content.
+	var oldTitle, oldSummary, oldBody string
+	err := tx.QueryRowContext(ctx,
+		`SELECT title, COALESCE(summary, ''), COALESCE(body_optional, '')
+		 FROM entries WHERE id = ?`, newEntry.ID,
+	).Scan(&oldTitle, &oldSummary, &oldBody)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// New entry — nothing to archive.
+			return nil
+		}
+		return fmt.Errorf("lookup existing entry: %w", err)
+	}
+
+	// Only archive if content actually changed.
+	if oldTitle == newEntry.Title && oldSummary == newEntry.Summary && oldBody == newEntry.BodyOptional {
+		return nil
+	}
+
+	// Calculate next version number.
+	var maxVersion int
+	err = tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(version_number), 0) FROM entry_versions WHERE entry_id = ?`,
+		newEntry.ID,
+	).Scan(&maxVersion)
+	if err != nil {
+		return fmt.Errorf("max version number: %w", err)
+	}
+	nextVersion := maxVersion + 1
+
+	// Generate version ID.
+	versionID := generateVersionID()
+
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO entry_versions (version_id, entry_id, version_number, title, summary, body_optional, saved_at)
+		 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+		versionID, newEntry.ID, nextVersion, oldTitle, oldSummary, oldBody,
+	)
+	if err != nil {
+		return fmt.Errorf("insert version row: %w", err)
+	}
+
+	return nil
 }
 
 func (s *sqliteEntryStore) Get(ctx context.Context, id string, includeArchived bool) (domain.EntryResult, error) {

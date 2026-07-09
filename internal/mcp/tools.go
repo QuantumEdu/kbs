@@ -19,18 +19,19 @@ type ToolRegistry struct {
 	tools   []Tool
 	handler ToolHandler
 
-	entrySvc       *app.EntryService
-	entryRefSvc    *app.EntryRefService
-	compareSvc     *app.VectorService
-	artifactSvc    *app.ArtifactService
-	contextSvc     *app.ContextService
-	seriesSvc      *app.SeriesService
-	workflowSvc    *app.WorkflowService
-	workflowRunSvc *app.WorkflowRunService
-	sessionSvc     *app.SessionService
-	projectSvc     *app.ProjectService
-	saveResultSvc  *app.SavePromptResultService
-	statsSvc       *app.StatsService
+	entrySvc          *app.EntryService
+	entryVersionSvc   *app.EntryVersionService
+	entryRefSvc       *app.EntryRefService
+	compareSvc        *app.VectorService
+	artifactSvc       *app.ArtifactService
+	contextSvc        *app.ContextService
+	seriesSvc         *app.SeriesService
+	workflowSvc       *app.WorkflowService
+	workflowRunSvc    *app.WorkflowRunService
+	sessionSvc        *app.SessionService
+	projectSvc        *app.ProjectService
+	saveResultSvc     *app.SavePromptResultService
+	statsSvc          *app.StatsService
 }
 
 // NewToolRegistry creates a registry with a generic handler (for testing).
@@ -43,6 +44,12 @@ func NewToolRegistry(handler ToolHandler) *ToolRegistry {
 // WithEntryRefService sets the entry ref service for graph operations.
 func (r *ToolRegistry) WithEntryRefService(svc *app.EntryRefService) *ToolRegistry {
 	r.entryRefSvc = svc
+	return r
+}
+
+// WithEntryVersionService sets the entry version service for version history operations.
+func (r *ToolRegistry) WithEntryVersionService(svc *app.EntryVersionService) *ToolRegistry {
+	r.entryVersionSvc = svc
 	return r
 }
 
@@ -210,6 +217,13 @@ func (r *ToolRegistry) registerV2Tools() {
 		{Name: "get_run", Description: "Get a single workflow run with its step details", InputSchema: schemaObj(map[string]interface{}{
 			"run_id": map[string]interface{}{"type": "string", "description": "Workflow run ID (required)"},
 		})},
+		{Name: "list_entry_versions", Description: "List version history for an entry (descending by version number)", InputSchema: schemaObj(map[string]interface{}{
+			"entry_id": map[string]interface{}{"type": "string", "description": "Entry ID (required)"},
+		})},
+		{Name: "restore_entry_version", Description: "Restore an entry to a previous version by version number", InputSchema: schemaObj(map[string]interface{}{
+			"entry_id":       map[string]interface{}{"type": "string", "description": "Entry ID (required)"},
+			"version_number": map[string]interface{}{"type": "number", "description": "Version number to restore (required)"},
+		})},
 	}
 }
 
@@ -275,6 +289,10 @@ func (r *ToolRegistry) dispatch(ctx context.Context, name string, args map[strin
 		return r.handleListWorkflowRuns(ctx, args)
 	case "get_run":
 		return r.handleGetRun(ctx, args)
+	case "list_entry_versions":
+		return r.handleListEntryVersions(ctx, args)
+	case "restore_entry_version":
+		return r.handleRestoreEntryVersion(ctx, args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -1148,6 +1166,51 @@ func (r *ToolRegistry) handleGetRun(ctx context.Context, args map[string]interfa
 		stepsOut[i] = sr
 	}
 	return jsonResult(map[string]interface{}{"run": run, "steps": stepsOut}), nil
+}
+
+func (r *ToolRegistry) handleListEntryVersions(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.entryVersionSvc == nil {
+		return errResult("Error: entry version service not available"), nil
+	}
+
+	entryID := strArg(args, "entry_id")
+	if entryID == "" {
+		return errResult("Error: entry_id is required"), nil
+	}
+
+	versions, err := r.entryVersionSvc.ListVersions(ctx, entryID)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+	if len(versions) == 0 {
+		return jsonResult([]interface{}{}), nil
+	}
+	return jsonResult(versions), nil
+}
+
+func (r *ToolRegistry) handleRestoreEntryVersion(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	if r.entryVersionSvc == nil {
+		return errResult("Error: entry version service not available"), nil
+	}
+
+	entryID := strArg(args, "entry_id")
+	if entryID == "" {
+		return errResult("Error: entry_id is required"), nil
+	}
+	versionNumber := intArg(args, "version_number")
+	if versionNumber < 1 {
+		return errResult("Error: version_number is required (must be >= 1)"), nil
+	}
+
+	if err := r.entryVersionSvc.RestoreVersion(ctx, entryID, versionNumber); err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+
+	return jsonResult(map[string]interface{}{
+		"entry_id":       entryID,
+		"version_number": versionNumber,
+		"status":         "restored",
+	}), nil
 }
 
 func errResult(text string) *ToolCallResult {

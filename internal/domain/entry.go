@@ -119,3 +119,16 @@ type SeriesRef struct {
 	TotalSteps int
 	Label      string
 }
+
+// EntryVersion represents a historical snapshot of an entry's content
+// before it was overwritten by Save(). Only title, summary, and
+// body_optional are versioned.
+type EntryVersion struct {
+	VersionID     string `json:"version_id"`
+	EntryID       string `json:"entry_id"`
+	VersionNumber int    `json:"version_number"`
+	Title         string `json:"title"`
+	Summary       string `json:"summary"`
+	BodyOptional  string `json:"body_optional"`
+	SavedAt       string `json:"saved_at"`
+}

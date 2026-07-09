@@ -916,3 +916,140 @@ func TestParseSearchFlagsPurpose(t *testing.T) {
 		t.Errorf("Purpose = %q, want empty", flags.Purpose)
 	}
 }
+
+func TestParseEntryHistoryFlags(t *testing.T) {
+	// Valid: entry history <id>
+	flags, err := ParseEntryHistoryFlags([]string{"skillvault", "entry", "history", "entry-123"})
+	if err != nil {
+		t.Fatalf("ParseEntryHistoryFlags failed: %v", err)
+	}
+	if flags.ID != "entry-123" {
+		t.Errorf("ID = %q, want 'entry-123'", flags.ID)
+	}
+
+	// Missing ID
+	_, err = ParseEntryHistoryFlags([]string{"skillvault", "entry", "history"})
+	if err == nil {
+		t.Fatal("expected error for missing entry ID")
+	}
+}
+
+func TestParseEntryRestoreFlags(t *testing.T) {
+	// Valid: entry restore <id> --version 2
+	flags, err := ParseEntryRestoreFlags([]string{"skillvault", "entry", "restore", "entry-123", "--version", "2"})
+	if err != nil {
+		t.Fatalf("ParseEntryRestoreFlags failed: %v", err)
+	}
+	if flags.ID != "entry-123" {
+		t.Errorf("ID = %q, want 'entry-123'", flags.ID)
+	}
+	if flags.Version != 2 {
+		t.Errorf("Version = %d, want 2", flags.Version)
+	}
+
+	// Missing --version
+	_, err = ParseEntryRestoreFlags([]string{"skillvault", "entry", "restore", "entry-123"})
+	if err == nil {
+		t.Fatal("expected error for missing --version")
+	}
+
+	// Version 0 invalid
+	_, err = ParseEntryRestoreFlags([]string{"skillvault", "entry", "restore", "entry-123", "--version", "0"})
+	if err == nil {
+		t.Fatal("expected error for version 0")
+	}
+}
+
+func TestParseCommandEntryHistory(t *testing.T) {
+	cmd, err := ParseCommand([]string{"skillvault", "entry", "history", "my-entry"})
+	if err != nil {
+		t.Fatalf("ParseCommand failed: %v", err)
+	}
+	if cmd != "entry-history" {
+		t.Errorf("cmd = %q, want 'entry-history'", cmd)
+	}
+
+	// Missing entry ID
+	_, err = ParseCommand([]string{"skillvault", "entry", "history"})
+	if err == nil {
+		t.Fatal("expected error for missing entry ID in history")
+	}
+}
+
+func TestParseCommandEntryRestore(t *testing.T) {
+	cmd, err := ParseCommand([]string{"skillvault", "entry", "restore", "my-entry"})
+	if err != nil {
+		t.Fatalf("ParseCommand failed: %v", err)
+	}
+	if cmd != "entry-restore" {
+		t.Errorf("cmd = %q, want 'entry-restore'", cmd)
+	}
+
+	// Missing entry ID
+	_, err = ParseCommand([]string{"skillvault", "entry", "restore"})
+	if err == nil {
+		t.Fatal("expected error for missing entry ID in restore")
+	}
+}
+
+func TestParseCommandEntryRef(t *testing.T) {
+	cmd, err := ParseCommand([]string{"skillvault", "entry", "ref", "add", "s", "t", "depends_on"})
+	if err != nil {
+		t.Fatalf("ParseCommand failed: %v", err)
+	}
+	if cmd != "entry-ref" {
+		t.Errorf("cmd = %q, want 'entry-ref'", cmd)
+	}
+}
+
+func TestParseExportPackFlags(t *testing.T) {
+	flags, err := ParseExportPackFlags([]string{"skillvault", "export", "--author", "alice", "--version", "1.0", "--description", "My pack", "--output", "test.svpack"})
+	if err != nil {
+		t.Fatalf("ParseExportPackFlags failed: %v", err)
+	}
+	if flags.Author != "alice" {
+		t.Errorf("author = %q, want 'alice'", flags.Author)
+	}
+	if flags.Version != "1.0" {
+		t.Errorf("version = %q, want '1.0'", flags.Version)
+	}
+	if flags.Description != "My pack" {
+		t.Errorf("description = %q, want 'My pack'", flags.Description)
+	}
+	if flags.OutputPath != "test.svpack" {
+		t.Errorf("output = %q, want 'test.svpack'", flags.OutputPath)
+	}
+
+	// Missing required flags.
+	_, err = ParseExportPackFlags([]string{"skillvault", "export"})
+	if err == nil {
+		t.Fatal("expected error for missing --author and --version")
+	}
+}
+
+func TestParseExportFlagsPack(t *testing.T) {
+	// Export with --pack flag should detect pack mode.
+	flags, err := ParseExportFlags([]string{"skillvault", "export", "--pack"})
+	if err != nil {
+		t.Fatalf("ParseExportFlags failed: %v", err)
+	}
+	if !flags.Pack {
+		t.Error("expected Pack=true when --pack flag is set")
+	}
+}
+
+func TestParseImportFlagsWithPrefix(t *testing.T) {
+	flags, err := ParseImportFlags([]string{"skillvault", "import", "file.svpack", "--prefix", "ns/", "--pack"})
+	if err != nil {
+		t.Fatalf("ParseImportFlags failed: %v", err)
+	}
+	if flags.FilePath != "file.svpack" {
+		t.Errorf("FilePath = %q, want 'file.svpack'", flags.FilePath)
+	}
+	if flags.Prefix != "ns/" {
+		t.Errorf("Prefix = %q, want 'ns/'", flags.Prefix)
+	}
+	if !flags.Pack {
+		t.Error("expected Pack=true")
+	}
+}

@@ -60,6 +60,8 @@ var commandDescs = map[string]string{
 	"sync-push":            "Push vault snapshot to remote storage",
 	"sync-pull":            "Pull vault snapshot from remote storage",
 	"entry-ref":            "Manage entry reference links (add/list/remove)",
+	"entry-history":        "Show version history for an entry",
+	"entry-restore":        "Restore an entry to a previous version",
 	"tui":                  "Start the interactive Bubble Tea terminal UI",
 }
 
@@ -74,6 +76,8 @@ func traceCmd(cmd string) {
 type vaultServices struct {
 	store          *db.Store
 	entrySvc       *app.EntryService
+	entryVersionSvc *app.EntryVersionService
+	packExportSvc   *app.VaultPackExportService
 	entryRefSvc    *app.EntryRefService
 	memoryIndexSvc *app.MemoryIndexService
 	artifactSvc    *app.ArtifactService
@@ -213,6 +217,8 @@ func openVault() *vaultServices {
 	sessionSvc := app.NewSessionService(entrySvc, artifactSvc, projectSvc, store.Entries, store.Artifacts, store.Projects)
 	exportSvc := app.NewVaultExportService(store.ImportExport, store.Artifacts, store.Entries, store.Projects, store.Workflows)
 	importSvc := app.NewVaultImportService(store.ImportExport, store.Entries, store.Projects, store.Artifacts)
+	entryVersionSvc := app.NewEntryVersionService(store.EntryVersions, store.Entries)
+	packExportSvc := app.NewVaultPackExportService(store.ImportExport, store.Entries, store.Projects, store.Artifacts, store.Workflows)
 	statsSvc := app.NewStatsService(store.Entries, store.Artifacts, store.Projects).WithWorkflowRunStore(store.WorkflowRuns)
 	saveResultSvc := app.NewSavePromptResultService(store.Entries, store.Projects, store.Artifacts)
 	workflowRunSvc := app.NewWorkflowRunService(store.Workflows, store.WorkflowRuns, store.Entries)
@@ -243,9 +249,11 @@ func openVault() *vaultServices {
 	syncSvc := app.NewSyncService(exportSvc, importSvc, gzipTransport)
 
 	return &vaultServices{
-		store:          store,
-		entrySvc:       entrySvc,
-		entryRefSvc:    entryRefSvc,
+		store:            store,
+		entrySvc:         entrySvc,
+		entryVersionSvc:  entryVersionSvc,
+		packExportSvc:    packExportSvc,
+		entryRefSvc:      entryRefSvc,
 		memoryIndexSvc: memoryIndexSvc,
 		artifactSvc:    artifactSvc,
 		workflowSvc:    workflowSvc,
@@ -642,6 +650,25 @@ func runCLI(cmd string) {
 			os.Exit(1)
 		}
 
+		if flags.Pack {
+			packFlags, err := cli.ParseExportPackFlags(os.Args)
+			if err != nil {
+				cli.PrintError(err)
+				os.Exit(1)
+			}
+			if err := svc.packExportSvc.ExportPack(ctx, app.ExportPackInput{
+				Author:      packFlags.Author,
+				Version:     packFlags.Version,
+				Description: packFlags.Description,
+				OutputPath:  packFlags.OutputPath,
+			}); err != nil {
+				cli.PrintError(err)
+				os.Exit(1)
+			}
+			fmt.Printf("Pack exported to %s\n", packFlags.OutputPath)
+			return
+		}
+
 		if err := svc.exportSvc.Export(ctx, flags.OutputPath); err != nil {
 			cli.PrintError(err)
 			os.Exit(1)
@@ -655,7 +682,7 @@ func runCLI(cmd string) {
 			os.Exit(1)
 		}
 
-		if err := svc.importSvc.Import(ctx, flags.FilePath); err != nil {
+		if err := svc.importSvc.ImportWithPrefix(ctx, flags.FilePath, flags.Prefix); err != nil {
 			cli.PrintError(err)
 			os.Exit(1)
 		}
@@ -1043,6 +1070,49 @@ func runCLI(cmd string) {
 			}
 		}
 
+	case "entry-history":
+		flags, err := cli.ParseEntryHistoryFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		versions, err := svc.entryVersionSvc.ListVersions(ctx, flags.ID)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		if len(versions) == 0 {
+			fmt.Printf("No version history for entry %s.\n", flags.ID)
+			return
+		}
+
+		fmt.Printf("Version history for entry %s:\n", flags.ID)
+		fmt.Print(cli.FormatTable(versions,
+			[]string{"#", "Title", "Saved At"},
+			func(v domain.EntryVersion) []string {
+				return []string{
+					fmt.Sprintf("%d", v.VersionNumber),
+					v.Title,
+					v.SavedAt,
+				}
+			}))
+
+	case "entry-restore":
+		flags, err := cli.ParseEntryRestoreFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		if err := svc.entryVersionSvc.RestoreVersion(ctx, flags.ID, flags.Version); err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Restored entry %s to version %d.\n", flags.ID, flags.Version)
+
 	case "entry-ref":
 		if len(os.Args) < 4 {
 			cli.PrintError(fmt.Errorf("usage: skillvault entry ref <subcommand> [args...]"))
@@ -1179,7 +1249,7 @@ func runMCP() {
 		svc.workflowSvc,
 		svc.sessionSvc,
 		svc.projectSvc,
-	).WithEntryRefService(svc.entryRefSvc).WithCompareService(svc.compareSvc).WithSaveResultService(svc.saveResultSvc).WithWorkflowRunService(svc.workflowRunSvc).WithStatsService(svc.statsSvc)
+	).WithEntryRefService(svc.entryRefSvc).WithCompareService(svc.compareSvc).WithSaveResultService(svc.saveResultSvc).WithWorkflowRunService(svc.workflowRunSvc).WithStatsService(svc.statsSvc).WithEntryVersionService(svc.entryVersionSvc)
 	server := mcp.NewServer(reg)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

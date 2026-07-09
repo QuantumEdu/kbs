@@ -58,12 +58,22 @@ func ParseCommand(args []string) (string, error) {
 		}
 	case "entry":
 		if len(args) < 3 {
-			return "", fmt.Errorf("entry requires a subcommand (ref)")
+			return "", fmt.Errorf("entry requires a subcommand (ref, history, restore)")
 		}
 		sub2 := args[2]
 		switch sub2 {
 		case "ref":
 			return "entry-ref", nil
+		case "history":
+			if len(args) < 4 {
+				return "", fmt.Errorf("entry history requires an entry ID")
+			}
+			return "entry-history", nil
+		case "restore":
+			if len(args) < 4 {
+				return "", fmt.Errorf("entry restore requires an entry ID")
+			}
+			return "entry-restore", nil
 		default:
 			return "", fmt.Errorf("unknown entry subcommand: %s", sub2)
 		}
@@ -205,6 +215,52 @@ func ParseGetEntryFlags(args []string) (*GetEntryFlags, error) {
 		return nil, fmt.Errorf("entry ID or slug is required")
 	}
 	return &GetEntryFlags{ID: args[2]}, nil
+}
+
+// EntryHistoryFlags holds the entry ID for entry history command.
+type EntryHistoryFlags struct {
+	ID string
+}
+
+// ParseEntryHistoryFlags parses the entry ID from positional args.
+// Usage: skillvault entry history <id>
+func ParseEntryHistoryFlags(args []string) (*EntryHistoryFlags, error) {
+	if len(args) < 4 {
+		return nil, fmt.Errorf("entry ID is required")
+	}
+	return &EntryHistoryFlags{ID: args[3]}, nil
+}
+
+// EntryRestoreFlags holds the entry ID and version number for entry restore.
+type EntryRestoreFlags struct {
+	ID      string
+	Version int
+}
+
+// ParseEntryRestoreFlags parses entry restore flags from args.
+// Usage: skillvault entry restore <id> --version N
+func ParseEntryRestoreFlags(args []string) (*EntryRestoreFlags, error) {
+	if len(args) < 4 {
+		return nil, fmt.Errorf("entry ID is required")
+	}
+
+	flags := &EntryRestoreFlags{ID: args[3], Version: 0}
+
+	fs := flag.NewFlagSet("entry-restore", flag.ContinueOnError)
+	fs.IntVar(&flags.Version, "version", 0, "Version number to restore (required)")
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 4 {
+		if err := fs.Parse(args[4:]); err != nil {
+			return nil, fmt.Errorf("parse entry restore flags: %w", err)
+		}
+	}
+
+	if flags.Version < 1 {
+		return nil, fmt.Errorf("--version is required (must be >= 1)")
+	}
+
+	return flags, nil
 }
 
 // CompareEntriesFlags holds the two entry IDs for compare-entries.
@@ -410,6 +466,7 @@ func ParseSessionWrapFlags(args []string) (*SessionWrapFlags, error) {
 // ExportFlags holds parsed export command flags.
 type ExportFlags struct {
 	OutputPath string
+	Pack       bool
 }
 
 // ParseExportFlags parses export-specific flags from args.
@@ -418,6 +475,7 @@ func ParseExportFlags(args []string) (*ExportFlags, error) {
 
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
 	fs.StringVar(&flags.OutputPath, "output", "skillvault-export.json", "Output file path")
+	fs.BoolVar(&flags.Pack, "pack", false, "Export as a skill pack (.svpack) with metadata")
 
 	fs.SetOutput(&nullWriter{})
 
@@ -430,9 +488,48 @@ func ParseExportFlags(args []string) (*ExportFlags, error) {
 	return flags, nil
 }
 
+// ExportPackFlags holds parsed pack export-specific flags.
+type ExportPackFlags struct {
+	Pack        bool
+	Author      string
+	Version     string
+	Description string
+	OutputPath  string
+}
+
+// ParseExportPackFlags parses pack export flags from args.
+func ParseExportPackFlags(args []string) (*ExportPackFlags, error) {
+	flags := &ExportPackFlags{Pack: true, OutputPath: "skillvault-pack.svpack"}
+
+	fs := flag.NewFlagSet("export", flag.ContinueOnError)
+	fs.StringVar(&flags.Author, "author", "", "Pack author (required)")
+	fs.StringVar(&flags.Version, "version", "", "Pack version (required)")
+	fs.StringVar(&flags.Description, "description", "", "Pack description")
+	fs.StringVar(&flags.OutputPath, "output", "skillvault-pack.svpack", "Output file path")
+
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 2 {
+		if err := fs.Parse(args[2:]); err != nil {
+			return nil, fmt.Errorf("parse pack export flags: %w", err)
+		}
+	}
+
+	if flags.Author == "" {
+		return nil, fmt.Errorf("--author is required for pack export")
+	}
+	if flags.Version == "" {
+		return nil, fmt.Errorf("--version is required for pack export")
+	}
+
+	return flags, nil
+}
+
 // ImportFlags holds parsed import command flags.
 type ImportFlags struct {
 	FilePath string
+	Prefix   string
+	Pack     bool
 }
 
 // RunFlags holds parsed run command flags.
@@ -559,7 +656,22 @@ func ParseImportFlags(args []string) (*ImportFlags, error) {
 	if len(args) < 3 {
 		return nil, fmt.Errorf("import requires a file path")
 	}
-	return &ImportFlags{FilePath: args[2]}, nil
+
+	flags := &ImportFlags{FilePath: args[2]}
+
+	fs := flag.NewFlagSet("import", flag.ContinueOnError)
+	fs.StringVar(&flags.Prefix, "prefix", "", "Prefix all imported entity IDs (e.g. 'ns/')")
+	fs.BoolVar(&flags.Pack, "pack", false, "Import as a skill pack")
+
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 3 {
+		if err := fs.Parse(args[3:]); err != nil {
+			return nil, fmt.Errorf("parse import flags: %w", err)
+		}
+	}
+
+	return flags, nil
 }
 
 // ImportWorkflowFlags holds parsed import-workflow command flags.
