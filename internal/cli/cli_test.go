@@ -916,3 +916,88 @@ func TestParseSearchFlagsPurpose(t *testing.T) {
 		t.Errorf("Purpose = %q, want empty", flags.Purpose)
 	}
 }
+
+func TestParseEntryHistoryFlags(t *testing.T) {
+	// Valid: entry history <id>
+	flags, err := ParseEntryHistoryFlags([]string{"skillvault", "entry", "history", "entry-123"})
+	if err != nil {
+		t.Fatalf("ParseEntryHistoryFlags failed: %v", err)
+	}
+	if flags.ID != "entry-123" {
+		t.Errorf("ID = %q, want 'entry-123'", flags.ID)
+	}
+
+	// Missing ID
+	_, err = ParseEntryHistoryFlags([]string{"skillvault", "entry", "history"})
+	if err == nil {
+		t.Fatal("expected error for missing entry ID")
+	}
+}
+
+func TestParseEntryRestoreFlags(t *testing.T) {
+	// Valid: entry restore <id> --version 2
+	flags, err := ParseEntryRestoreFlags([]string{"skillvault", "entry", "restore", "entry-123", "--version", "2"})
+	if err != nil {
+		t.Fatalf("ParseEntryRestoreFlags failed: %v", err)
+	}
+	if flags.ID != "entry-123" {
+		t.Errorf("ID = %q, want 'entry-123'", flags.ID)
+	}
+	if flags.Version != 2 {
+		t.Errorf("Version = %d, want 2", flags.Version)
+	}
+
+	// Missing --version
+	_, err = ParseEntryRestoreFlags([]string{"skillvault", "entry", "restore", "entry-123"})
+	if err == nil {
+		t.Fatal("expected error for missing --version")
+	}
+
+	// Version 0 invalid
+	_, err = ParseEntryRestoreFlags([]string{"skillvault", "entry", "restore", "entry-123", "--version", "0"})
+	if err == nil {
+		t.Fatal("expected error for version 0")
+	}
+}
+
+func TestParseCommandEntryHistory(t *testing.T) {
+	cmd, err := ParseCommand([]string{"skillvault", "entry", "history", "my-entry"})
+	if err != nil {
+		t.Fatalf("ParseCommand failed: %v", err)
+	}
+	if cmd != "entry-history" {
+		t.Errorf("cmd = %q, want 'entry-history'", cmd)
+	}
+
+	// Missing entry ID
+	_, err = ParseCommand([]string{"skillvault", "entry", "history"})
+	if err == nil {
+		t.Fatal("expected error for missing entry ID in history")
+	}
+}
+
+func TestParseCommandEntryRestore(t *testing.T) {
+	cmd, err := ParseCommand([]string{"skillvault", "entry", "restore", "my-entry"})
+	if err != nil {
+		t.Fatalf("ParseCommand failed: %v", err)
+	}
+	if cmd != "entry-restore" {
+		t.Errorf("cmd = %q, want 'entry-restore'", cmd)
+	}
+
+	// Missing entry ID
+	_, err = ParseCommand([]string{"skillvault", "entry", "restore"})
+	if err == nil {
+		t.Fatal("expected error for missing entry ID in restore")
+	}
+}
+
+func TestParseCommandEntryRef(t *testing.T) {
+	cmd, err := ParseCommand([]string{"skillvault", "entry", "ref", "add", "s", "t", "depends_on"})
+	if err != nil {
+		t.Fatalf("ParseCommand failed: %v", err)
+	}
+	if cmd != "entry-ref" {
+		t.Errorf("cmd = %q, want 'entry-ref'", cmd)
+	}
+}

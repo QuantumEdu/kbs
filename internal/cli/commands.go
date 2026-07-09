@@ -58,12 +58,22 @@ func ParseCommand(args []string) (string, error) {
 		}
 	case "entry":
 		if len(args) < 3 {
-			return "", fmt.Errorf("entry requires a subcommand (ref)")
+			return "", fmt.Errorf("entry requires a subcommand (ref, history, restore)")
 		}
 		sub2 := args[2]
 		switch sub2 {
 		case "ref":
 			return "entry-ref", nil
+		case "history":
+			if len(args) < 4 {
+				return "", fmt.Errorf("entry history requires an entry ID")
+			}
+			return "entry-history", nil
+		case "restore":
+			if len(args) < 4 {
+				return "", fmt.Errorf("entry restore requires an entry ID")
+			}
+			return "entry-restore", nil
 		default:
 			return "", fmt.Errorf("unknown entry subcommand: %s", sub2)
 		}
@@ -205,6 +215,52 @@ func ParseGetEntryFlags(args []string) (*GetEntryFlags, error) {
 		return nil, fmt.Errorf("entry ID or slug is required")
 	}
 	return &GetEntryFlags{ID: args[2]}, nil
+}
+
+// EntryHistoryFlags holds the entry ID for entry history command.
+type EntryHistoryFlags struct {
+	ID string
+}
+
+// ParseEntryHistoryFlags parses the entry ID from positional args.
+// Usage: skillvault entry history <id>
+func ParseEntryHistoryFlags(args []string) (*EntryHistoryFlags, error) {
+	if len(args) < 4 {
+		return nil, fmt.Errorf("entry ID is required")
+	}
+	return &EntryHistoryFlags{ID: args[3]}, nil
+}
+
+// EntryRestoreFlags holds the entry ID and version number for entry restore.
+type EntryRestoreFlags struct {
+	ID      string
+	Version int
+}
+
+// ParseEntryRestoreFlags parses entry restore flags from args.
+// Usage: skillvault entry restore <id> --version N
+func ParseEntryRestoreFlags(args []string) (*EntryRestoreFlags, error) {
+	if len(args) < 4 {
+		return nil, fmt.Errorf("entry ID is required")
+	}
+
+	flags := &EntryRestoreFlags{ID: args[3], Version: 0}
+
+	fs := flag.NewFlagSet("entry-restore", flag.ContinueOnError)
+	fs.IntVar(&flags.Version, "version", 0, "Version number to restore (required)")
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 4 {
+		if err := fs.Parse(args[4:]); err != nil {
+			return nil, fmt.Errorf("parse entry restore flags: %w", err)
+		}
+	}
+
+	if flags.Version < 1 {
+		return nil, fmt.Errorf("--version is required (must be >= 1)")
+	}
+
+	return flags, nil
 }
 
 // CompareEntriesFlags holds the two entry IDs for compare-entries.
