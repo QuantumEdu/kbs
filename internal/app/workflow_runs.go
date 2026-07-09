@@ -401,3 +401,13 @@ func generateRunStepID() string {
 	rand.Read(b)
 	return "rst-" + hex.EncodeToString(b)
 }
+
+// ListAllRuns delegates to the workflow run store for paginated run listing with progress.
+func (s *WorkflowRunService) ListAllRuns(ctx context.Context, workflowID *string, limit, offset int) ([]domain.WorkflowRun, []db.RunProgress, error) {
+	return s.workflowRunStore.ListAllRuns(ctx, workflowID, limit, offset)
+}
+
+// GetRun delegates to the workflow run store for fetching a single run with its steps.
+func (s *WorkflowRunService) GetRun(ctx context.Context, runID string) (domain.WorkflowRun, []domain.WorkflowRunStep, error) {
+	return s.workflowRunStore.GetRun(ctx, runID)
+}

@@ -3,11 +3,14 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/quantum-6/skillvault/internal/app"
 	"github.com/quantum-6/skillvault/internal/db"
+	"github.com/quantum-6/skillvault/internal/domain"
 
 	_ "modernc.org/sqlite"
 )
@@ -93,8 +96,8 @@ func TestToolsListReturns19Tools(t *testing.T) {
 	default:
 		t.Fatalf("tools is not an array: %T", toolsRaw)
 	}
-	if toolCount != 19 {
-		t.Errorf("expected 19 tools, got %d", toolCount)
+	if toolCount != 22 {
+		t.Errorf("expected 22 tools, got %d", toolCount)
 	}
 }
 
@@ -301,6 +304,9 @@ func TestToolNamesAreCorrect(t *testing.T) {
 		"save_result",
 		"run_workflow",
 		"route_scenario",
+		"get_stats",
+		"list_workflow_runs",
+		"get_run",
 	}
 
 	if len(names) != len(expected) {
@@ -1239,17 +1245,218 @@ func TestToolCountIncludesNewTools(t *testing.T) {
 	reg := NewToolRegistry(nil)
 	tools := reg.List()
 
-	// Should be 19 tools: 17 existing + run_workflow + route_scenario
-	if len(tools) != 19 {
-		t.Errorf("expected 19 tools, got %d", len(tools))
+	// Should be 22 tools: 19 existing + get_stats + list_workflow_runs + get_run
+	if len(tools) != 22 {
+		t.Errorf("expected 22 tools, got %d", len(tools))
 	}
 	names := make(map[string]bool)
 	for _, tool := range tools {
 		names[tool.Name] = true
 	}
-	for _, name := range []string{"run_workflow", "route_scenario"} {
+	for _, name := range []string{"run_workflow", "route_scenario", "get_stats", "list_workflow_runs", "get_run"} {
 		if !names[name] {
 			t.Errorf("expected tool %q to be registered", name)
 		}
+	}
+}
+
+// --- get_stats, list_workflow_runs, get_run tests (PR B) ---
+
+// setupMCPServicesWithStats sets up a full ToolRegistry with StatsService wired.
+func setupMCPServicesWithStats(t *testing.T) (*ToolRegistry, *db.Store, func()) {
+	t.Helper()
+	sqlDB, err := db.OpenDB(":memory:")
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	if err := db.RunMigrations(sqlDB); err != nil {
+		sqlDB.Close()
+		t.Fatalf("RunMigrations: %v", err)
+	}
+	store := db.NewStore(sqlDB)
+
+	entrySvc := app.NewEntryService(store.Entries, store.Projects, store.Artifacts)
+	artifactSvc := app.NewArtifactService(store.Artifacts, store.Entries, store.Projects)
+	workflowSvc := app.NewWorkflowService(store.Workflows)
+	seriesSvc := app.NewSeriesService(store.Series, store.Entries)
+	projectSvc := app.NewProjectService(store.Projects)
+	entryRefSvc := app.NewEntryRefService(store.EntryLinks, store.Entries)
+	contextSvc := app.NewContextService(store.Entries, store.Projects, store.Series, store.Workflows, store.Artifacts, entrySvc)
+	sessionSvc := app.NewSessionService(entrySvc, artifactSvc, projectSvc, store.Entries, store.Artifacts, store.Projects)
+	workflowRunSvc := app.NewWorkflowRunService(store.Workflows, store.WorkflowRuns, store.Entries)
+	saveResultSvc := app.NewSavePromptResultService(store.Entries, store.Projects, store.Artifacts)
+	statsSvc := app.NewStatsService(store.Entries, store.Artifacts, store.Projects).WithWorkflowRunStore(store.WorkflowRuns)
+	entrySvc.SetWorkflowStore(store.Workflows)
+
+	reg := NewServiceToolRegistry(entrySvc, artifactSvc, contextSvc, seriesSvc, workflowSvc, sessionSvc, projectSvc).
+		WithEntryRefService(entryRefSvc).
+		WithWorkflowRunService(workflowRunSvc).
+		WithSaveResultService(saveResultSvc).
+		WithStatsService(statsSvc)
+
+	return reg, store, func() { sqlDB.Close() }
+}
+
+// seedRunWithSteps creates a project, entries, a workflow (if not already saved),
+// and a completed run with the given number of steps.
+func seedRunWithSteps(t *testing.T, store *db.Store, projectID, wfID, runID string, stepCount int, savedWorkflows map[string]bool) {
+	t.Helper()
+	ctx := context.Background()
+	entrySvc := app.NewEntryService(store.Entries, store.Projects, store.Artifacts)
+	var entryIDs []string
+	for i := 1; i <= stepCount; i++ {
+		r, err := entrySvc.SaveEntry(ctx, app.SaveEntryInput{
+			Title: fmt.Sprintf("Step %d Prompt", i), Type: "prompt",
+			Summary: fmt.Sprintf("Step %d", i), Project: projectID,
+		})
+		if err != nil {
+			t.Fatalf("save step %d: %v", i, err)
+		}
+		entryIDs = append(entryIDs, r.Entry.Entry.ID)
+	}
+	if !savedWorkflows[wfID] {
+		wf := domain.Workflow{
+			ID: wfID, Name: "WF " + wfID, Slug: "test-wf-" + wfID,
+			Description: "Testing", Status: domain.StatusActive,
+			CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		}
+		steps := make([]domain.WorkflowStep, stepCount)
+		for i := 0; i < stepCount; i++ {
+			steps[i] = domain.WorkflowStep{
+				ID: fmt.Sprintf("ws-%s-%d", wfID, i+1), WorkflowID: wfID,
+				OrderIndex: i + 1, Title: fmt.Sprintf("Step %d", i+1), Required: i == 0,
+			}
+		}
+		if err := store.Workflows.Save(ctx, wf, steps); err != nil {
+			t.Fatalf("save workflow: %v", err)
+		}
+		savedWorkflows[wfID] = true
+	}
+	now := time.Now()
+	finished := now.Add(5 * time.Second)
+	run := domain.WorkflowRun{
+		ID: runID, WorkflowID: wfID, Input: "in", Output: "out",
+		Status: domain.RunStatusCompleted, StartedAt: now, FinishedAt: &finished,
+	}
+	runSteps := make([]domain.WorkflowRunStep, stepCount)
+	for i := 0; i < stepCount; i++ {
+		status := domain.RunStatusCompleted
+		output := fmt.Sprintf("out %d", i+1)
+		if i == stepCount-1 {
+			status = domain.RunStatusFailed
+			output = ""
+		}
+		runSteps[i] = domain.WorkflowRunStep{
+			ID: fmt.Sprintf("rst-%s-%d", runID, i+1), RunID: runID, StepID: int64(i + 1),
+			EntryID: entryIDs[i], Status: status, Output: output,
+			StartedAt: now, FinishedAt: &finished,
+		}
+	}
+	if err := store.WorkflowRuns.CreateRun(ctx, run, runSteps); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+}
+
+func TestGetStatsMCP(t *testing.T) {
+	reg, store, cleanup := setupMCPServicesWithStats(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	proj, err := reg.projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "testproj"})
+	if err != nil {
+		t.Fatalf("SaveProject: %v", err)
+	}
+	seedRunWithSteps(t, store, proj.ID, "wf-stats", "run-stats", 3, map[string]bool{})
+
+	result, err := reg.Call(ctx, "get_stats", nil)
+	if err != nil {
+		t.Fatalf("get_stats: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("get_stats error: %s", result.Content[0].Text)
+	}
+	raw := result.Content[0].Text
+	if !strings.Contains(raw, "workflow_runs") {
+		t.Fatal("missing workflow_runs block")
+	}
+	if !strings.Contains(raw, `"total_runs":1`) || !strings.Contains(raw, `"completed_runs":1`) {
+		t.Errorf("expected total_runs=1, completed_runs=1: %s", raw)
+	}
+}
+
+func TestListWorkflowRunsMCP(t *testing.T) {
+	reg, store, cleanup := setupMCPServicesWithStats(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	proj, err := reg.projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "testproj"})
+	if err != nil {
+		t.Fatalf("SaveProject: %v", err)
+	}
+	saved := map[string]bool{}
+	seedRunWithSteps(t, store, proj.ID, "wf-a", "run-a1", 3, saved)
+	seedRunWithSteps(t, store, proj.ID, "wf-a", "run-a2", 2, saved)
+	seedRunWithSteps(t, store, proj.ID, "wf-b", "run-b1", 4, saved)
+
+	// All runs
+	result, err := reg.Call(ctx, "list_workflow_runs", map[string]interface{}{"limit": float64(10)})
+	if err != nil {
+		t.Fatalf("list_workflow_runs: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("list_workflow_runs error: %s", result.Content[0].Text)
+	}
+	raw := result.Content[0].Text
+	if !strings.Contains(raw, "run-a1") || !strings.Contains(raw, "run-a2") || !strings.Contains(raw, "run-b1") {
+		t.Errorf("missing runs: %s", raw)
+	}
+	if !strings.Contains(raw, `"completed_steps"`) {
+		t.Errorf("missing completed_steps: %s", raw)
+	}
+
+	// Filtered by workflow_id
+	result2, _ := reg.Call(ctx, "list_workflow_runs", map[string]interface{}{"workflow_id": "wf-a", "limit": float64(5)})
+	raw2 := result2.Content[0].Text
+	if !strings.Contains(raw2, "run-a1") || !strings.Contains(raw2, "run-a2") {
+		t.Errorf("wf-a filter: %s", raw2)
+	}
+	if strings.Contains(raw2, "run-b1") {
+		t.Error("run-b1 leaked through wf-a filter")
+	}
+}
+
+func TestGetRunMCP(t *testing.T) {
+	reg, store, cleanup := setupMCPServicesWithStats(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	proj, err := reg.projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "testproj"})
+	if err != nil {
+		t.Fatalf("SaveProject: %v", err)
+	}
+	seedRunWithSteps(t, store, proj.ID, "wf-gr", "run-gr", 3, map[string]bool{})
+
+	result, err := reg.Call(ctx, "get_run", map[string]interface{}{"run_id": "run-gr"})
+	if err != nil {
+		t.Fatalf("get_run: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("get_run error: %s", result.Content[0].Text)
+	}
+	raw := result.Content[0].Text
+	if !strings.Contains(raw, `"run"`) || !strings.Contains(raw, `"steps"`) {
+		t.Fatal("missing run/steps keys")
+	}
+	if !strings.Contains(raw, `"wf-gr"`) {
+		t.Errorf("missing workflow_id: %s", raw)
+	}
+	if strings.Count(raw, `"step_index"`) != 3 {
+		t.Errorf("expected 3 steps: %s", raw)
+	}
+
+	// Not found
+	result2, _ := reg.Call(ctx, "get_run", map[string]interface{}{"run_id": "nonexistent-xyz"})
+	if !result2.IsError || !strings.Contains(result2.Content[0].Text, "not found") {
+		t.Errorf("expected not-found error: %s", result2.Content[0].Text)
 	}
 }
