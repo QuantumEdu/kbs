@@ -26,26 +26,26 @@ Chain strategy: feature-branch-chain
 
 ## Phase 1: PR A — RED: Store Tests
 
-- [ ] 1.1 Write `TestGetRunStats_MixedStatuses` in `internal/db/workflow_run_store_test.go` — seed 7 completed + 2 failed + 1 running run; assert total=10, completed=7, failed=2, duration stats non-nil
-- [ ] 1.2 Write `TestGetRunStats_Empty` in `internal/db/workflow_run_store_test.go` — no runs; assert all zero values, no error
-- [ ] 1.3 Write `TestGetRunStats_PerWorkflow` in `internal/db/workflow_run_store_test.go` — seed 2 workflows (3 runs + 2 runs); filter one; assert scope
-- [ ] 1.4 Write `TestListAllRuns_WithProgress` in `internal/db/workflow_run_store_test.go` — seed run with 5 steps (3 completed); assert step_ratio=0.6, struct populated
+- [x] 1.1 Write `TestGetRunStats_MixedStatuses` in `internal/db/workflow_run_store_test.go` — seed 7 completed + 2 failed + 1 running run; assert total=10, completed=7, failed=2, duration stats non-nil
+- [x] 1.2 Write `TestGetRunStats_Empty` in `internal/db/workflow_run_store_test.go` — no runs; assert all zero values, no error
+- [x] 1.3 Write `TestGetRunStats_PerWorkflow` in `internal/db/workflow_run_store_test.go` — seed 2 workflows (3 runs + 2 runs); filter one; assert scope
+- [x] 1.4 Write `TestListAllRuns_WithProgress` in `internal/db/workflow_run_store_test.go` — seed run with 5 steps (3 completed); assert step_ratio=0.6, struct populated
 
 ## Phase 2: PR A — GREEN: Store Types + Queries
 
-- [ ] 1.5 Add `WorkflowRunStats`, `WorkflowRunPerWorkflow`, `RunProgress` types and `GetRunStats`/`ListAllRuns` methods to `WorkflowRunStore` interface in `internal/db/store.go`
-- [ ] 1.6 Implement `GetRunStats` in `internal/db/workflow_run_store.go` — SQL: COUNT, SUM CASE status, COALESCE(AVG/MAX/MIN(julianday*86400)), per-workflow GROUP BY, optional workflow_id filter
-- [ ] 1.7 Implement `ListAllRuns` in `internal/db/workflow_run_store.go` — optional workflow_id, limit/offset, LEFT JOIN run_steps for completed/total ratio per run via subquery
+- [x] 1.5 Add `WorkflowRunStats`, `WorkflowRunPerWorkflow`, `RunProgress` types and `GetRunStats`/`ListAllRuns` methods to `WorkflowRunStore` interface in `internal/db/store.go`
+- [x] 1.6 Implement `GetRunStats` in `internal/db/workflow_run_store.go` — SQL: COUNT, SUM CASE status, COALESCE(AVG/MAX/MIN(julianday*86400)), per-workflow GROUP BY, optional workflow_id filter
+- [x] 1.7 Implement `ListAllRuns` in `internal/db/workflow_run_store.go` — optional workflow_id, limit/offset, LEFT JOIN run_steps for completed/total ratio per run via subquery
 
 ## Phase 3: PR A — RED: StatsService Tests
 
-- [ ] 1.8 Write `TestGetStats_WorkflowRunsPopulated` in `internal/app/stats_test.go` — mock returns non-nil stats; assert `VaultStats.WorkflowRuns` populated
-- [ ] 1.9 Write `TestGetStats_NoWorkflowRunsWhenStoreNil` in `internal/app/stats_test.go` — nil WorkflowRunStore; assert `WorkflowRuns` is nil
+- [x] 1.8 Write `TestGetStats_WorkflowRunsPopulated` in `internal/app/stats_test.go` — mock returns non-nil stats; assert `VaultStats.WorkflowRuns` populated
+- [x] 1.9 Write `TestGetStats_NoWorkflowRunsWhenStoreNil` in `internal/app/stats_test.go` — nil WorkflowRunStore; assert `WorkflowRuns` is nil
 
 ## Phase 4: PR A — GREEN: StatsService Wiring
 
-- [ ] 1.10 Add `WorkflowRunStore` interface subset + `workflowRunStore` field + `WithWorkflowRunStore()` builder to `StatsService` in `internal/app/stats.go`
-- [ ] 1.11 Extend `VaultStats` with `WorkflowRuns *WorkflowRunStats \`json:"workflow_runs,omitempty"\``; call `GetRunStats(ctx, nil)` in `GetStats` when store non-nil
+- [x] 1.10 Add `WorkflowRunStore` interface subset + `workflowRunStore` field + `WithWorkflowRunStore()` builder to `StatsService` in `internal/app/stats.go`
+- [x] 1.11 Extend `VaultStats` with `WorkflowRuns *WorkflowRunStats \`json:"workflow_runs,omitempty"\``; call `GetRunStats(ctx, nil)` in `GetStats` when store non-nil
 
 ## Phase 5: PR B — RED: CLI Tests
 
