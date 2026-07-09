@@ -72,16 +72,16 @@ Chain strategy: feature-branch-chain
 
 ## Phase 9: PR C — RED: Domain Tests
 
-- [ ] 3.1 Write `TestPurpose_OBSERVABILITY_valid` in `internal/domain/validation_test.go` — `PurposeObservability.IsValid()` true; `ValidatePurpose("OBSERVABILITY")` nil
-- [ ] 3.2 Write `TestPurpose_OBSERVABILITY_invalid` in `internal/domain/validation_test.go` — `Purpose("obs").IsValid()` false; `ValidatePurpose("INVALID")` err; assert error msg includes OBSERVABILITY
+- [x] 3.1 Write `TestPurpose_OBSERVABILITY_valid` in `internal/domain/validation_test.go` — `PurposeObservability.IsValid()` true; `ValidatePurpose("OBSERVABILITY")` nil
+- [x] 3.2 Write `TestPurpose_OBSERVABILITY_invalid` in `internal/domain/validation_test.go` — `Purpose("obs").IsValid()` false; `ValidatePurpose("INVALID")` err; assert error msg includes OBSERVABILITY
 
 ## Phase 10: PR C — GREEN: Domain + Migration
 
-- [ ] 3.3 Add `PurposeObservability Purpose = "OBSERVABILITY"` and add to `IsValid()` switch case in `internal/domain/entry.go`
-- [ ] 3.4 Update `ValidatePurpose` error message in `internal/domain/validation.go` to list OBSERVABILITY
-- [ ] 3.5 Create `internal/db/migrations/008_observability_purpose.sql` — rebuild entries (007 pattern): `entries_new` with `purpose TEXT DEFAULT '' CHECK(purpose IN ('', 'WORK', 'KNOWLEDGE', 'LEARNING', 'RELATIONSHIP', 'STATE', 'OBSERVABILITY'))`; explicit INSERT column list; swap; rebuild indexes + FTS5
-- [ ] 3.6 Sync `internal/db/schema.sql` — update entries purpose line 31 from `purpose TEXT DEFAULT '',` to `purpose TEXT DEFAULT '' CHECK(purpose IN ('', 'WORK', 'KNOWLEDGE', 'LEARNING', 'RELATIONSHIP', 'STATE', 'OBSERVABILITY')),`
+- [x] 3.3 Add `PurposeObservability Purpose = "OBSERVABILITY"` and add to `IsValid()` switch case in `internal/domain/entry.go`
+- [x] 3.4 Update `ValidatePurpose` error message in `internal/domain/validation.go` to list OBSERVABILITY
+- [x] 3.5 Create `internal/db/migrations/008_observability_purpose.sql` — rebuild entries (007 pattern): `entries_new` with `purpose TEXT DEFAULT '' CHECK(purpose IN ('', 'WORK', 'KNOWLEDGE', 'LEARNING', 'RELATIONSHIP', 'STATE', 'OBSERVABILITY'))`; explicit INSERT column list; swap; rebuild indexes + FTS5
+- [x] 3.6 Sync `internal/db/schema.sql` — update entries purpose line 31 from `purpose TEXT DEFAULT '',` to `purpose TEXT DEFAULT '' CHECK(purpose IN ('', 'WORK', 'KNOWLEDGE', 'LEARNING', 'RELATIONSHIP', 'STATE', 'OBSERVABILITY')),`
 
 ## Phase 11: PR C — RED: Migration Test
 
-- [ ] 3.7 Write `TestMigration008_OBSERVABILITY` in `internal/db/workflow_run_store_test.go` (or new `migration_test.go`) — seed entries with various purposes; run migration 008; assert data preserved; assert OBSERVABILITY entry saves and queries cleanly
+- [x] 3.7 Write `TestMigration008_OBSERVABILITY` in `internal/db/migrate_test.go` — seed entries with various purposes; run migration 008; assert data preserved; assert OBSERVABILITY entry saves and queries cleanly
