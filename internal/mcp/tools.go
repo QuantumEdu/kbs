@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/quantum-6/skillvault/internal/app"
 	"github.com/quantum-6/skillvault/internal/domain"
@@ -29,6 +30,7 @@ type ToolRegistry struct {
 	sessionSvc     *app.SessionService
 	projectSvc     *app.ProjectService
 	saveResultSvc  *app.SavePromptResultService
+	statsSvc       *app.StatsService
 }
 
 // NewToolRegistry creates a registry with a generic handler (for testing).
@@ -59,6 +61,12 @@ func (r *ToolRegistry) WithSaveResultService(svc *app.SavePromptResultService) *
 // WithWorkflowRunService sets the workflow run service for run_workflow tool.
 func (r *ToolRegistry) WithWorkflowRunService(svc *app.WorkflowRunService) *ToolRegistry {
 	r.workflowRunSvc = svc
+	return r
+}
+
+// WithStatsService sets the stats service for get_stats tool.
+func (r *ToolRegistry) WithStatsService(svc *app.StatsService) *ToolRegistry {
+	r.statsSvc = svc
 	return r
 }
 
@@ -194,6 +202,14 @@ func (r *ToolRegistry) registerV2Tools() {
 		{Name: "route_scenario", Description: "Resolve a free-text scenario to a matching workflow or skill", InputSchema: schemaObj(map[string]interface{}{
 			"scenario": map[string]interface{}{"type": "string", "description": "Scenario text to route (required)"},
 		})},
+		{Name: "get_stats", Description: "Return vault statistics including workflow run analytics", InputSchema: schemaObj(map[string]interface{}{})},
+		{Name: "list_workflow_runs", Description: "List workflow runs with optional workflow filter and step progress", InputSchema: schemaObj(map[string]interface{}{
+			"workflow_id": map[string]interface{}{"type": "string", "description": "Filter by workflow ID (optional)"},
+			"limit":       map[string]interface{}{"type": "number", "description": "Max results (default 20)"},
+		})},
+		{Name: "get_run", Description: "Get a single workflow run with its step details", InputSchema: schemaObj(map[string]interface{}{
+			"run_id": map[string]interface{}{"type": "string", "description": "Workflow run ID (required)"},
+		})},
 	}
 }
 
@@ -253,6 +269,12 @@ func (r *ToolRegistry) dispatch(ctx context.Context, name string, args map[strin
 		return r.handleRunWorkflow(ctx, args)
 	case "route_scenario":
 		return r.handleRouteScenario(ctx, args)
+	case "get_stats":
+		return r.handleGetStats(ctx, args)
+	case "list_workflow_runs":
+		return r.handleListWorkflowRuns(ctx, args)
+	case "get_run":
+		return r.handleGetRun(ctx, args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -1044,6 +1066,78 @@ func (r *ToolRegistry) handleRouteScenario(ctx context.Context, args map[string]
 	return &ToolCallResult{
 		Content: []ToolContent{{Type: "text", Text: string(data)}},
 	}, nil
+}
+
+func (r *ToolRegistry) handleGetStats(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	stats, err := r.statsSvc.GetStats(ctx)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+	return jsonResult(stats), nil
+}
+
+func (r *ToolRegistry) handleListWorkflowRuns(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	workflowID := strArg(args, "workflow_id")
+	limit := intArg(args, "limit")
+	if limit <= 0 {
+		limit = 20
+	}
+	var wfIDPtr *string
+	if workflowID != "" {
+		wfIDPtr = &workflowID
+	}
+	runs, progress, err := r.workflowRunSvc.ListAllRuns(ctx, wfIDPtr, limit, 0)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+	results := make([]map[string]interface{}, 0, len(runs))
+	for i, run := range runs {
+		r := map[string]interface{}{
+			"id": run.ID, "workflow_id": run.WorkflowID, "status": string(run.Status),
+			"started_at": run.StartedAt.Format(time.RFC3339),
+		}
+		if run.Input != "" {
+			r["input"] = run.Input
+		}
+		if run.Output != "" {
+			r["output"] = run.Output
+		}
+		if run.FinishedAt != nil {
+			r["finished_at"] = run.FinishedAt.Format(time.RFC3339)
+		}
+		if i < len(progress) {
+			r["completed_steps"] = progress[i].CompletedSteps
+			r["total_steps"] = progress[i].TotalSteps
+		}
+		results = append(results, r)
+	}
+	return jsonResult(results), nil
+}
+
+func (r *ToolRegistry) handleGetRun(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	runID := strArg(args, "run_id")
+	if runID == "" {
+		return errResult("Error: run_id is required"), nil
+	}
+	run, steps, err := r.workflowRunSvc.GetRun(ctx, runID)
+	if err != nil {
+		return errResult("Error: run not found: " + err.Error()), nil
+	}
+	stepsOut := make([]map[string]interface{}, len(steps))
+	for i, s := range steps {
+		sr := map[string]interface{}{
+			"id": s.ID, "step_index": s.StepID, "entry_id": s.EntryID,
+			"status": string(s.Status), "started_at": s.StartedAt.Format(time.RFC3339),
+		}
+		if s.Output != "" {
+			sr["output"] = s.Output
+		}
+		if s.FinishedAt != nil {
+			sr["finished_at"] = s.FinishedAt.Format(time.RFC3339)
+		}
+		stepsOut[i] = sr
+	}
+	return jsonResult(map[string]interface{}{"run": run, "steps": stepsOut}), nil
 }
 
 func errResult(text string) *ToolCallResult {

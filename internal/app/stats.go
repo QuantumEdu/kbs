@@ -12,14 +12,14 @@ import (
 
 // VaultStats holds aggregated vault statistics.
 type VaultStats struct {
-	TotalEntries   int
-	TotalArtifacts int
-	TotalProjects  int
-	TotalChars     int // sum of body + summary lengths across all entries
-	TodayEntries   int
-	TodayArtifacts int
-	TodayChars     int // sum of body + summary lengths for today's entries
-	TokenEstimate  int // TotalChars / 4 (rough heuristic)
+	TotalEntries   int                  `json:"total_entries"`
+	TotalArtifacts int                  `json:"total_artifacts"`
+	TotalProjects  int                  `json:"total_projects"`
+	TotalChars     int                  `json:"total_chars"`
+	TodayEntries   int                  `json:"today_entries"`
+	TodayArtifacts int                  `json:"today_artifacts"`
+	TodayChars     int                  `json:"today_chars"`
+	TokenEstimate  int                  `json:"token_estimate"`
 	WorkflowRuns   *db.WorkflowRunStats `json:"workflow_runs,omitempty"`
 }
 
@@ -134,6 +134,26 @@ func FormatStats(s *VaultStats) string {
 		b.WriteString(fmt.Sprintf(" | Today: +%d chars", s.TodayChars))
 	}
 
+	return b.String()
+}
+
+// FormatWorkflowRunStats produces a summary of workflow run analytics.
+func FormatWorkflowRunStats(s *db.WorkflowRunStats) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("\nWorkflow Runs: %d total (%d completed, %d failed)\n", s.TotalRuns, s.CompletedRuns, s.FailedRuns))
+	if s.AvgDurationSecs > 0 || s.MaxDurationSecs > 0 || s.MinDurationSecs > 0 {
+		b.WriteString(fmt.Sprintf("  Duration: avg %.1fs, max %.1fs, min %.1fs\n", s.AvgDurationSecs, s.MaxDurationSecs, s.MinDurationSecs))
+	}
+	if s.FailedStepCount > 0 {
+		b.WriteString(fmt.Sprintf("  Failed steps: %d\n", s.FailedStepCount))
+	}
+	if len(s.PerWorkflow) > 0 {
+		b.WriteString("\nPer Workflow:\n")
+		for _, pw := range s.PerWorkflow {
+			b.WriteString(fmt.Sprintf("  %s: %d runs, %d completed, avg %.1fs\n",
+				pw.WorkflowID, pw.TotalRuns, pw.CompletedRuns, pw.AvgDurationSecs))
+		}
+	}
 	return b.String()
 }
 
