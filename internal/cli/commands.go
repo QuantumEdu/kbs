@@ -466,6 +466,7 @@ func ParseSessionWrapFlags(args []string) (*SessionWrapFlags, error) {
 // ExportFlags holds parsed export command flags.
 type ExportFlags struct {
 	OutputPath string
+	Pack       bool
 }
 
 // ParseExportFlags parses export-specific flags from args.
@@ -474,6 +475,7 @@ func ParseExportFlags(args []string) (*ExportFlags, error) {
 
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
 	fs.StringVar(&flags.OutputPath, "output", "skillvault-export.json", "Output file path")
+	fs.BoolVar(&flags.Pack, "pack", false, "Export as a skill pack (.svpack) with metadata")
 
 	fs.SetOutput(&nullWriter{})
 
@@ -486,9 +488,48 @@ func ParseExportFlags(args []string) (*ExportFlags, error) {
 	return flags, nil
 }
 
+// ExportPackFlags holds parsed pack export-specific flags.
+type ExportPackFlags struct {
+	Pack        bool
+	Author      string
+	Version     string
+	Description string
+	OutputPath  string
+}
+
+// ParseExportPackFlags parses pack export flags from args.
+func ParseExportPackFlags(args []string) (*ExportPackFlags, error) {
+	flags := &ExportPackFlags{Pack: true, OutputPath: "skillvault-pack.svpack"}
+
+	fs := flag.NewFlagSet("export", flag.ContinueOnError)
+	fs.StringVar(&flags.Author, "author", "", "Pack author (required)")
+	fs.StringVar(&flags.Version, "version", "", "Pack version (required)")
+	fs.StringVar(&flags.Description, "description", "", "Pack description")
+	fs.StringVar(&flags.OutputPath, "output", "skillvault-pack.svpack", "Output file path")
+
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 2 {
+		if err := fs.Parse(args[2:]); err != nil {
+			return nil, fmt.Errorf("parse pack export flags: %w", err)
+		}
+	}
+
+	if flags.Author == "" {
+		return nil, fmt.Errorf("--author is required for pack export")
+	}
+	if flags.Version == "" {
+		return nil, fmt.Errorf("--version is required for pack export")
+	}
+
+	return flags, nil
+}
+
 // ImportFlags holds parsed import command flags.
 type ImportFlags struct {
 	FilePath string
+	Prefix   string
+	Pack     bool
 }
 
 // RunFlags holds parsed run command flags.
@@ -615,7 +656,22 @@ func ParseImportFlags(args []string) (*ImportFlags, error) {
 	if len(args) < 3 {
 		return nil, fmt.Errorf("import requires a file path")
 	}
-	return &ImportFlags{FilePath: args[2]}, nil
+
+	flags := &ImportFlags{FilePath: args[2]}
+
+	fs := flag.NewFlagSet("import", flag.ContinueOnError)
+	fs.StringVar(&flags.Prefix, "prefix", "", "Prefix all imported entity IDs (e.g. 'ns/')")
+	fs.BoolVar(&flags.Pack, "pack", false, "Import as a skill pack")
+
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 3 {
+		if err := fs.Parse(args[3:]); err != nil {
+			return nil, fmt.Errorf("parse import flags: %w", err)
+		}
+	}
+
+	return flags, nil
 }
 
 // ImportWorkflowFlags holds parsed import-workflow command flags.
