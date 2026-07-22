@@ -333,6 +333,47 @@ skip the q-secrets rebuild.
 
 ---
 
+## Agent Telemetry System
+
+Local-first observability for CLI LLM coding agents. Collects, redacts, and persists
+tool calls, token usage, quality signals, and agent lifecycle events to SQLite.
+
+### Components
+
+- **`telemetryd`** — Unix socket daemon that validates, redacts, hashes, and stores events
+- **`telemetryctl`** — CLI to query runs, events, and daemon status
+- **`telemetrywrap`** — CLI wrapper that infers telemetry events from any command
+- **OpenCode plugin** — Native `EventEmitter` emitting 9 canonical event types
+
+### Quick Start
+
+```bash
+# Build the binaries
+go build -o ~/tools/telemetryd ./cmd/telemetryd/
+go build -o ~/tools/telemetryctl ./cmd/telemetryctl/
+
+# Start the daemon
+telemetryd &
+
+# Check daemon status
+telemetryctl status
+
+# List runs
+telemetryctl run list
+telemetryctl run recent
+```
+
+### Security
+
+- SHA-256 arg hashing with 32-byte random salt (`~/.telemetry/salt`, 0600 perms)
+- Built-in regex redaction: OpenAI keys, Bearer tokens, auth headers, `--api-key` flags
+- Base64 entropy scanning → `scanned-warning` flag
+- Zero plaintext secrets in logs, DB, or CLI output
+
+For full documentation, see [`docs/telemetry.md`](docs/telemetry.md).
+
+---
+
 ## MCP Tools (24)
 
 For AI agents (Claude Code, OpenCode, etc.):
@@ -555,6 +596,8 @@ Test pyramid:
 
 - **Go 1.26+** — standard library for CLI, HTTP, JSON, file I/O, crypto, embed
 - **`modernc.org/sqlite`** — pure Go SQLite driver (no CGO)
+- **`telemetryd`** — Unix socket daemon for agent observability (included in repo)
+- **`telemetryctl`** — CLI for run queries and daemon status (included in repo)
 
 **Zero frameworks.** No Cobra, no Fiber, no ORM, no Gin, no Echo.
 
@@ -582,6 +625,10 @@ Test pyramid:
 | LifeOS purpose taxonomy | ✅ Active |
 | Structured MCP workflow runs (`run_workflow`) | ✅ Active |
 | Workflow run analytics (`get_stats`, `list_workflow_runs`, `get_run`) | ✅ Active |
+| Agent telemetry daemon (`telemetryd`) | ✅ Active |
+| Agent telemetry CLI (`telemetryctl`) | ✅ Active |
+| Agent telemetry plugins + wrapper | ✅ Active |
+| Quality signal detectors (loop, stall, streak, token) | ✅ Active |
 
 ---
 
