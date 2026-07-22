@@ -93,6 +93,24 @@ type TokenUsage struct {
 	EfficiencyRatio  *float64 `json:"efficiency_ratio,omitempty"`
 }
 
+// RunFilter provides query criteria for listing runs.
+type RunFilter struct {
+	Limit   int
+	AgentID string
+	Since   *time.Time
+}
+
+// AgentStep captures a step boundary within a run.
+type AgentStep struct {
+	ID          string     `json:"id"`
+	RunID       string     `json:"run_id"`
+	StepName    string     `json:"step_name"`
+	StepIndex   int        `json:"step_index"`
+	StartedAt   time.Time  `json:"started_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	DurationMs  int64      `json:"duration_ms"`
+}
+
 // DaemonStatus provides health and operational metrics for telemetryd.
 type DaemonStatus struct {
 	UptimeSeconds     int64    `json:"uptime_seconds"`
