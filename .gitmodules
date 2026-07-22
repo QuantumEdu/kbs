@@ -1,0 +1,3 @@
+[submodule "q-secrets"]
+	path = q-secrets
+	url = https://github.com/QuantumEdu/q-secrets.git

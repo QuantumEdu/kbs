@@ -96,7 +96,7 @@ Generate implementation plan from spec.
 
 ```bash
 # Prerequisites: Go 1.26+
-git clone https://github.com/QuantumEdu/kbs
+git clone --recurse-submodules https://github.com/QuantumEdu/kbs
 cd kbs
 
 # Build (single binary, no CGO)
@@ -274,9 +274,14 @@ q-secrets is a local encrypted secret manager that stores secrets in a SQLite da
 
 ### Installation
 
+q-secrets is included as a **git submodule** in the kbs repository. After cloning kbs, initialize the submodule:
+
 ```bash
-# Clone q-secrets into the kbs repo (if not already present)
-git clone https://github.com/QuantumEdu/q-secrets
+# Clone kbs with submodules
+git clone --recurse-submodules https://github.com/QuantumEdu/kbs
+
+# Or, if you already cloned without --recurse-submodules:
+git submodule update --init --recursive
 
 # Install both skillvault and q-secrets
 make install-all
