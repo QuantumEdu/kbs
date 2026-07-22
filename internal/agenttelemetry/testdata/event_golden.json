@@ -1,0 +1,17 @@
+{
+  "event_id": "evt-01",
+  "event_type": "prompt.submitted",
+  "timestamp": "2026-07-22T10:15:00Z",
+  "run_id": "run-01",
+  "agent_id": "opencode",
+  "agent_version": "0.1.0",
+  "source": "plugin",
+  "correlation_id": "evt-01",
+  "redaction_policy": "hash-args",
+  "confidence_level": "measured",
+  "payload": {
+    "prompt_hash": "sha256:abc123",
+    "prompt_char_count": 2450,
+    "model": "claude-sonnet-4-5"
+  }
+}
