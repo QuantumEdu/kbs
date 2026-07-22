@@ -42,6 +42,9 @@ func main() {
 	// Create collector.
 	collector := agenttelemetry.NewCollector(store, cfg.SocketPath)
 	collector.SetSecurityPipeline(pipeline)
+	collector.SetDaemonStartTime(time.Now())
+	collector.SetDBPath(cfg.DBPath)
+	collector.SetPromptStorage(cfg.StorePrompts)
 
 	// Start with retry.
 	ctx, cancel := context.WithCancel(context.Background())
