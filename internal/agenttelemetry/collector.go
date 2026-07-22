@@ -15,7 +15,8 @@ const AckOK = `{"status":"ok"}` + "\n"
 
 // Collector listens on a Unix socket and dispatches events to validation and storage.
 type Collector struct {
-	store      *Store
+	store    *Store
+	security *SecurityPipeline
 	socketPath string
 	listener   net.Listener
 	mu         sync.Mutex
@@ -28,6 +29,15 @@ func NewCollector(store *Store, socketPath string) *Collector {
 		store:      store,
 		socketPath: socketPath,
 	}
+}
+
+// SetSecurityPipeline attaches a security pipeline to the collector. When set,
+// every ingested event passes through redaction and entropy scanning before
+// storage. Passing nil clears the pipeline.
+func (c *Collector) SetSecurityPipeline(sp *SecurityPipeline) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.security = sp
 }
 
 // Listen binds the Unix socket and accepts connections. Each connection is handled
@@ -90,6 +100,10 @@ func (c *Collector) ingest(ctx context.Context, raw []byte) string {
 	var e Event
 	if err := json.Unmarshal(raw, &e); err != nil {
 		return fmt.Sprintf(`{"status":"error","error":%q}`+"\n", err.Error())
+	}
+
+	if c.security != nil {
+		c.security.Process(&e)
 	}
 
 	if err := c.store.SaveEvent(ctx, e); err != nil {

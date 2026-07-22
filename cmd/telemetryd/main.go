@@ -32,8 +32,16 @@ func main() {
 
 	log.Printf("telemetryd: store opened at %s", cfg.DBPath)
 
+	// Initialize security pipeline.
+	pipeline, err := agenttelemetry.NewSecurityPipeline(cfg.SaltPath, cfg.RedactionPatterns)
+	if err != nil {
+		log.Fatalf("telemetryd: security pipeline: %v", err)
+	}
+	log.Printf("telemetryd: security pipeline initialized (salt: %s)", cfg.SaltPath)
+
 	// Create collector.
 	collector := agenttelemetry.NewCollector(store, cfg.SocketPath)
+	collector.SetSecurityPipeline(pipeline)
 
 	// Start with retry.
 	ctx, cancel := context.WithCancel(context.Background())
