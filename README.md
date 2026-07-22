@@ -260,6 +260,71 @@ cmd/skillvault/
 | `compare-entries` | Vector similarity between two entries | `skillvault compare-entries e1 e2` |
 | `stats` | Show vault statistics and entry counts | `skillvault stats [--workflow-runs] [--json]` |
 | `update` | Rebuild and reinstall binary from source | `skillvault update [--repo <path>] [--install-path <path>]` |
+| `secrets` | Run q-secrets (optional encrypted secret manager) | `skillvault secrets init`, `skillvault secrets add pi KEY=val` |
+
+---
+
+## q-secrets integration (optional)
+
+SkillVault can run [q-secrets](https://github.com/QuantumEdu/q-secrets) as a subprogram for local encrypted secret management.
+
+### What is q-secrets?
+
+q-secrets is a local encrypted secret manager that stores secrets in a SQLite database with keyring-backed master key encryption. It supports `init`, `add`, `get`, `run` (inject secrets into a child process), `list`, `delete`, `rotate`, `export`, and `import` commands.
+
+### Installation
+
+```bash
+# Clone q-secrets into the kbs repo (if not already present)
+git clone https://github.com/QuantumEdu/q-secrets
+
+# Install both skillvault and q-secrets
+make install-all
+
+# Or install q-secrets separately
+make install-q-secrets
+```
+
+### Usage
+
+```bash
+# Initialize q-secrets (creates ~/.q-secrets/secrets.db and generates keys)
+skillvault secrets init
+
+# Add secrets to a profile
+skillvault secrets add pi KEY=val GITHUB_TOKEN=ghp_...
+
+# List profiles
+skillvault secrets list
+
+# Retrieve a secret
+skillvault secrets get pi KEY
+
+# Run a command with secrets as environment variables
+skillvault secrets run pi -- opencode
+
+# All q-secrets commands are available
+skillvault secrets version
+skillvault secrets rotate pi
+skillvault secrets export pi
+```
+
+### Binary resolution order
+
+The `secrets` command resolves the q-secrets binary by checking, in order:
+
+1. `Q_SECRETS_BIN` environment variable (full path override)
+2. Same directory as the `skillvault` executable
+3. `q-secrets/q-secrets` relative to the kbs repository root (dev mode)
+4. `q-secrets` in `PATH`
+
+If the binary is not found, run `make install-q-secrets` or set `Q_SECRETS_BIN`.
+
+### Updates
+
+`skillvault update` will automatically rebuild and reinstall q-secrets if the
+`q-secrets/` directory exists in the kbs repository. Set `SKIP_Q_SECRETS=1` to
+skip the q-secrets rebuild.
 
 ---
 

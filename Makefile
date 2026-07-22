@@ -1,7 +1,9 @@
-.PHONY: build test clean install build-tui
+.PHONY: build test clean install build-tui build-q-secrets install-q-secrets install-all
 
 BINARY=skillvault
 INSTALL_DIR=$(HOME)/tools
+Q_SECRETS_DIR=q-secrets
+Q_SECRETS_BIN=q-secrets
 
 build:
 	go build -o $(BINARY) ./cmd/skillvault
@@ -26,3 +28,13 @@ install: build
 	mkdir -p $(INSTALL_DIR)
 	cp $(BINARY) $(INSTALL_DIR)/$(BINARY)
 	@echo "Installed to $(INSTALL_DIR)/$(BINARY)"
+
+build-q-secrets:
+	cd $(Q_SECRETS_DIR) && go build -o $(Q_SECRETS_BIN) .
+
+install-q-secrets: build-q-secrets
+	mkdir -p $(INSTALL_DIR)
+	cp $(Q_SECRETS_DIR)/$(Q_SECRETS_BIN) $(INSTALL_DIR)/$(Q_SECRETS_BIN)
+	@echo "Installed q-secrets to $(INSTALL_DIR)/$(Q_SECRETS_BIN)"
+
+install-all: install install-q-secrets

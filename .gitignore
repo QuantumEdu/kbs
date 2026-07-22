@@ -18,3 +18,6 @@ skillvault.db
 
 # Zone.Identifier (NTFS alternate streams)
 *:Zone.Identifier
+
+# q-secrets submodule (separate repo, cloned independently)
+q-secrets/

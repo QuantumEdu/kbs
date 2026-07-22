@@ -65,6 +65,7 @@ var commandDescs = map[string]string{
 	"entry-restore":        "Restore an entry to a previous version",
 	"tui":                  "Start the interactive Bubble Tea terminal UI",
 	"update":              "Rebuild and reinstall the skillvault binary from source",
+	"secrets":             "Run q-secrets (optional secret manager subprogram). Passes all arguments through",
 }
 
 func traceCmd(cmd string) {
@@ -148,6 +149,9 @@ func main() {
 	case "update":
 		traceCmd("update")
 		runUpdate()
+	case "secrets":
+		traceCmd("secrets")
+		runSecrets()
 	default:
 		traceCmd(cmd)
 		runCLI(cmd)
@@ -294,6 +298,134 @@ func runUpdate() {
 	verCmd.Stderr = os.Stderr
 	_ = verCmd.Run()
 	fmt.Printf("[sk-vault] update: rebuilt and installed to %s\n", installPath)
+
+	// Step 7: Optionally rebuild q-secrets if present in repo.
+	if os.Getenv("SKIP_Q_SECRETS") == "1" {
+		fmt.Fprintf(os.Stderr, "[sk-vault] SKIP_Q_SECRETS=1; skipping q-secrets update\n")
+		return
+	}
+	qModPath := filepath.Join(repoPath, "q-secrets", "go.mod")
+	if _, err := os.Stat(qModPath); err == nil {
+		qSecretsTmp, err := os.CreateTemp(installDir, ".q-secrets-build-*")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[sk-vault] warning: could not create temp file for q-secrets: %v\n", err)
+			return
+		}
+		qTmpPath := qSecretsTmp.Name()
+		qSecretsTmp.Close()
+
+		qBuildCmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", qTmpPath, ".")
+		qBuildCmd.Dir = filepath.Join(repoPath, "q-secrets")
+		qBuildCmd.Stdout = os.Stdout
+		qBuildCmd.Stderr = os.Stderr
+		qBuildCmd.Env = append(os.Environ(), "GOFLAGS=")
+		if err := qBuildCmd.Run(); err != nil {
+			os.Remove(qTmpPath)
+			fmt.Fprintf(os.Stderr, "[sk-vault] warning: q-secrets build failed: %v\n", err)
+			return
+		}
+
+		if err := os.Chmod(qTmpPath, 0755); err != nil {
+			os.Remove(qTmpPath)
+			fmt.Fprintf(os.Stderr, "[sk-vault] warning: chmod q-secrets binary: %v\n", err)
+			return
+		}
+
+		qInstallPath := filepath.Join(installDir, "q-secrets")
+		if err := os.Rename(qTmpPath, qInstallPath); err != nil {
+			os.Remove(qTmpPath)
+			fmt.Fprintf(os.Stderr, "[sk-vault] warning: install q-secrets to %s: %v\n", qInstallPath, err)
+			return
+		}
+
+		fmt.Printf("[sk-vault] update: q-secrets rebuilt and installed to %s\n", qInstallPath)
+	} else {
+		fmt.Fprintf(os.Stderr, "[sk-vault] q-secrets/ not found in repo; skipping q-secrets update\n")
+	}
+}
+
+func runSecrets() {
+	secretPath := resolveQSecretsBin()
+	if secretPath == "" {
+		fmt.Fprintf(os.Stderr, "[sk-vault] q-secrets not found. Install it with:\n")
+		fmt.Fprintf(os.Stderr, "  make install-q-secrets\n")
+		fmt.Fprintf(os.Stderr, "or set Q_SECRETS_BIN to its path.\n")
+		os.Exit(1)
+	}
+
+	// Build the command: q-secrets <args...>
+	cmd := exec.Command(secretPath, os.Args[2:]...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		}
+		os.Exit(1)
+	}
+}
+
+// resolveQSecretsBin returns the path to the q-secrets binary, or empty if not found.
+func resolveQSecretsBin() string {
+	// 1. Q_SECRETS_BIN env var (full path override)
+	if p := os.Getenv("Q_SECRETS_BIN"); p != "" {
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p
+		}
+	}
+
+	// 2. Same directory as the current skillvault executable
+	if execPath, err := os.Executable(); err == nil {
+		dir := filepath.Dir(execPath)
+		candidate := filepath.Join(dir, "q-secrets")
+		if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+			return candidate
+		}
+	}
+
+	// 3. q-secrets/q-secrets relative to the kbs repo root (useful for development)
+	repoRoot := resolveRepoRoot()
+	if repoRoot != "" {
+		candidate := filepath.Join(repoRoot, "q-secrets", "q-secrets")
+		if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+			return candidate
+		}
+	}
+
+	// 4. q-secrets in PATH
+	if p, err := exec.LookPath("q-secrets"); err == nil {
+		return p
+	}
+
+	return ""
+}
+
+// resolveRepoRoot returns the path to the kbs repository root, or empty if not found.
+func resolveRepoRoot() string {
+	if execPath, err := os.Executable(); err == nil {
+		absExec, _ := filepath.Abs(execPath)
+		parent := filepath.Dir(absExec)
+		if info, err := os.Stat(filepath.Join(parent, ".git")); err == nil && info.IsDir() {
+			return parent
+		}
+	}
+	// Fallback: walk up from cwd looking for .git
+	if cwd, err := os.Getwd(); err == nil {
+		dir := cwd
+		for {
+			if info, err := os.Stat(filepath.Join(dir, ".git")); err == nil && info.IsDir() {
+				return dir
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	return ""
 }
 
 func openVault() *vaultServices {

@@ -331,3 +331,37 @@ func TestSymlinkDetection(t *testing.T) {
 		t.Error("skillvault basename should be skillvault")
 	}
 }
+
+func TestResolveQSecretsBin_EnvVar(t *testing.T) {
+	tmpDir := t.TempDir()
+	mockBin := filepath.Join(tmpDir, "q-secrets")
+	if err := os.WriteFile(mockBin, []byte("#!/bin/sh\necho q-secrets mock\n"), 0755); err != nil {
+		t.Fatalf("failed to create mock binary: %v", err)
+	}
+
+	t.Setenv("Q_SECRETS_BIN", mockBin)
+	got := resolveQSecretsBin()
+	if got != mockBin {
+		t.Errorf("expected %q, got %q", mockBin, got)
+	}
+}
+
+func TestResolveQSecretsBin_NotFound(t *testing.T) {
+	// Use a temp dir as working directory so resolveRepoRoot doesn't find
+	// the real kbs repo by walking up from cwd.
+	tmpDir := t.TempDir()
+	origCwd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() { _ = os.Chdir(origCwd) }()
+
+	t.Setenv("Q_SECRETS_BIN", "")
+	t.Setenv("PATH", tmpDir)
+
+	got := resolveQSecretsBin()
+	if got != "" {
+		t.Errorf("expected empty string when binary not found, got %q", got)
+	}
+}
+
