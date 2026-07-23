@@ -20,3 +20,7 @@ skillvault.db
 *:Zone.Identifier
 
 
+
+# telemetryd/telemetryctl binaries
+telemetryd
+telemetryctl

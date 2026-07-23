@@ -20,6 +20,9 @@ test:
 test-cover:
 	go test -cover ./...
 
+test-integration:
+	go test -tags integration -count=1 ./internal/agenttelemetry/...
+
 clean:
 	rm -f $(BINARY) $(BINARY)-tui
 	go clean -cache
