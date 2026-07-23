@@ -30,7 +30,7 @@ const version = "v3"
 
 var commandDescs = map[string]string{
 	"version":              "Print version information",
-	"init":                 "Initialize vault directory, database, and subdirectories. Use --with-secrets to also install q-secrets.",
+	"init":                 "Initialize vault directory, database, and subdirectories. Use --with-secrets to also install q-secrets, --with-telemetry for telemetryd/telemetryctl, or --all for both.",
 	"mcp":                  "Start MCP JSON-RPC 2.0 server over stdio",
 	"http":                 "Start HTTP REST API server on 127.0.0.1:7438",
 	"add-entry":            "Save a new entry to the vault",
@@ -65,6 +65,7 @@ var commandDescs = map[string]string{
 	"entry-restore":        "Restore an entry to a previous version",
 	"tui":                  "Start the interactive Bubble Tea terminal UI",
 	"update":              "Rebuild and reinstall the skillvault binary from source",
+	"install-telemetry":   "Build and install telemetryd, telemetryctl, and telemetrywrap from the kbs repo",
 	"secrets":             "Run q-secrets (optional secret manager subprogram). Use 'secrets install' to install it, or pass --with-secrets to 'init'. Passes all other arguments through to q-secrets.",
 }
 
@@ -149,6 +150,10 @@ func main() {
 	case "update":
 		traceCmd("update")
 		runUpdate()
+	case "install-telemetry":
+		traceCmd("install-telemetry")
+		installDir := defaultInstallDir()
+		installTelemetry(installDir)
 	case "secrets":
 		traceCmd("secrets")
 		runSecrets()
@@ -199,14 +204,27 @@ func runInit() {
 
 	fmt.Println("SkillVault initialized at", vd)
 
-	// --with-secrets: optionally build and install q-secrets after init.
+	installDir := defaultInstallDir()
+	hasSecrets := false
+	hasTelemetry := false
 	for _, a := range os.Args[2:] {
-		if a == "--with-secrets" {
-			installDir := defaultInstallDir()
-			fmt.Fprintf(os.Stderr, "[sk-vault] init: --with-secrets flag set, installing q-secrets to %s\n", installDir)
-			installQSecrets(installDir)
-			break
+		switch a {
+		case "--with-secrets":
+			hasSecrets = true
+		case "--with-telemetry":
+			hasTelemetry = true
+		case "--all":
+			hasSecrets = true
+			hasTelemetry = true
 		}
+	}
+	if hasSecrets {
+		fmt.Fprintf(os.Stderr, "[sk-vault] init: --with-secrets flag set, installing q-secrets to %s\n", installDir)
+		installQSecrets(installDir)
+	}
+	if hasTelemetry {
+		fmt.Fprintf(os.Stderr, "[sk-vault] init: --with-telemetry flag set, installing telemetry binaries to %s\n", installDir)
+		installTelemetry(installDir)
 	}
 }
 
@@ -312,9 +330,16 @@ func runUpdate() {
 	// Step 7: Optionally rebuild q-secrets if present in repo.
 	if os.Getenv("SKIP_Q_SECRETS") == "1" {
 		fmt.Fprintf(os.Stderr, "[sk-vault] SKIP_Q_SECRETS=1; skipping q-secrets update\n")
-		return
+	} else {
+		installQSecrets(installDir)
 	}
-	installQSecrets(installDir)
+
+	// Step 8: Rebuild telemetry binaries (unless skipped).
+	if os.Getenv("SKIP_TELEMETRY") == "1" {
+		fmt.Fprintf(os.Stderr, "[sk-vault] SKIP_TELEMETRY=1; skipping telemetry build\n")
+	} else {
+		installTelemetry(installDir)
+	}
 }
 
 func runSecrets() {
@@ -413,6 +438,69 @@ func installQSecrets(installDir string) {
 	}
 
 	fmt.Printf("[sk-vault] q-secrets installed to %s\n", qInstallPath)
+}
+
+// installTelemetry builds telemetryd, telemetryctl, and telemetrywrap from the repo
+// and installs them to installDir.
+func installTelemetry(installDir string) {
+	repoPath := os.Getenv("SKILLVAULT_REPO")
+	if repoPath == "" {
+		repoPath = resolveRepoRoot()
+	}
+	if repoPath == "" {
+		fmt.Fprintf(os.Stderr, "[sk-vault] error: cannot find kbs repo root\n")
+		return
+	}
+
+	if err := exec.Command("git", "-C", repoPath, "rev-parse", "--git-dir").Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "[sk-vault] error: %s is not a valid git repository\n", repoPath)
+		return
+	}
+
+	type telemetryBin struct {
+		Name  string
+		GoPkg string
+	}
+	bins := []telemetryBin{
+		{"telemetryd", "./cmd/telemetryd"},
+		{"telemetryctl", "./cmd/telemetryctl"},
+		{"telemetrywrap", "./internal/agenttelemetry/telemetrywrap"},
+	}
+
+	for _, bin := range bins {
+		tmpFile, err := os.CreateTemp(installDir, ".telemetry-build-*")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[sk-vault] warning: create temp file in %s: %v\n", installDir, err)
+			continue
+		}
+		tmpPath := tmpFile.Name()
+		tmpFile.Close()
+
+		buildCmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", tmpPath, bin.GoPkg)
+		buildCmd.Dir = repoPath
+		buildCmd.Stdout = os.Stdout
+		buildCmd.Stderr = os.Stderr
+		if err := buildCmd.Run(); err != nil {
+			os.Remove(tmpPath)
+			fmt.Fprintf(os.Stderr, "[sk-vault] warning: build %s failed: %v\n", bin.Name, err)
+			continue
+		}
+
+		if err := os.Chmod(tmpPath, 0755); err != nil {
+			os.Remove(tmpPath)
+			fmt.Fprintf(os.Stderr, "[sk-vault] warning: chmod %s: %v\n", tmpPath, err)
+			continue
+		}
+
+		installPath := filepath.Join(installDir, bin.Name)
+		if err := os.Rename(tmpPath, installPath); err != nil {
+			os.Remove(tmpPath)
+			fmt.Fprintf(os.Stderr, "[sk-vault] warning: install %s to %s: %v\n", bin.Name, installPath, err)
+			continue
+		}
+
+		fmt.Printf("[sk-vault] %s installed to %s\n", bin.Name, installPath)
+	}
 }
 
 // resolveQSecretsBin returns the path to the q-secrets binary, or empty if not found.

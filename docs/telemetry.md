@@ -11,6 +11,49 @@ tool calls, token usage, quality signals, and agent lifecycle events to SQLite.
 - **OpenCode plugin** — Native `EventEmitter` emitting 9 canonical event types
 - **`q-secrets`** (optional) — Local encrypted secret manager, installable via `skillvault secrets install` or `skillvault init --with-secrets`
 
+## Installation
+
+### From the kbs repo (any machine)
+
+```bash
+# Clone the repo (first time only)
+git clone https://github.com/QuantumEdu/kbs.git
+cd kbs
+git submodule update --init
+
+# One-shot install: all binaries to ~/tools/
+make install-all
+
+# Or use skillvault (if already installed)
+skillvault init --all         # init vault + install q-secrets + install telemetry
+skillvault install-telemetry  # install telemetry only
+skillvault update             # pull latest + rebuild everything
+```
+
+### Via skillvault (once installed)
+
+```bash
+skillvault install-telemetry        # build + install telemetryd, telemetryctl, telemetrywrap
+skillvault init --with-telemetry    # init vault + install telemetry
+skillvault init --all               # init vault + q-secrets + telemetry
+skillvault update                   # pull latest, rebuild skillvault + q-secrets + telemetry
+```
+
+Environment variables:
+
+| Env var | Effect |
+|---------|--------|
+| `SKILLVAULT_REPO` | Point to the kbs repo (auto-detected if skillvault inside the repo) |
+| `SKIP_Q_SECRETS=1` | Skip q-secrets rebuild during `update` |
+| `SKIP_TELEMETRY=1` | Skip telemetry rebuild during `update` |
+
+### Via Makefile
+
+```bash
+make install-telemetry   # build + install to ~/tools/
+make install-all          # skillvault + q-secrets + telemetry
+```
+
 ## Quick Start
 
 ```bash
@@ -233,12 +276,13 @@ envelopes with metadata fields (`event_id`, `event_type`, `timestamp`, `run_id`,
 All components are part of the kbs monorepo:
 
 ```bash
-# Build all binaries
-go build ./cmd/telemetryd/
-go build ./cmd/telemetryctl/
+# Via Makefile
+make build-telemetry
 
-# The telemetrywrap binary is internal
-go build ./internal/agenttelemetry/telemetrywrap/
+# Or direct go build
+go build -ldflags="-s -w" -o telemetryd ./cmd/telemetryd/
+go build -ldflags="-s -w" -o telemetryctl ./cmd/telemetryctl/
+go build -ldflags="-s -w" -o telemetrywrap ./internal/agenttelemetry/telemetrywrap/
 ```
 
 ## Testing

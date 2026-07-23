@@ -104,6 +104,8 @@ func ParseCommand(args []string) (string, error) {
 		return sub, nil
 	case "update":
 		return sub, nil
+	case "install-telemetry":
+		return sub, nil
 	case "secrets":
 		return sub, nil
 	case "sync":

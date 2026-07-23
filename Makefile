@@ -1,4 +1,7 @@
-.PHONY: build test clean install build-tui build-q-secrets install-q-secrets install-all
+.PHONY: build test clean install install-all \
+        build-tui build-q-secrets install-q-secrets \
+        build-telemetry install-telemetry \
+        test-integration
 
 BINARY=skillvault
 INSTALL_DIR=$(HOME)/tools
@@ -24,7 +27,7 @@ test-integration:
 	go test -tags integration -count=1 ./internal/agenttelemetry/...
 
 clean:
-	rm -f $(BINARY) $(BINARY)-tui
+	rm -f $(BINARY) $(BINARY)-tui telemetryd telemetryctl telemetrywrap
 	go clean -cache
 
 install: build
@@ -42,7 +45,21 @@ install-q-secrets: build-q-secrets
 	@echo ""
 	@echo "Alternative: run 'skillvault init --with-secrets' or 'skillvault secrets install' to install from within kbs."
 
-install-all: install install-q-secrets
+# Telemetry binaries
+build-telemetry:
+	go build -ldflags="-s -w" -o telemetryd ./cmd/telemetryd
+	go build -ldflags="-s -w" -o telemetryctl ./cmd/telemetryctl
+	go build -ldflags="-s -w" -o telemetrywrap ./internal/agenttelemetry/telemetrywrap
+	@echo "Built telemetry binaries"
 
-test-integration:
-	go test -tags integration -count=1 ./internal/agenttelemetry/...
+install-telemetry: build-telemetry
+	mkdir -p $(INSTALL_DIR)
+	cp telemetryd $(INSTALL_DIR)/telemetryd
+	cp telemetryctl $(INSTALL_DIR)/telemetryctl
+	cp telemetrywrap $(INSTALL_DIR)/telemetrywrap
+	@echo "Installed telemetry binaries to $(INSTALL_DIR)/"
+	@echo ""
+	@echo "Alternative: run 'skillvault install-telemetry' or 'skillvault init --with-telemetry' to install from within kbs."
+
+install-all: install install-q-secrets install-telemetry
+	@echo "All binaries installed to $(INSTALL_DIR)/"

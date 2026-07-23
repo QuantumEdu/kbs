@@ -21,6 +21,7 @@ skillvault.db
 
 
 
-# telemetryd/telemetryctl binaries
+# telemetry binaries (built by make build-telemetry)
 telemetryd
 telemetryctl
+telemetrywrap
