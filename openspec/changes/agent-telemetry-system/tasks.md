@@ -56,21 +56,21 @@ Chain strategy: feature-branch-chain
 ## Phase 3: Security (PR #3 — ~380 lines)
 > REQ-SEC-01, REQ-SEC-02, REQ-SEC-03, REQ-SEC-04
 
-- [ ] 3.1 `internal/agenttelemetry/hasher.go`: SHA-256(salt+join(args,"\x00")), `Verify`, `SaltFingerprint`, salt gen 32 bytes 0600
-- [ ] 3.2 `internal/agenttelemetry/hasher_test.go`: determinism, salt isolation, verification, missing/wrong-perm salt → exit code 3
-- [ ] 3.3 `internal/agenttelemetry/redactor.go`: 4 built-in regexes, custom via `TELEMETRY_REDACTION_PATTERNS`, compile-error fallback
-- [ ] 3.4 `internal/agenttelemetry/redactor_test.go`: API key, bearer token, auth header, `--api-key` flag redaction
-- [ ] 3.5 `internal/agenttelemetry/entropyscanner.go`: base64 ratio > 0.75 + length > 20 → `scanned-warning` flag
-- [ ] 3.6 Wire security pipeline into Collector.Ingest: hash → redact → entropy scan before Store
+- [x] 3.1 `internal/agenttelemetry/hasher.go`: SHA-256(salt+join(args,"\x00")), `Verify`, `SaltFingerprint`, salt gen 32 bytes 0600
+- [x] 3.2 `internal/agenttelemetry/hasher_test.go`: determinism, salt isolation, verification, missing/wrong-perm salt → exit code 3
+- [x] 3.3 `internal/agenttelemetry/redactor.go`: 4 built-in regexes, custom via `TELEMETRY_REDACTION_PATTERNS`, compile-error fallback
+- [x] 3.4 `internal/agenttelemetry/redactor_test.go`: API key, bearer token, auth header, `--api-key` flag redaction
+- [x] 3.5 `internal/agenttelemetry/entropyscanner.go`: base64 ratio > 0.75 + length > 20 → `scanned-warning` flag
+- [x] 3.6 Wire security pipeline into Collector.Ingest: hash → redact → entropy scan before Store
 
 ## Phase 4: CLI (PR #4 — ~220 lines)
 > REQ-CORE-03, REQ-QUAL-05
 
-- [ ] 4.1 `cmd/telemetryctl/main.go`: subcommands with `flag` package
-- [ ] 4.2 `run list`: `--limit`, `--agent`, `--since` filters, table output (run_id, agent, status, tokens, cost, duration)
-- [ ] 4.3 `run show ID`: header + step tree + token/cost breakdown + quality signal summary
-- [ ] 4.4 `run recent`: last 5 runs summary
-- [ ] 4.5 `status`: daemon uptime, events ingested, DB size, salt fingerprint, redaction patterns, prompt storage enabled?
+- [x] 4.1 `cmd/telemetryctl/main.go`: subcommands with `flag` package
+- [x] 4.2 `run list`: `--limit`, `--agent`, `--since` filters, table output (run_id, agent, status, tokens, cost, duration)
+- [x] 4.3 `run show ID`: header + step tree + token/cost breakdown + quality signal summary
+- [x] 4.4 `run recent`: last 5 runs summary
+- [x] 4.5 `status`: daemon uptime, events ingested, DB size, salt fingerprint, redaction patterns, prompt storage enabled?
 
 ## Phase 5: Plugins (PR #5 — ~460 lines) ⚠️ exceeds 400
 > REQ-PLUG-01, REQ-PLUG-02, REQ-PLUG-03, REQ-PLUG-04
@@ -83,13 +83,13 @@ Chain strategy: feature-branch-chain
 ## Phase 6: Quality Signals (PR #6 — ~420 lines) ⚠️ exceeds 400
 > REQ-QUAL-01, REQ-QUAL-02, REQ-QUAL-03, REQ-QUAL-04, REQ-QUAL-05
 
-- [ ] 6.1 `internal/agenttelemetry/loopdetector.go`: rolling 60s window, 3 identical `args_hash` → `loop.detected`, LRU eviction max 1000
-- [ ] 6.2 `internal/agenttelemetry/loopdetector_test.go`: 3 identical → detect, different args → no, window expiry → no
-- [ ] 6.3 `internal/agenttelemetry/stalldetector.go`: wall-clock inactivity check, 60s no events on active run → `policy.violation`
-- [ ] 6.4 `internal/agenttelemetry/stalldetector_test.go`: 61s inactivity → violation, completed run → no
-- [ ] 6.5 `internal/agenttelemetry/streakdetector.go`: ≥5 fail streak or ≥3 no-change streak → `policy.violation`
-- [ ] 6.6 `internal/agenttelemetry/tokencounter.go`: `char-div-4` estimation, `efficiency_ratio < 0.05` → `policy.violation`
-- [ ] 6.7 Wire detectors into Collector.Ingest: call after Store, emit signals as events
+- [x] 6.1 `internal/agenttelemetry/loopdetector.go`: rolling 60s window, 3 identical `args_hash` → `loop.detected`, LRU eviction max 1000
+- [x] 6.2 `internal/agenttelemetry/loopdetector_test.go`: 3 identical → detect, different args → no, window expiry → no
+- [x] 6.3 `internal/agenttelemetry/stalldetector.go`: wall-clock inactivity check, 60s no events on active run → `policy.violation`
+- [x] 6.4 `internal/agenttelemetry/stalldetector_test.go`: 61s inactivity → violation, completed run → no
+- [x] 6.5 `internal/agenttelemetry/streakdetector.go`: ≥5 fail streak or ≥3 no-change streak → `policy.violation`
+- [x] 6.6 `internal/agenttelemetry/tokencounter.go`: `char-div-4` estimation, `efficiency_ratio < 0.05` → `policy.violation`
+- [x] 6.7 Wire detectors into Collector.Ingest: call after Store, emit signals as events
 
 ## Phase 7: Integration + E2E (PR #7 — ~360 lines)
 > REQ-CORE-01, REQ-CORE-03, REQ-QUAL-05

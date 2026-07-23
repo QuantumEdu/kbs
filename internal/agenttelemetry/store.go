@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -181,10 +182,18 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]AgentRun, error) {
 		total_tokens, total_cost_usd, COALESCE(error_type,''), COALESCE(error_message,'')
 	FROM agent_runs`
 	var args []interface{}
+	var clauses []string
 
 	if f.AgentID != "" {
-		query += " WHERE agent_id = ?"
+		clauses = append(clauses, "agent_id = ?")
 		args = append(args, f.AgentID)
+	}
+	if f.Since != nil {
+		clauses = append(clauses, "started_at >= ?")
+		args = append(args, f.Since.UTC().Format(time.RFC3339))
+	}
+	if len(clauses) > 0 {
+		query += " WHERE " + strings.Join(clauses, " AND ")
 	}
 	query += " ORDER BY started_at DESC"
 	if f.Limit > 0 {
@@ -256,6 +265,138 @@ func (s *Store) Status(ctx context.Context) (DaemonStatus, error) {
 
 	// DB size will be populated by the caller (daemon) via os.Stat.
 	return ds, nil
+}
+
+// GetSteps returns all agent steps for a run, ordered by step_index.
+func (s *Store) GetSteps(ctx context.Context, runID string) ([]AgentStep, error) {
+	if s.db == nil {
+		return nil, fmt.Errorf("store is closed")
+	}
+	query := `SELECT id, run_id, step_name, step_index,
+		COALESCE(started_at,''), COALESCE(completed_at,''), duration_ms
+	FROM agent_steps WHERE run_id = ? ORDER BY step_index`
+	rows, err := s.db.QueryContext(ctx, query, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var steps []AgentStep
+	for rows.Next() {
+		var s AgentStep
+		var startedStr, completedStr sql.NullString
+		if err := rows.Scan(&s.ID, &s.RunID, &s.StepName, &s.StepIndex,
+			&startedStr, &completedStr, &s.DurationMs); err != nil {
+			return nil, err
+		}
+		s.StartedAt, _ = time.Parse(time.RFC3339, startedStr.String)
+		if completedStr.Valid {
+			t, _ := time.Parse(time.RFC3339, completedStr.String)
+			s.CompletedAt = &t
+		}
+		steps = append(steps, s)
+	}
+	if steps == nil {
+		steps = []AgentStep{}
+	}
+	return steps, rows.Err()
+}
+
+// GetTokenUsage returns all token usage records for a run, ordered by recorded_at.
+func (s *Store) GetTokenUsage(ctx context.Context, runID string) ([]TokenUsage, error) {
+	if s.db == nil {
+		return nil, fmt.Errorf("store is closed")
+	}
+	query := `SELECT id, run_id, COALESCE(step_id,''), model,
+		input_tokens, output_tokens, total_tokens, cost_usd,
+		estimation_method, efficiency_ratio
+	FROM token_usage WHERE run_id = ? ORDER BY recorded_at`
+	rows, err := s.db.QueryContext(ctx, query, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var usages []TokenUsage
+	for rows.Next() {
+		var u TokenUsage
+		var effRatio sql.NullFloat64
+		if err := rows.Scan(&u.ID, &u.RunID, &u.StepID, &u.Model,
+			&u.InputTokens, &u.OutputTokens, &u.TotalTokens, &u.CostUSD,
+			&u.EstimationMethod, &effRatio); err != nil {
+			return nil, err
+		}
+		if effRatio.Valid {
+			u.EfficiencyRatio = &effRatio.Float64
+		}
+		usages = append(usages, u)
+	}
+	if usages == nil {
+		usages = []TokenUsage{}
+	}
+	return usages, rows.Err()
+}
+
+// EventCount returns the number of events for a given run ID.
+func (s *Store) EventCount(ctx context.Context, runID string) (int, error) {
+	if s.db == nil {
+		return 0, fmt.Errorf("store is closed")
+	}
+	var count int
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE run_id = ?", runID).Scan(&count)
+	return count, err
+}
+
+// EventCountByType returns the number of events for a given run ID and event type.
+func (s *Store) EventCountByType(ctx context.Context, runID, eventType string) (int, error) {
+	if s.db == nil {
+		return 0, fmt.Errorf("store is closed")
+	}
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM events WHERE run_id = ? AND event_type = ?",
+		runID, eventType).Scan(&count)
+	return count, err
+}
+
+// EventRow holds a single event row from the database.
+type EventRow struct {
+	EventID        string
+	RunID          string
+	EventType      string
+	CorrelationID  *string
+	Timestamp      string
+}
+
+// GetEventsByRun returns all events for a run, ordered by timestamp.
+func (s *Store) GetEventsByRun(ctx context.Context, runID string) ([]EventRow, error) {
+	if s.db == nil {
+		return nil, fmt.Errorf("store is closed")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, run_id, event_type, correlation_id, timestamp FROM events WHERE run_id = ? ORDER BY timestamp",
+		runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []EventRow
+	for rows.Next() {
+		var er EventRow
+		var corrID sql.NullString
+		if err := rows.Scan(&er.EventID, &er.RunID, &er.EventType, &corrID, &er.Timestamp); err != nil {
+			return nil, err
+		}
+		if corrID.Valid {
+			er.CorrelationID = &corrID.String
+		}
+		events = append(events, er)
+	}
+	if events == nil {
+		events = []EventRow{}
+	}
+	return events, rows.Err()
 }
 
 // Close closes the database connection.
