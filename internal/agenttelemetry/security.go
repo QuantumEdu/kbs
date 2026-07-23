@@ -51,3 +51,21 @@ func (sp *SecurityPipeline) Process(e *Event) {
 		}
 	}
 }
+
+// SaltFingerprint returns the first 8 hex chars of SHA-256(salt), or empty
+// string when the pipeline has no hasher.
+func (sp *SecurityPipeline) SaltFingerprint() string {
+	if sp.hasher != nil {
+		return sp.hasher.SaltFingerprint()
+	}
+	return ""
+}
+
+// RedactionPatterns returns the list of active regex pattern strings, or nil
+// when the pipeline has no redactor.
+func (sp *SecurityPipeline) RedactionPatterns() []string {
+	if sp.redactor != nil {
+		return sp.redactor.Patterns()
+	}
+	return nil
+}

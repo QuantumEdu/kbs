@@ -82,3 +82,9 @@ func (h *ArgHasher) Hash(args []string) string {
 func (h *ArgHasher) Verify(args []string, hash string) bool {
 	return h.Hash(args) == hash
 }
+
+// SaltFingerprint returns the first 8 hex characters of SHA-256(salt).
+func (h *ArgHasher) SaltFingerprint() string {
+	hash := sha256.Sum256(h.salt)
+	return hex.EncodeToString(hash[:])[:8]
+}
