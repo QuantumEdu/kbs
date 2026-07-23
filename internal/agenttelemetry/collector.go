@@ -25,6 +25,10 @@ type Collector struct {
 	listener        net.Listener
 	mu              sync.Mutex
 	closed          bool
+	loopDetector    *LoopDetector
+	stallDetector   *StallDetector
+	streakDetector  *StreakDetector
+	tokenCounter    *TokenCounter
 }
 
 // NewCollector creates a new Collector bound to the given socket path.
@@ -65,6 +69,26 @@ func (c *Collector) SetPromptStorage(enabled bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.promptStorage = enabled
+}
+
+// SetLoopDetector attaches a loop detector to the collector.
+func (c *Collector) SetLoopDetector(ld *LoopDetector) {
+	c.loopDetector = ld
+}
+
+// SetStallDetector attaches a stall detector to the collector.
+func (c *Collector) SetStallDetector(sd *StallDetector) {
+	c.stallDetector = sd
+}
+
+// SetStreakDetector attaches a streak detector to the collector.
+func (c *Collector) SetStreakDetector(sd *StreakDetector) {
+	c.streakDetector = sd
+}
+
+// SetTokenCounter attaches a token counter to the collector.
+func (c *Collector) SetTokenCounter(tc *TokenCounter) {
+	c.tokenCounter = tc
 }
 
 // Listen binds the Unix socket and accepts connections. Each connection is handled
@@ -145,7 +169,65 @@ func (c *Collector) ingest(ctx context.Context, raw []byte) string {
 		return fmt.Sprintf(`{"status":"error","error":%q}`+"\n", err.Error())
 	}
 
+	// Run quality signal detectors after successful save.
+
+	// Loop detector: check tool.called events.
+	if e.EventType == "tool.called" && c.loopDetector != nil {
+		var tcr ToolCallRecord
+		if json.Unmarshal(e.Payload, &tcr) == nil {
+			if signal := c.loopDetector.Check(tcr); signal != nil {
+				emitSignalEvent(c.store, ctx, e, "loop.detected", signal)
+			}
+		}
+	}
+
+	// Stall detector: record activity on every event, then check.
+	if c.stallDetector != nil {
+		c.stallDetector.Record(e.RunID, time.Now())
+		if signal := c.stallDetector.Check(e.RunID); signal != nil {
+			// Only fire for active (running) runs.
+			run, err := c.store.GetRun(ctx, e.RunID)
+			if err == nil && run.Status == "running" {
+				emitSignalEvent(c.store, ctx, e, "policy.violation", signal)
+			}
+		}
+	}
+
+	// Streak detector: check tool status for failures.
+	if e.EventType == "tool.called" && c.streakDetector != nil {
+		var tcr ToolCallRecord
+		if json.Unmarshal(e.Payload, &tcr) == nil {
+			if tcr.ErrorType != "" {
+				if signal := c.streakDetector.RecordFail(e.RunID); signal != nil {
+					emitSignalEvent(c.store, ctx, e, "policy.violation", signal)
+				}
+			} else {
+				c.streakDetector.RecordSuccess(e.RunID)
+			}
+		}
+	}
+
 	return AckOK
+}
+
+// emitSignalEvent marshals a signal payload and saves it as an event.
+func emitSignalEvent(store *Store, ctx context.Context, source Event, eventType string, signal interface{}) {
+	payload, err := json.Marshal(signal)
+	if err != nil {
+		return
+	}
+	signalEvent := Event{
+		EventID:         fmt.Sprintf("evt-%d", time.Now().UnixNano()),
+		EventType:       eventType,
+		Timestamp:       time.Now(),
+		RunID:           source.RunID,
+		AgentID:         source.AgentID,
+		Source:          "daemon",
+		RedactionPolicy: "none",
+		ConfidenceLevel: "measured",
+		Payload:         payload,
+	}
+	_ = store.SaveEvent(ctx, signalEvent)
 }
 
 // Shutdown drains pending connections and closes the socket.

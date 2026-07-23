@@ -337,6 +337,68 @@ func (s *Store) GetTokenUsage(ctx context.Context, runID string) ([]TokenUsage, 
 	return usages, rows.Err()
 }
 
+// EventCount returns the number of events for a given run ID.
+func (s *Store) EventCount(ctx context.Context, runID string) (int, error) {
+	if s.db == nil {
+		return 0, fmt.Errorf("store is closed")
+	}
+	var count int
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE run_id = ?", runID).Scan(&count)
+	return count, err
+}
+
+// EventCountByType returns the number of events for a given run ID and event type.
+func (s *Store) EventCountByType(ctx context.Context, runID, eventType string) (int, error) {
+	if s.db == nil {
+		return 0, fmt.Errorf("store is closed")
+	}
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM events WHERE run_id = ? AND event_type = ?",
+		runID, eventType).Scan(&count)
+	return count, err
+}
+
+// EventRow holds a single event row from the database.
+type EventRow struct {
+	EventID        string
+	RunID          string
+	EventType      string
+	CorrelationID  *string
+	Timestamp      string
+}
+
+// GetEventsByRun returns all events for a run, ordered by timestamp.
+func (s *Store) GetEventsByRun(ctx context.Context, runID string) ([]EventRow, error) {
+	if s.db == nil {
+		return nil, fmt.Errorf("store is closed")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, run_id, event_type, correlation_id, timestamp FROM events WHERE run_id = ? ORDER BY timestamp",
+		runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []EventRow
+	for rows.Next() {
+		var er EventRow
+		var corrID sql.NullString
+		if err := rows.Scan(&er.EventID, &er.RunID, &er.EventType, &corrID, &er.Timestamp); err != nil {
+			return nil, err
+		}
+		if corrID.Valid {
+			er.CorrelationID = &corrID.String
+		}
+		events = append(events, er)
+	}
+	if events == nil {
+		events = []EventRow{}
+	}
+	return events, rows.Err()
+}
+
 // Close closes the database connection.
 func (s *Store) Close() error {
 	if s.db == nil {
