@@ -30,7 +30,7 @@ const version = "v3"
 
 var commandDescs = map[string]string{
 	"version":              "Print version information",
-	"init":                 "Initialize vault directory, database, and subdirectories",
+	"init":                 "Initialize vault directory, database, and subdirectories. Use --with-secrets to also install q-secrets.",
 	"mcp":                  "Start MCP JSON-RPC 2.0 server over stdio",
 	"http":                 "Start HTTP REST API server on 127.0.0.1:7438",
 	"add-entry":            "Save a new entry to the vault",
@@ -65,7 +65,7 @@ var commandDescs = map[string]string{
 	"entry-restore":        "Restore an entry to a previous version",
 	"tui":                  "Start the interactive Bubble Tea terminal UI",
 	"update":              "Rebuild and reinstall the skillvault binary from source",
-	"secrets":             "Run q-secrets (optional secret manager subprogram). Passes all arguments through",
+	"secrets":             "Run q-secrets (optional secret manager subprogram). Use 'secrets install' to install it, or pass --with-secrets to 'init'. Passes all other arguments through to q-secrets.",
 }
 
 func traceCmd(cmd string) {
@@ -198,6 +198,16 @@ func runInit() {
 	}
 
 	fmt.Println("SkillVault initialized at", vd)
+
+	// --with-secrets: optionally build and install q-secrets after init.
+	for _, a := range os.Args[2:] {
+		if a == "--with-secrets" {
+			installDir := defaultInstallDir()
+			fmt.Fprintf(os.Stderr, "[sk-vault] init: --with-secrets flag set, installing q-secrets to %s\n", installDir)
+			installQSecrets(installDir)
+			break
+		}
+	}
 }
 
 func runUpdate() {
@@ -304,52 +314,24 @@ func runUpdate() {
 		fmt.Fprintf(os.Stderr, "[sk-vault] SKIP_Q_SECRETS=1; skipping q-secrets update\n")
 		return
 	}
-	qModPath := filepath.Join(repoPath, "q-secrets", "go.mod")
-	if _, err := os.Stat(qModPath); err == nil {
-		qSecretsTmp, err := os.CreateTemp(installDir, ".q-secrets-build-*")
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[sk-vault] warning: could not create temp file for q-secrets: %v\n", err)
-			return
-		}
-		qTmpPath := qSecretsTmp.Name()
-		qSecretsTmp.Close()
-
-		qBuildCmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", qTmpPath, ".")
-		qBuildCmd.Dir = filepath.Join(repoPath, "q-secrets")
-		qBuildCmd.Stdout = os.Stdout
-		qBuildCmd.Stderr = os.Stderr
-		qBuildCmd.Env = append(os.Environ(), "GOFLAGS=")
-		if err := qBuildCmd.Run(); err != nil {
-			os.Remove(qTmpPath)
-			fmt.Fprintf(os.Stderr, "[sk-vault] warning: q-secrets build failed: %v\n", err)
-			return
-		}
-
-		if err := os.Chmod(qTmpPath, 0755); err != nil {
-			os.Remove(qTmpPath)
-			fmt.Fprintf(os.Stderr, "[sk-vault] warning: chmod q-secrets binary: %v\n", err)
-			return
-		}
-
-		qInstallPath := filepath.Join(installDir, "q-secrets")
-		if err := os.Rename(qTmpPath, qInstallPath); err != nil {
-			os.Remove(qTmpPath)
-			fmt.Fprintf(os.Stderr, "[sk-vault] warning: install q-secrets to %s: %v\n", qInstallPath, err)
-			return
-		}
-
-		fmt.Printf("[sk-vault] update: q-secrets rebuilt and installed to %s\n", qInstallPath)
-	} else {
-		fmt.Fprintf(os.Stderr, "[sk-vault] q-secrets/ not found in repo; skipping q-secrets update\n")
-	}
+	installQSecrets(installDir)
 }
 
 func runSecrets() {
+	// Handle "secrets install" subcommand: build and install q-secrets.
+	if len(os.Args) > 2 && os.Args[2] == "install" {
+		installDir := defaultInstallDir()
+		fmt.Fprintf(os.Stderr, "[sk-vault] installing q-secrets to %s\n", installDir)
+		installQSecrets(installDir)
+		return
+	}
+
 	secretPath := resolveQSecretsBin()
 	if secretPath == "" {
 		fmt.Fprintf(os.Stderr, "[sk-vault] q-secrets not found. Install it with:\n")
-		fmt.Fprintf(os.Stderr, "  make install-q-secrets\n")
-		fmt.Fprintf(os.Stderr, "or set Q_SECRETS_BIN to its path.\n")
+		fmt.Fprintf(os.Stderr, "  skillvault secrets install\n")
+		fmt.Fprintf(os.Stderr, "or pass --with-secrets to 'skillvault init' to install during initialization.\n")
+		fmt.Fprintf(os.Stderr, "Also set Q_SECRETS_BIN to its path if already installed elsewhere.\n")
 		os.Exit(1)
 	}
 
@@ -365,6 +347,72 @@ func runSecrets() {
 		}
 		os.Exit(1)
 	}
+}
+
+// defaultInstallDir returns the directory where q-secrets should be installed.
+// Priority: SKILLVAULT_INSTALL_PATH parent dir → current executable dir → ~/tools.
+func defaultInstallDir() string {
+	if p := os.Getenv("SKILLVAULT_INSTALL_PATH"); p != "" {
+		return filepath.Dir(p)
+	}
+	if execPath, err := os.Executable(); err == nil {
+		return filepath.Dir(execPath)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "/usr/local/bin"
+	}
+	return filepath.Join(home, "tools")
+}
+
+// installQSecrets builds q-secrets from the submodule and installs it to installDir.
+func installQSecrets(installDir string) {
+	// Resolve repo root to find q-secrets/ submodule.
+	repoPath := os.Getenv("SKILLVAULT_REPO")
+	if repoPath == "" {
+		repoPath = resolveRepoRoot()
+	}
+
+	qModPath := filepath.Join(repoPath, "q-secrets", "go.mod")
+	if _, err := os.Stat(qModPath); err != nil {
+		fmt.Fprintf(os.Stderr, "[sk-vault] q-secrets/ not found in repo at %s; skipping install\n", qModPath)
+		fmt.Fprintf(os.Stderr, "[sk-vault]   Ensure the submodule is initialized: git submodule update --init\n")
+		return
+	}
+
+	qTmp, err := os.CreateTemp(installDir, ".q-secrets-build-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[sk-vault] warning: could not create temp file: %v\n", err)
+		return
+	}
+	qTmpPath := qTmp.Name()
+	qTmp.Close()
+
+	qBuildCmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", qTmpPath, ".")
+	qBuildCmd.Dir = filepath.Join(repoPath, "q-secrets")
+	qBuildCmd.Stdout = os.Stdout
+	qBuildCmd.Stderr = os.Stderr
+	qBuildCmd.Env = append(os.Environ(), "GOFLAGS=")
+	if err := qBuildCmd.Run(); err != nil {
+		os.Remove(qTmpPath)
+		fmt.Fprintf(os.Stderr, "[sk-vault] warning: q-secrets build failed: %v\n", err)
+		return
+	}
+
+	if err := os.Chmod(qTmpPath, 0755); err != nil {
+		os.Remove(qTmpPath)
+		fmt.Fprintf(os.Stderr, "[sk-vault] warning: chmod q-secrets binary: %v\n", err)
+		return
+	}
+
+	qInstallPath := filepath.Join(installDir, "q-secrets")
+	if err := os.Rename(qTmpPath, qInstallPath); err != nil {
+		os.Remove(qTmpPath)
+		fmt.Fprintf(os.Stderr, "[sk-vault] warning: install q-secrets to %s: %v\n", qInstallPath, err)
+		return
+	}
+
+	fmt.Printf("[sk-vault] q-secrets installed to %s\n", qInstallPath)
 }
 
 // resolveQSecretsBin returns the path to the q-secrets binary, or empty if not found.

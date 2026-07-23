@@ -286,8 +286,13 @@ git submodule update --init --recursive
 # Install both skillvault and q-secrets
 make install-all
 
+# Or install via kbs (recommended)
+skillvault init --with-secrets
+
 # Or install q-secrets separately
 make install-q-secrets
+# OR
+skillvault secrets install
 ```
 
 ### Usage

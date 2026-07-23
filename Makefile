@@ -36,5 +36,10 @@ install-q-secrets: build-q-secrets
 	mkdir -p $(INSTALL_DIR)
 	cp $(Q_SECRETS_DIR)/$(Q_SECRETS_BIN) $(INSTALL_DIR)/$(Q_SECRETS_BIN)
 	@echo "Installed q-secrets to $(INSTALL_DIR)/$(Q_SECRETS_BIN)"
+	@echo ""
+	@echo "Alternative: run 'skillvault init --with-secrets' or 'skillvault secrets install' to install from within kbs."
 
 install-all: install install-q-secrets
+
+test-integration:
+	go test -tags integration -count=1 ./internal/agenttelemetry/...

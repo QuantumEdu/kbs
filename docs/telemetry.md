@@ -9,6 +9,7 @@ tool calls, token usage, quality signals, and agent lifecycle events to SQLite.
 - **`telemetryctl`** — CLI to query runs, events, and daemon status
 - **`telemetrywrap`** — CLI wrapper that infers telemetry events from any command
 - **OpenCode plugin** — Native `EventEmitter` emitting 9 canonical event types
+- **`q-secrets`** (optional) — Local encrypted secret manager, installable via `skillvault secrets install` or `skillvault init --with-secrets`
 
 ## Quick Start
 
