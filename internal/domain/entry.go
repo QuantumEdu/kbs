@@ -5,11 +5,11 @@ import "time"
 type Purpose string
 
 const (
-	PurposeWork         Purpose = "WORK"
-	PurposeKnowledge    Purpose = "KNOWLEDGE"
-	PurposeLearning     Purpose = "LEARNING"
-	PurposeRelationship Purpose = "RELATIONSHIP"
-	PurposeState        Purpose = "STATE"
+	PurposeWork          Purpose = "WORK"
+	PurposeKnowledge     Purpose = "KNOWLEDGE"
+	PurposeLearning      Purpose = "LEARNING"
+	PurposeRelationship  Purpose = "RELATIONSHIP"
+	PurposeState         Purpose = "STATE"
 	PurposeObservability Purpose = "OBSERVABILITY"
 )
 
@@ -36,6 +36,7 @@ const (
 	EntryTypeDecision        EntryType = "decision"
 	EntryTypeArtifactSummary EntryType = "artifact_summary"
 	EntryTypeHandoff         EntryType = "handoff"
+	EntryTypePending         EntryType = "pending"
 	EntryTypeRouting         EntryType = "routing"
 )
 
@@ -44,7 +45,7 @@ func (et EntryType) IsValid() bool {
 	case EntryTypePrompt, EntryTypeSkill, EntryTypeWorkflowNote,
 		EntryTypeReference, EntryTypeUser, EntryTypeFeedback,
 		EntryTypeProjectState, EntryTypeSession, EntryTypeDecision,
-		EntryTypeArtifactSummary, EntryTypeHandoff, EntryTypeRouting:
+		EntryTypeArtifactSummary, EntryTypeHandoff, EntryTypePending, EntryTypeRouting:
 		return true
 	}
 	return false

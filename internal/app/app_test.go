@@ -95,6 +95,90 @@ func TestEntryServiceRoutingTypeRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEntryServicePendingRoundTrip(t *testing.T) {
+	_, entrySvc, _, _, _, projectSvc, _, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if _, err := projectSvc.SaveProject(ctx, SaveProjectInput{Name: "codex"}); err != nil {
+		t.Fatalf("SaveProject failed: %v", err)
+	}
+
+	result, err := entrySvc.SavePending(ctx, SavePendingInput{
+		Project: "codex",
+		Title:   "Update presentation",
+		Note:    "Refresh examples before opening the PR",
+		Tags:    []string{"slides", "release"},
+	})
+	if err != nil {
+		t.Fatalf("SavePending failed: %v", err)
+	}
+	if result.Entry.Entry.Type != domain.EntryTypePending {
+		t.Fatalf("type = %q, want pending", result.Entry.Entry.Type)
+	}
+	if result.Entry.Entry.Purpose != domain.PurposeWork {
+		t.Fatalf("purpose = %q, want WORK", result.Entry.Entry.Purpose)
+	}
+
+	items, err := entrySvc.ListPending(ctx, "codex", false)
+	if err != nil {
+		t.Fatalf("ListPending failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	if items[0].Entry.ID != result.Entry.Entry.ID {
+		t.Fatalf("listed id = %q, want %q", items[0].Entry.ID, result.Entry.Entry.ID)
+	}
+
+	filtered, err := entrySvc.ListPendingWithOptions(ctx, ListPendingInput{Project: "codex", Query: "refresh", Tag: "slides"})
+	if err != nil {
+		t.Fatalf("ListPendingWithOptions failed: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].Entry.ID != result.Entry.Entry.ID {
+		t.Fatalf("filtered items = %+v, want saved pending item", filtered)
+	}
+
+	filtered, err = entrySvc.ListPendingWithOptions(ctx, ListPendingInput{Project: "codex", Query: "missing"})
+	if err != nil {
+		t.Fatalf("ListPendingWithOptions query miss failed: %v", err)
+	}
+	if len(filtered) != 0 {
+		t.Fatalf("len(filtered) with missing query = %d, want 0", len(filtered))
+	}
+
+	pendingItem, err := entrySvc.GetPending(ctx, result.Entry.Entry.ID, true)
+	if err != nil {
+		t.Fatalf("GetPending failed: %v", err)
+	}
+	if pendingItem.Entry.ID != result.Entry.Entry.ID {
+		t.Fatalf("GetPending id = %q, want %q", pendingItem.Entry.ID, result.Entry.Entry.ID)
+	}
+
+	if err := entrySvc.ResolvePending(ctx, result.Entry.Entry.ID); err != nil {
+		t.Fatalf("ResolvePending failed: %v", err)
+	}
+
+	items, err = entrySvc.ListPending(ctx, "codex", false)
+	if err != nil {
+		t.Fatalf("ListPending after resolve failed: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("len(items) after resolve = %d, want 0", len(items))
+	}
+
+	items, err = entrySvc.ListPending(ctx, "codex", true)
+	if err != nil {
+		t.Fatalf("ListPending include archived failed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) include archived = %d, want 1", len(items))
+	}
+	if items[0].Entry.Status != domain.StatusArchived {
+		t.Fatalf("status = %q, want archived", items[0].Entry.Status)
+	}
+}
+
 func TestRoutingEntrySearchable(t *testing.T) {
 	_, svc, _, _, _, _, _, _, _, _, cleanup := setupAppServices(t)
 	defer cleanup()
@@ -883,6 +967,90 @@ func TestGetContextModeProject(t *testing.T) {
 	}
 	if strings.Contains(pack.Raw, "Other decision") {
 		t.Error("should not include decisions from other projects")
+	}
+}
+
+func TestGetContextIncludesActivePendingForProject(t *testing.T) {
+	_, entrySvc, _, _, _, projectSvc, svc, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	proj, _ := projectSvc.SaveProject(ctx, SaveProjectInput{Name: "testproj", Description: "Test project"})
+
+	if _, err := entrySvc.SavePending(ctx, SavePendingInput{
+		Project: proj.ID,
+		Title:   "Refresh release notes",
+		Note:    "After the benchmark rerun",
+	}); err != nil {
+		t.Fatalf("SavePending failed: %v", err)
+	}
+
+	archived, err := entrySvc.SavePending(ctx, SavePendingInput{
+		Project: proj.ID,
+		Title:   "Old follow-up",
+	})
+	if err != nil {
+		t.Fatalf("SavePending archived seed failed: %v", err)
+	}
+	if err := entrySvc.ResolvePending(ctx, archived.Entry.Entry.ID); err != nil {
+		t.Fatalf("ResolvePending failed: %v", err)
+	}
+
+	pack, err := svc.GetContext(ctx, ContextInput{
+		Mode:            "planning",
+		Project:         proj.ID,
+		ExcludeArchived: true,
+		MaxChars:        5000,
+	})
+	if err != nil {
+		t.Fatalf("GetContext failed: %v", err)
+	}
+	if !strings.Contains(pack.Raw, "## Active Pending") {
+		t.Fatal("expected Active Pending section in context pack")
+	}
+	if !strings.Contains(pack.Raw, "Open: 1 | Done: 1") {
+		t.Error("expected pending summary counts in context pack")
+	}
+	if !strings.Contains(pack.Raw, "Refresh release notes: After the benchmark rerun") {
+		t.Error("expected active pending item in context pack")
+	}
+	if strings.Contains(pack.Raw, "Old follow-up") {
+		t.Error("resolved pending item should not appear in context pack")
+	}
+}
+
+func TestGetContextIncludeFiltersPendingSection(t *testing.T) {
+	_, entrySvc, _, _, _, projectSvc, svc, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	proj, _ := projectSvc.SaveProject(ctx, SaveProjectInput{Name: "testproj"})
+
+	if _, err := entrySvc.SavePending(ctx, SavePendingInput{Project: proj.ID, Title: "Review rollout"}); err != nil {
+		t.Fatalf("SavePending failed: %v", err)
+	}
+
+	pack, err := svc.GetContext(ctx, ContextInput{
+		Mode:            "project",
+		Project:         proj.ID,
+		Include:         []string{"pending"},
+		ExcludeArchived: true,
+		MaxChars:        5000,
+	})
+	if err != nil {
+		t.Fatalf("GetContext failed: %v", err)
+	}
+	if !strings.Contains(pack.Raw, "Review rollout") {
+		t.Error("expected pending item when include=pending")
+	}
+	if !strings.Contains(pack.Raw, "Open: 1") {
+		t.Error("expected pending summary count when include=pending")
+	}
+	if strings.Contains(pack.Raw, "## Active Decisions") {
+		t.Error("did not expect decisions section when only pending was requested")
+	}
+	if strings.Contains(pack.Raw, "## Relevant Workflows") {
+		t.Error("did not expect workflows section when only pending was requested")
 	}
 }
 

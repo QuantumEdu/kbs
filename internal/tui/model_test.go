@@ -4,6 +4,7 @@ package tui
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,352 +12,375 @@ import (
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
-// stubEntryStore implements db.EntryStore for testing.
 type stubEntryStore struct {
 	entries map[string]domain.EntryResult
+	order   []string
 }
 
-func (s *stubEntryStore) Save(ctx context.Context, entry domain.Entry, tags []string) error { return nil }
+func (s *stubEntryStore) Save(ctx context.Context, entry domain.Entry, tags []string) error {
+	return nil
+}
+
 func (s *stubEntryStore) Get(ctx context.Context, id string, includeArchived bool) (domain.EntryResult, error) {
-	r, ok := s.entries[id]
+	result, ok := s.entries[id]
 	if !ok {
 		return domain.EntryResult{}, &domain.NotFoundError{Resource: "entry", ID: id}
 	}
-	return r, nil
+	if !includeArchived && result.Entry.Status == domain.StatusArchived {
+		return domain.EntryResult{}, &domain.NotFoundError{Resource: "entry", ID: id}
+	}
+	return result, nil
 }
+
 func (s *stubEntryStore) Search(ctx context.Context, q domain.SearchQuery) ([]domain.EntrySearchResult, error) {
-	// Return all entries regardless of query for test determinism.
-	var results []domain.EntrySearchResult
-	for _, v := range s.entries {
-		results = append(results, domain.EntrySearchResult{
-			Entry: v.Entry,
-			Tags:  v.Tags,
-		})
+	results := make([]domain.EntrySearchResult, 0)
+	query := strings.ToLower(strings.TrimSpace(q.Query))
+	for _, id := range s.order {
+		result := s.entries[id]
+		if !q.IncludeArchived && result.Entry.Status == domain.StatusArchived {
+			continue
+		}
+		if q.ProjectID != nil {
+			if result.Entry.ProjectID == nil || *result.Entry.ProjectID != *q.ProjectID {
+				continue
+			}
+		}
+		if query != "" {
+			haystack := strings.ToLower(result.Entry.Title + " " + result.Entry.Summary + " " + result.Entry.BodyOptional)
+			if !strings.Contains(haystack, query) {
+				continue
+			}
+		}
+		results = append(results, domain.EntrySearchResult{Entry: result.Entry, Tags: result.Tags})
+		if q.Limit > 0 && len(results) >= q.Limit {
+			break
+		}
 	}
 	return results, nil
 }
+
 func (s *stubEntryStore) SearchByTags(ctx context.Context, tags []string, matchAll bool, typePtr, projectPtr *string, limit int) ([]domain.EntrySearchResult, error) {
 	return nil, nil
 }
-func (s *stubEntryStore) Archive(ctx context.Context, id string) error { return nil }
-func (s *stubEntryStore) List(ctx context.Context, filter domain.EntryFilter) ([]domain.EntryListResult, error) {
-	return nil, nil
+
+func (s *stubEntryStore) Archive(ctx context.Context, id string) error {
+	result, ok := s.entries[id]
+	if !ok {
+		return &domain.NotFoundError{Resource: "entry", ID: id}
+	}
+	result.Entry.Status = domain.StatusArchived
+	s.entries[id] = result
+	return nil
 }
 
-// stubProjectStore implements db.ProjectStore for testing.
-type stubProjectStore struct{}
+func (s *stubEntryStore) List(ctx context.Context, filter domain.EntryFilter) ([]domain.EntryListResult, error) {
+	items := make([]domain.EntryListResult, 0)
+	for _, id := range s.order {
+		result := s.entries[id]
+		if !filter.IncludeArchived && result.Entry.Status == domain.StatusArchived {
+			continue
+		}
+		if filter.ProjectID != nil {
+			if result.Entry.ProjectID == nil || *result.Entry.ProjectID != *filter.ProjectID {
+				continue
+			}
+		}
+		if filter.Type != nil && string(result.Entry.Type) != *filter.Type {
+			continue
+		}
+		items = append(items, domain.EntryListResult{Entry: result.Entry, Tags: result.Tags})
+	}
+	return items, nil
+}
 
-func (s *stubProjectStore) Save(ctx context.Context, p domain.Project) error           { return nil }
-func (s *stubProjectStore) Get(ctx context.Context, id string) (domain.Project, error) { return domain.Project{}, nil }
-func (s *stubProjectStore) List(ctx context.Context, incArch bool) ([]domain.Project, error) {
-	return nil, nil
+type stubProjectStore struct {
+	projects []domain.Project
+	index    map[string]domain.Project
+}
+
+func (s *stubProjectStore) Save(ctx context.Context, p domain.Project) error { return nil }
+func (s *stubProjectStore) Get(ctx context.Context, id string) (domain.Project, error) {
+	project, ok := s.index[id]
+	if !ok {
+		return domain.Project{}, &domain.NotFoundError{Resource: "project", ID: id}
+	}
+	return project, nil
+}
+func (s *stubProjectStore) List(ctx context.Context, includeArchived bool) ([]domain.Project, error) {
+	if includeArchived {
+		return s.projects, nil
+	}
+	active := make([]domain.Project, 0, len(s.projects))
+	for _, project := range s.projects {
+		if project.Status != domain.StatusArchived {
+			active = append(active, project)
+		}
+	}
+	return active, nil
 }
 func (s *stubProjectStore) Archive(ctx context.Context, id string) error { return nil }
 
-// stubArtifactStore implements db.ArtifactStore for testing.
 type stubArtifactStore struct{}
 
-func (s *stubArtifactStore) Save(ctx context.Context, a domain.Artifact) error          { return nil }
-func (s *stubArtifactStore) Get(ctx context.Context, id string) (domain.Artifact, error) { return domain.Artifact{}, nil }
+func (s *stubArtifactStore) Save(ctx context.Context, a domain.Artifact) error { return nil }
+func (s *stubArtifactStore) Get(ctx context.Context, id string) (domain.Artifact, error) {
+	return domain.Artifact{}, &domain.NotFoundError{Resource: "artifact", ID: id}
+}
 func (s *stubArtifactStore) List(ctx context.Context, projectID *string) ([]domain.Artifact, error) {
 	return nil, nil
 }
 
-func setupTestSvc() *app.EntryService {
-	entries := map[string]domain.EntryResult{
-		"alpha": {
-			Entry: domain.Entry{
-				ID:      "alpha",
-				Title:   "Alpha Entry",
-				Type:    domain.EntryTypePrompt,
-				Summary: "First test entry",
-				Status:  domain.StatusActive,
-			},
-			Tags: []domain.Tag{{ID: "t1", Name: "test", Slug: "test"}},
-		},
-		"beta": {
-			Entry: domain.Entry{
-				ID:      "beta",
-				Title:   "Beta Entry",
-				Type:    domain.EntryTypeSkill,
-				Summary: "Second test entry",
-				Status:  domain.StatusDraft,
-			},
-			Tags: []domain.Tag{{ID: "t2", Name: "demo", Slug: "demo"}},
-		},
-	}
-	return app.NewEntryService(
-		&stubEntryStore{entries: entries},
-		&stubProjectStore{},
-		&stubArtifactStore{},
-	)
+type stubWorkflowStore struct{}
+
+func (s *stubWorkflowStore) Save(ctx context.Context, w domain.Workflow, steps []domain.WorkflowStep) error {
+	return nil
+}
+func (s *stubWorkflowStore) Get(ctx context.Context, id string) (domain.Workflow, error) {
+	return domain.Workflow{}, &domain.NotFoundError{Resource: "workflow", ID: id}
+}
+func (s *stubWorkflowStore) GetSteps(ctx context.Context, workflowID string) ([]domain.WorkflowStep, error) {
+	return nil, nil
+}
+func (s *stubWorkflowStore) Render(ctx context.Context, id string) ([]domain.WorkflowStep, error) {
+	return nil, nil
+}
+func (s *stubWorkflowStore) List(ctx context.Context, includeArchived bool) ([]domain.Workflow, error) {
+	return nil, nil
 }
 
-func TestModelInitTriggersSearch(t *testing.T) {
-	svc := setupTestSvc()
-	m := NewModel(svc)
+type stubSeriesStore struct{}
+
+func (s *stubSeriesStore) Save(ctx context.Context, series domain.Series) error { return nil }
+func (s *stubSeriesStore) Get(ctx context.Context, id string, includeArchived bool) (domain.SeriesResult, error) {
+	return domain.SeriesResult{}, &domain.NotFoundError{Resource: "series", ID: id}
+}
+func (s *stubSeriesStore) Compose(ctx context.Context, seriesID string) ([]domain.Entry, error) {
+	return nil, nil
+}
+func (s *stubSeriesStore) List(ctx context.Context, filter domain.SeriesFilter) ([]domain.SeriesListResult, error) {
+	return nil, nil
+}
+func (s *stubSeriesStore) ReplaceSeriesEntries(ctx context.Context, seriesID string, entries []domain.SeriesEntry) error {
+	return nil
+}
+
+func setupTestModel() *model {
+	projectA := domain.Project{ID: "codex", Name: "Codex", Description: "CLI intelligence work", Status: domain.StatusActive}
+	projectB := domain.Project{ID: "atlas", Name: "Atlas", Description: "Release prep", Status: domain.StatusActive}
+
+	entryProject := func(projectID string) *string {
+		return &projectID
+	}
+
+	entryStore := &stubEntryStore{
+		order: []string{"pending-codex", "done-codex", "entry-codex", "decision-codex", "session-codex", "pending-atlas", "entry-atlas", "session-atlas"},
+		entries: map[string]domain.EntryResult{
+			"pending-codex":  {Entry: domain.Entry{ID: "pending-codex", Title: "Review pending rollout", Type: domain.EntryTypePending, Summary: "Review pending rollout", BodyOptional: "Keep output concise", Status: domain.StatusActive, ProjectID: entryProject("codex")}},
+			"done-codex":     {Entry: domain.Entry{ID: "done-codex", Title: "Shipped rollout notes", Type: domain.EntryTypePending, Summary: "Shipped rollout notes", BodyOptional: "Archived after release", Status: domain.StatusArchived, ProjectID: entryProject("codex")}},
+			"entry-codex":    {Entry: domain.Entry{ID: "entry-codex", Title: "Intent-first CLI", Type: domain.EntryTypeSkill, Summary: "Natural command routing", BodyOptional: "search help routing", Status: domain.StatusActive, ProjectID: entryProject("codex")}},
+			"decision-codex": {Entry: domain.Entry{ID: "decision-codex", Title: "Use pending in context", Type: domain.EntryTypeDecision, Summary: "Surface deferred work", Status: domain.StatusActive, ProjectID: entryProject("codex")}},
+			"session-codex":  {Entry: domain.Entry{ID: "session-codex", Title: "Recent codex session", Type: domain.EntryTypeSession, Summary: "Queued TUI work", Status: domain.StatusActive, ProjectID: entryProject("codex")}},
+			"pending-atlas":  {Entry: domain.Entry{ID: "pending-atlas", Title: "Finalize release notes", Type: domain.EntryTypePending, Summary: "Finalize release notes", BodyOptional: "Ship Friday", Status: domain.StatusActive, ProjectID: entryProject("atlas")}},
+			"entry-atlas":    {Entry: domain.Entry{ID: "entry-atlas", Title: "Deploy checklist", Type: domain.EntryTypeReference, Summary: "Deployment steps", BodyOptional: "deploy staging prod", Status: domain.StatusActive, ProjectID: entryProject("atlas")}},
+			"session-atlas":  {Entry: domain.Entry{ID: "session-atlas", Title: "Atlas wrap", Type: domain.EntryTypeSession, Summary: "Release prep recap", Status: domain.StatusActive, ProjectID: entryProject("atlas")}},
+		},
+	}
+
+	projectStore := &stubProjectStore{
+		projects: []domain.Project{projectA, projectB},
+		index: map[string]domain.Project{
+			projectA.ID: projectA,
+			projectB.ID: projectB,
+		},
+	}
+
+	artifactStore := &stubArtifactStore{}
+	entrySvc := app.NewEntryService(entryStore, projectStore, artifactStore)
+	projectSvc := app.NewProjectService(projectStore)
+	contextSvc := app.NewContextService(entryStore, projectStore, &stubSeriesStore{}, &stubWorkflowStore{}, artifactStore, entrySvc)
+	return NewModel(entrySvc, projectSvc, contextSvc)
+}
+
+func applyDashboardLoad(t *testing.T, m *model, cmd tea.Cmd) *model {
+	t.Helper()
+	msg := cmd()
+	loaded, ok := msg.(dashboardLoadedMsg)
+	if !ok {
+		t.Fatalf("expected dashboardLoadedMsg, got %T", msg)
+	}
+	updated, _ := m.Update(loaded)
+	return updated.(*model)
+}
+
+func TestModelInitLoadsDashboard(t *testing.T) {
+	m := setupTestModel()
+	m.width = 140
+	m.height = 40
 
 	cmd := m.Init()
 	if cmd == nil {
-		t.Fatal("Init should return a search command")
+		t.Fatal("Init should return a dashboard load command")
 	}
 
-	// Execute the command to get results.
-	msg := cmd()
-	results, ok := msg.(searchResultsMsg)
-	if !ok {
-		t.Fatalf("expected searchResultsMsg, got %T", msg)
+	m = applyDashboardLoad(t, m, cmd)
+	if len(m.projects) != 2 {
+		t.Fatalf("projects = %d, want 2", len(m.projects))
 	}
-
-	if len(results) != 2 {
-		t.Fatalf("expected 2 search results, got %d", len(results))
+	if m.selectedProjectID() != "codex" {
+		t.Fatalf("selected project = %q, want codex", m.selectedProjectID())
 	}
-}
-
-func TestModelUpdateSearchResults(t *testing.T) {
-	svc := setupTestSvc()
-	m := NewModel(svc)
-
-	// Simulate search results arriving.
-	results := searchResultsMsg{
-		{Entry: domain.Entry{ID: "x", Title: "X", Type: domain.EntryTypePrompt, Status: domain.StatusActive}},
-		{Entry: domain.Entry{ID: "y", Title: "Y", Type: domain.EntryTypeSkill, Status: domain.StatusDraft}},
+	if len(m.pending) != 1 || m.pending[0].Entry.ID != "pending-codex" {
+		t.Fatalf("unexpected pending list: %+v", m.pending)
 	}
-
-	newModel, cmd := m.Update(results)
-	if cmd != nil {
-		t.Fatalf("unexpected command after search results: %v", cmd)
+	if stats := m.pendingStatsFor("codex"); stats.Open != 1 || stats.Done != 1 {
+		t.Fatalf("unexpected codex stats: %+v", stats)
 	}
-
-	nm := newModel.(*model)
-	if len(nm.entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(nm.entries))
+	if len(m.results) == 0 {
+		t.Fatal("expected search results for selected project")
 	}
-	if nm.loading {
-		t.Fatal("expected loading to be false after results")
-	}
-	if nm.cursor != 0 {
-		t.Fatalf("expected cursor 0, got %d", nm.cursor)
+	if !strings.Contains(m.contextPreview, "## Active Pending") {
+		t.Fatalf("expected pending section in context preview, got: %s", m.contextPreview)
 	}
 }
 
-func TestModelCursorNavigation(t *testing.T) {
-	svc := setupTestSvc()
-	m := NewModel(svc)
+func TestModelProjectNavigationReloadsDashboard(t *testing.T) {
+	m := setupTestModel()
+	m.width = 140
+	m.height = 40
+	m = applyDashboardLoad(t, m, m.Init())
 
-	// Seed with search results.
-	m.entries = []domain.EntrySearchResult{
-		{Entry: domain.Entry{ID: "a", Title: "A", Type: domain.EntryTypePrompt, Status: domain.StatusActive}},
-		{Entry: domain.Entry{ID: "b", Title: "B", Type: domain.EntryTypeSkill, Status: domain.StatusDraft}},
-		{Entry: domain.Entry{ID: "c", Title: "C", Type: domain.EntryTypeDecision, Status: domain.StatusCanonical}},
-	}
-	m.cursor = 0
-	m.loading = false
-	m.width = 80
-	m.height = 24
-
-	// Move down twice.
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}
-	newModel, _ := m.Update(msg)
-	if nm := newModel.(*model); nm.cursor != 1 {
-		t.Fatalf("after first 'j': expected cursor 1, got %d", nm.cursor)
-	}
-
-	newModel, _ = newModel.(*model).Update(msg)
-	if nm := newModel.(*model); nm.cursor != 2 {
-		t.Fatalf("after second 'j': expected cursor 2, got %d", nm.cursor)
-	}
-
-	// Should not go past end.
-	newModel, _ = newModel.(*model).Update(msg)
-	if nm := newModel.(*model); nm.cursor != 2 {
-		t.Fatalf("cursor should stay at 2 (end), got %d", nm.cursor)
-	}
-
-	// Move up.
-	up := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}}
-	newModel, _ = newModel.(*model).Update(up)
-	if nm := newModel.(*model); nm.cursor != 1 {
-		t.Fatalf("after 'k': expected cursor 1, got %d", nm.cursor)
-	}
-
-	// Should not go before start.
-	newModel, _ = newModel.(*model).Update(up)
-	newModel, _ = newModel.(*model).Update(up)
-	if nm := newModel.(*model); nm.cursor != 0 {
-		t.Fatalf("cursor should stay at 0, got %d", nm.cursor)
-	}
-}
-
-func TestModelEntrySelectionNavigatesToDetail(t *testing.T) {
-	svc := setupTestSvc()
-	m := NewModel(svc)
-
-	m.entries = []domain.EntrySearchResult{
-		{Entry: domain.Entry{ID: "alpha", Title: "Alpha", Type: domain.EntryTypePrompt, Status: domain.StatusActive}},
-	}
-	m.cursor = 0
-	m.loading = false
-	m.width = 80
-	m.height = 24
-
-	// Press Enter to select entry.
-	enter := tea.KeyMsg{Type: tea.KeyEnter}
-	newModel, cmd := m.Update(enter)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 	if cmd == nil {
-		t.Fatal("expected a command for fetching entry detail after Enter")
+		t.Fatal("expected reload command when changing project")
 	}
+	m = applyDashboardLoad(t, updated.(*model), cmd)
 
-	// Execute the command to get the detail message.
+	if m.selectedProjectID() != "atlas" {
+		t.Fatalf("selected project = %q, want atlas", m.selectedProjectID())
+	}
+	if len(m.pending) != 1 || m.pending[0].Entry.ID != "pending-atlas" {
+		t.Fatalf("unexpected pending for atlas: %+v", m.pending)
+	}
+	if !strings.Contains(m.contextPreview, "Finalize release notes") {
+		t.Fatalf("expected atlas context preview, got: %s", m.contextPreview)
+	}
+}
+
+func TestModelSearchFiltersSelectedProjectEntries(t *testing.T) {
+	m := setupTestModel()
+	m.width = 140
+	m.height = 40
+	m = applyDashboardLoad(t, m, m.Init())
+
+	m.searchInput.Focus()
+	m.searchInput.SetValue("routing")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected reload command after search enter")
+	}
+	m = applyDashboardLoad(t, updated.(*model), cmd)
+
+	if m.searchQuery != "routing" {
+		t.Fatalf("search query = %q, want routing", m.searchQuery)
+	}
+	if len(m.results) != 1 || m.results[0].Entry.ID != "entry-codex" {
+		t.Fatalf("unexpected filtered results: %+v", m.results)
+	}
+}
+
+func TestModelPendingEnterLoadsDetail(t *testing.T) {
+	m := setupTestModel()
+	m.width = 140
+	m.height = 40
+	m = applyDashboardLoad(t, m, m.Init())
+	m.focus = focusPending
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected detail command from pending pane")
+	}
 	msg := cmd()
 	detail, ok := msg.(entryDetailMsg)
 	if !ok {
 		t.Fatalf("expected entryDetailMsg, got %T", msg)
 	}
 	if detail.err != nil {
-		t.Fatalf("unexpected error: %v", detail.err)
+		t.Fatalf("unexpected detail error: %v", detail.err)
 	}
+	updated, _ = updated.(*model).Update(detail)
+	m = updated.(*model)
 
-	// Apply the detail message to switch to detail view.
-	newModel, _ = newModel.(*model).Update(msg)
-	m2 := newModel.(*model)
-	if m2.state != stateDetail {
-		t.Fatalf("expected stateDetail after selection, got %v", m2.state)
+	if m.state != stateDetail {
+		t.Fatalf("state = %v, want detail", m.state)
 	}
-	if m2.detail == nil {
-		t.Fatal("expected detail to be set")
-	}
-}
-
-func TestModelEscFromDetailToBrowse(t *testing.T) {
-	svc := setupTestSvc()
-	m := NewModel(svc)
-
-	// Put model in detail state.
-	m.state = stateDetail
-	m.detail = &app.GetEntryResult{
-		Entry: domain.EntryResult{
-			Entry: domain.Entry{ID: "x", Title: "X", Type: domain.EntryTypePrompt, Status: domain.StatusActive},
-		},
-	}
-	m.width = 80
-	m.height = 24
-
-	// Press Esc to go back.
-	esc := tea.KeyMsg{Type: tea.KeyEsc}
-	newModel, _ := m.Update(esc)
-	nm := newModel.(*model)
-	if nm.state != stateBrowse {
-		t.Fatalf("expected stateBrowse after Esc, got %v", nm.state)
-	}
-	if nm.detail != nil {
-		t.Fatal("expected detail to be cleared after Esc")
+	if m.detail == nil || m.detail.Entry.Entry.ID != "pending-codex" {
+		t.Fatalf("unexpected detail: %+v", m.detail)
 	}
 }
 
-func TestModelQuitFromBrowse(t *testing.T) {
-	svc := setupTestSvc()
-	m := NewModel(svc)
-	m.state = stateBrowse
-	m.width = 80
-	m.height = 24
+func TestModelResolvePendingWithConfirmation(t *testing.T) {
+	m := setupTestModel()
+	m.width = 140
+	m.height = 40
+	m = applyDashboardLoad(t, m, m.Init())
+	m.focus = focusPending
 
-	q := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}
-	_, cmd := m.Update(q)
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if cmd != nil {
+		t.Fatal("did not expect command on confirmation prompt")
+	}
+	m = updated.(*model)
+	if !m.confirmResolve {
+		t.Fatal("expected confirmResolve to be enabled")
+	}
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	if cmd == nil {
-		t.Fatal("expected quit command on 'q'")
+		t.Fatal("expected resolve command after confirmation")
 	}
-	// tea.Quit returns a quit Msg when executed.
-	quitMsg := cmd()
-	if _, ok := quitMsg.(tea.QuitMsg); !ok {
-		t.Fatalf("expected tea.QuitMsg, got %T", quitMsg)
+	msg := cmd()
+	resolved, ok := msg.(resolvePendingMsg)
+	if !ok {
+		t.Fatalf("expected resolvePendingMsg, got %T", msg)
+	}
+	if resolved.err != nil {
+		t.Fatalf("unexpected resolve error: %v", resolved.err)
+	}
+	updated, _ = updated.(*model).Update(resolved)
+	m = updated.(*model)
+
+	if m.confirmResolve {
+		t.Fatal("expected confirmation mode to close after resolving")
+	}
+	if len(m.pending) != 0 {
+		t.Fatalf("expected pending list to be empty after resolve, got %+v", m.pending)
+	}
+	if !strings.Contains(m.statusMessage, "Marked pending item done") {
+		t.Fatalf("unexpected status message: %q", m.statusMessage)
+	}
+	if stats := m.pendingStatsFor("codex"); stats.Open != 0 || stats.Done != 2 {
+		t.Fatalf("unexpected codex stats after resolve: %+v", stats)
+	}
+	if strings.Contains(m.contextPreview, "Review pending rollout") {
+		t.Fatalf("resolved pending item should not remain in context preview: %s", m.contextPreview)
 	}
 }
 
-func TestModelViewRendersBrowse(t *testing.T) {
-	svc := setupTestSvc()
-	m := NewModel(svc)
-
-	m.entries = []domain.EntrySearchResult{
-		{Entry: domain.Entry{ID: "a", Title: "Alpha", Type: domain.EntryTypePrompt, Status: domain.StatusActive}},
-	}
-	m.cursor = 0
-	m.loading = false
-	m.width = 80
-	m.height = 24
+func TestDashboardViewShowsAllSurfaces(t *testing.T) {
+	m := setupTestModel()
+	m.width = 140
+	m.height = 40
+	m = applyDashboardLoad(t, m, m.Init())
 
 	view := m.View()
-	if view == "" {
-		t.Fatal("expected non-empty browse view")
-	}
-	if !contains(view, "SkillVault") {
-		t.Error("browse view should contain 'SkillVault' title")
-	}
-	if !contains(view, "Alpha") {
-		t.Error("browse view should contain entry title 'Alpha'")
-	}
-	if !contains(view, "prompt") {
-		t.Error("browse view should contain entry type 'prompt'")
-	}
-}
-
-func TestModelViewRendersDetail(t *testing.T) {
-	svc := setupTestSvc()
-	m := NewModel(svc)
-
-	m.state = stateDetail
-	m.detail = &app.GetEntryResult{
-		Entry: domain.EntryResult{
-			Entry: domain.Entry{ID: "alpha", Title: "Alpha Entry", Type: domain.EntryTypePrompt, Summary: "Test summary", BodyOptional: "Body content", Status: domain.StatusActive},
-			Tags:  []domain.Tag{{ID: "t1", Name: "test", Slug: "test"}},
-		},
-	}
-	m.loading = false
-	m.width = 80
-	m.height = 24
-
-	view := m.View()
-	if !contains(view, "Alpha Entry") {
-		t.Error("detail view should contain entry title")
-	}
-	if !contains(view, "alpha") {
-		t.Error("detail view should contain entry ID")
-	}
-	if !contains(view, "Test summary") {
-		t.Error("detail view should contain summary")
-	}
-	if !contains(view, "Body content") {
-		t.Error("detail view should contain body")
-	}
-	if !contains(view, "test") {
-		t.Error("detail view should contain tags")
-	}
-	if !contains(view, "← esc/q back to list") {
-		t.Error("detail view should contain back hint")
-	}
-}
-
-func TestModelWindowResize(t *testing.T) {
-	svc := setupTestSvc()
-	m := NewModel(svc)
-
-	msg := tea.WindowSizeMsg{Width: 120, Height: 40}
-	newModel, _ := m.Update(msg)
-
-	nm := newModel.(*model)
-	if nm.width != 120 {
-		t.Fatalf("expected width 120, got %d", nm.width)
-	}
-	if nm.height != 40 {
-		t.Fatalf("expected height 40, got %d", nm.height)
-	}
-}
-
-func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
+	for _, expected := range []string{"Projects", "Pending", "Browse", "Context Preview", "SkillVault TUI"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("expected %q in view, got: %s", expected, view)
 		}
 	}
-	return false
+	for _, expected := range []string{"1 open | 1/2 done", "Pending: 1 open | 1/2 done"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("expected %q in view, got: %s", expected, view)
+		}
+	}
 }

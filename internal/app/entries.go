@@ -26,6 +26,13 @@ type SaveEntryInput struct {
 	Purpose string
 }
 
+type SavePendingInput struct {
+	Project string
+	Title   string
+	Note    string
+	Tags    []string
+}
+
 type GetEntryResult struct {
 	Entry    domain.EntryResult
 	Artifact *domain.Artifact
@@ -65,6 +72,14 @@ type EntryService struct {
 	artifactStore db.ArtifactStore
 	workflowStore db.WorkflowStore
 	vector        *VectorService
+}
+
+type ListPendingInput struct {
+	Project         string
+	IncludeArchived bool
+	Query           string
+	Tag             string
+	Limit           int
 }
 
 func NewEntryService(store db.EntryStore, projectStore db.ProjectStore, artifactStore db.ArtifactStore) *EntryService {
@@ -182,6 +197,26 @@ func (s *EntryService) SaveEntry(ctx context.Context, input SaveEntryInput) (*Ge
 	return &GetEntryResult{Entry: result, Artifact: artifact}, nil
 }
 
+func (s *EntryService) SavePending(ctx context.Context, input SavePendingInput) (*GetEntryResult, error) {
+	if strings.TrimSpace(input.Project) == "" {
+		return nil, fmt.Errorf("project is required")
+	}
+	if strings.TrimSpace(input.Title) == "" {
+		return nil, fmt.Errorf("title is required")
+	}
+
+	return s.SaveEntry(ctx, SaveEntryInput{
+		Title:   strings.TrimSpace(input.Title),
+		Type:    string(domain.EntryTypePending),
+		Summary: strings.TrimSpace(input.Title),
+		Body:    strings.TrimSpace(input.Note),
+		Project: strings.TrimSpace(input.Project),
+		Tags:    input.Tags,
+		Status:  string(domain.StatusActive),
+		Purpose: string(domain.PurposeWork),
+	})
+}
+
 func (s *EntryService) Get(ctx context.Context, id string, includeArchived bool) (domain.EntryResult, error) {
 	return s.store.Get(ctx, id, includeArchived)
 }
@@ -228,6 +263,50 @@ func (s *EntryService) List(ctx context.Context, filter domain.EntryFilter) ([]d
 	return s.store.List(ctx, filter)
 }
 
+func (s *EntryService) ListPending(ctx context.Context, project string, includeArchived bool) ([]domain.EntryListResult, error) {
+	return s.ListPendingWithOptions(ctx, ListPendingInput{Project: project, IncludeArchived: includeArchived})
+}
+
+func (s *EntryService) ListPendingWithOptions(ctx context.Context, input ListPendingInput) ([]domain.EntryListResult, error) {
+	project := strings.TrimSpace(input.Project)
+	if project == "" {
+		return nil, fmt.Errorf("project is required")
+	}
+
+	proj, err := s.projectStore.Get(ctx, project)
+	if err != nil {
+		return nil, fmt.Errorf("project %q not found: %w", input.Project, err)
+	}
+
+	typeName := string(domain.EntryTypePending)
+	items, err := s.store.List(ctx, domain.EntryFilter{
+		ProjectID:       &proj.ID,
+		Type:            &typeName,
+		IncludeArchived: input.IncludeArchived,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	query := strings.ToLower(strings.TrimSpace(input.Query))
+	tag := strings.ToLower(strings.TrimSpace(input.Tag))
+	filtered := make([]domain.EntryListResult, 0, len(items))
+	for _, item := range items {
+		if query != "" && !pendingMatchesQuery(item, query) {
+			continue
+		}
+		if tag != "" && !pendingHasTag(item, tag) {
+			continue
+		}
+		filtered = append(filtered, item)
+		if input.Limit > 0 && len(filtered) >= input.Limit {
+			break
+		}
+	}
+
+	return filtered, nil
+}
+
 func (s *EntryService) Archive(ctx context.Context, id string) error {
 	return s.store.Archive(ctx, id)
 }
@@ -242,6 +321,51 @@ func (s *EntryService) SearchByTags(ctx context.Context, tags []string, matchAll
 
 func (s *EntryService) ArchiveEntry(ctx context.Context, id string) error {
 	return s.store.Archive(ctx, id)
+}
+
+func (s *EntryService) ResolvePending(ctx context.Context, id string) error {
+	result, err := s.GetPending(ctx, id, true)
+	if err != nil {
+		return err
+	}
+	if result.Entry.Status == domain.StatusArchived {
+		return fmt.Errorf("pending item %q is already archived", id)
+	}
+	return s.store.Archive(ctx, result.Entry.ID)
+}
+
+func (s *EntryService) GetPending(ctx context.Context, id string, includeArchived bool) (domain.EntryResult, error) {
+	result, err := s.store.Get(ctx, id, includeArchived)
+	if err != nil {
+		return domain.EntryResult{}, err
+	}
+	if result.Entry.Type != domain.EntryTypePending {
+		return domain.EntryResult{}, fmt.Errorf("entry %q is type %q, expected pending", id, result.Entry.Type)
+	}
+	return result, nil
+}
+
+func pendingMatchesQuery(item domain.EntryListResult, query string) bool {
+	if strings.Contains(strings.ToLower(item.Entry.ID), query) ||
+		strings.Contains(strings.ToLower(item.Entry.Title), query) ||
+		strings.Contains(strings.ToLower(item.Entry.BodyOptional), query) {
+		return true
+	}
+	for _, tag := range item.Tags {
+		if strings.Contains(strings.ToLower(tag.Name), query) {
+			return true
+		}
+	}
+	return false
+}
+
+func pendingHasTag(item domain.EntryListResult, tag string) bool {
+	for _, itemTag := range item.Tags {
+		if strings.EqualFold(itemTag.Name, tag) {
+			return true
+		}
+	}
+	return false
 }
 
 // RouteScenario resolves a scenario string to a matching workflow or skill

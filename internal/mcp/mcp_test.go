@@ -439,12 +439,19 @@ func TestAC10_MCPGetContextMatchesCLIGetContext(t *testing.T) {
 		"type":    "feedback",
 		"summary": "Prefer simple architecture",
 	})
+	if _, err := reg.entrySvc.SavePending(ctx, app.SavePendingInput{
+		Project: proj.ID,
+		Title:   "Triage deferred migration",
+		Note:    "After the release cut",
+	}); err != nil {
+		t.Fatalf("AC10 FAIL: SavePending failed: %v", err)
+	}
 
 	// Get context via MCP get_context tool
 	mcpResult, err := reg.Call(ctx, "get_context", map[string]interface{}{
 		"mode":             "planning",
 		"project":          proj.ID,
-		"include":          []interface{}{"decisions", "profile"},
+		"include":          []interface{}{"decisions", "profile", "pending"},
 		"exclude_archived": true,
 		"max_chars":        float64(5000),
 	})
@@ -461,7 +468,7 @@ func TestAC10_MCPGetContextMatchesCLIGetContext(t *testing.T) {
 	directPack, err := reg.contextSvc.GetContext(ctx, app.ContextInput{
 		Mode:            "planning",
 		Project:         proj.ID,
-		Include:         []string{"decisions", "profile"},
+		Include:         []string{"decisions", "profile", "pending"},
 		ExcludeArchived: true,
 		MaxChars:        5000,
 	})
@@ -483,6 +490,12 @@ func TestAC10_MCPGetContextMatchesCLIGetContext(t *testing.T) {
 	}
 	if !strings.Contains(directText, "Use Go chi") {
 		t.Fatal("AC10 FAIL: CLI output missing decision entry")
+	}
+	if !strings.Contains(mcpText, "Triage deferred migration: After the release cut") {
+		t.Fatal("AC10 FAIL: MCP output missing pending entry")
+	}
+	if !strings.Contains(directText, "Triage deferred migration: After the release cut") {
+		t.Fatal("AC10 FAIL: CLI output missing pending entry")
 	}
 	if !strings.Contains(mcpText, "ac10-test") {
 		t.Fatal("AC10 FAIL: MCP output missing project reference")

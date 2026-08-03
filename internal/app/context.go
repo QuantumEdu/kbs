@@ -9,6 +9,8 @@ import (
 	"github.com/quantum-6/skillvault/internal/domain"
 )
 
+const contextPendingLimit = 5
+
 type ContextInput struct {
 	Mode            string
 	Project         string
@@ -30,12 +32,12 @@ type ContextSection struct {
 }
 
 type ContextService struct {
-	entryStore   db.EntryStore
-	projectStore db.ProjectStore
-	seriesStore  db.SeriesStore
+	entryStore    db.EntryStore
+	projectStore  db.ProjectStore
+	seriesStore   db.SeriesStore
 	workflowStore db.WorkflowStore
 	artifactStore db.ArtifactStore
-	entryService *EntryService
+	entryService  *EntryService
 }
 
 func NewContextService(
@@ -61,7 +63,7 @@ func (s *ContextService) GetContext(ctx context.Context, input ContextInput) (*C
 		input.Mode = "project"
 	}
 	if input.ExcludeArchived && input.Include == nil {
-		input.Include = []string{"profile", "decisions", "workflows", "recent_sessions"}
+		input.Include = []string{"profile", "decisions", "pending", "workflows", "recent_sessions"}
 	}
 	maxChars := input.MaxChars
 	if maxChars <= 0 {
@@ -107,6 +109,7 @@ func (s *ContextService) GetContext(ctx context.Context, input ContextInput) (*C
 	if len(includeSet) == 0 {
 		includeSet["profile"] = true
 		includeSet["decisions"] = true
+		includeSet["pending"] = true
 		includeSet["workflows"] = true
 		includeSet["recent_sessions"] = true
 	}
@@ -122,6 +125,13 @@ func (s *ContextService) GetContext(ctx context.Context, input ContextInput) (*C
 		decisions := s.collectDecisions(ctx, input.Project, input.ExcludeArchived)
 		if decisions != "" {
 			addSection("Active Decisions", decisions)
+		}
+	}
+
+	if input.Project != "" && includeSet["pending"] {
+		pending := s.collectPending(ctx, input.Project)
+		if pending != "" {
+			addSection("Active Pending", pending)
 		}
 	}
 
@@ -277,6 +287,55 @@ func (s *ContextService) collectRecentSessions(ctx context.Context, projectID st
 			b.WriteString(e.Entry.Summary)
 		}
 		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func (s *ContextService) collectPending(ctx context.Context, projectID string) string {
+	if s.entryService == nil {
+		return ""
+	}
+
+	entries, err := s.entryService.ListPendingWithOptions(ctx, ListPendingInput{
+		Project:         projectID,
+		IncludeArchived: true,
+	})
+	if err != nil || len(entries) == 0 {
+		return ""
+	}
+
+	active := make([]domain.EntryListResult, 0, len(entries))
+	done := 0
+	for _, entry := range entries {
+		if entry.Entry.Status == domain.StatusArchived {
+			done++
+			continue
+		}
+		active = append(active, entry)
+	}
+	if len(active) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("- Open: %d", len(active)))
+	if done > 0 {
+		b.WriteString(fmt.Sprintf(" | Done: %d", done))
+	}
+	b.WriteString("\n")
+
+	limit := min(len(active), contextPendingLimit)
+	for _, e := range active[:limit] {
+		b.WriteString("- ")
+		b.WriteString(e.Entry.Title)
+		if note := strings.TrimSpace(e.Entry.BodyOptional); note != "" && note != e.Entry.Title {
+			b.WriteString(": ")
+			b.WriteString(note)
+		}
+		b.WriteString("\n")
+	}
+	if len(active) > limit {
+		b.WriteString(fmt.Sprintf("- %d more pending item(s)\n", len(active)-limit))
 	}
 	return b.String()
 }

@@ -239,6 +239,13 @@ func TestAC4_ContextGenerationPlanningMode(t *testing.T) {
 		Title: "Session Apr 11", Type: "session", Summary: "Added workflow rendering",
 		Project: proj.ID, Status: "active",
 	})
+	if _, err := entrySvc.SavePending(ctx, SavePendingInput{
+		Project: proj.ID,
+		Title:   "Wire pending into context pack",
+		Note:    "Keep output concise",
+	}); err != nil {
+		t.Fatalf("AC4 FAIL: SavePending failed: %v", err)
+	}
 
 	_, err := store.Entries.Get(ctx, "fb-prefs", true)
 	if err != nil {
@@ -272,6 +279,9 @@ func TestAC4_ContextGenerationPlanningMode(t *testing.T) {
 	}
 	if !strings.Contains(pack.Raw, "Session Apr 10") {
 		t.Error("AC4 FAIL: missing recent session in context pack")
+	}
+	if !strings.Contains(pack.Raw, "Wire pending into context pack: Keep output concise") {
+		t.Error("AC4 FAIL: missing active pending item in context pack")
 	}
 	if !strings.Contains(pack.Raw, "User prefers Go for backend") {
 		t.Error("AC4 FAIL: missing user preferences/feedback in context pack")

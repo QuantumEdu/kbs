@@ -1,6 +1,83 @@
-# CLI Reference — 37 commands
+# CLI Reference — intent-first quick paths
 
 All entries use **slugs** as identifiers. A slug is the title in kebab-case: `"Clean Architecture Review"` → `clean-architecture-review`.
+
+## Quick path by task
+
+| If you want to... | Command |
+|---|---|
+| Set up the vault | `skillvault setup` |
+| Check whether the vault is ready | `skillvault doctor` |
+| Save something reusable | `skillvault add-entry ...` |
+| Find something you saved | `skillvault find "query"` |
+| Read one saved item | `skillvault read <entry-id-or-slug>` |
+| Build an agent context pack | `skillvault context --project myapp --mode planning` |
+| Browse projects, pending, and context interactively | `make build-tui && ./skillvault-tui tui` |
+| Save a dated backup snapshot | `skillvault backup` |
+
+## Intent aliases
+
+These aliases are additive shortcuts. The original commands still work.
+
+| Alias | Canonical command |
+|---|---|
+| `setup` | `init` |
+| `check` | `doctor` |
+| `setup doctor` | `doctor` |
+| `find` | `search` |
+| `lookup` | `search` |
+| `read` | `get` |
+| `open` | `get` |
+| `open entry` | `get` |
+| `context` | `get-context` |
+| `context project` | `get-context` |
+| `project context` | `get-context` |
+| `projects` | `list-projects` |
+| `show projects` | `list-projects` |
+| `project start` | `add-project` |
+| `project add` | `add-project` |
+| `project list` | `list-projects` |
+| `backup all` | `backup` |
+| `setup mcp` | `mcp config` |
+| `mcp setup` | `mcp config` |
+| `workflow import` | `import-workflow` |
+| `workflow show` | `render-workflow` |
+
+## Discovery help
+
+Help commands are side-effect free.
+
+```bash
+skillvault help
+skillvault docs
+skillvault readme
+skillvault help doctor
+skillvault check --help
+skillvault context --help
+skillvault mcp config --help
+```
+
+Use this when you want examples without memorizing flags or command names.
+
+Simple typos on read-only commands are also tolerated when the match is high-confidence, for example `skillvault docter` or `skillvault projcts`.
+
+## `tui`
+
+Open the build-tag-gated Bubble Tea dashboard.
+
+```bash
+make build-tui
+./skillvault-tui tui
+```
+
+Current MVP surface:
+
+- Projects overview
+- Pending items for the selected project
+- Search and entry browsing scoped to the selected project
+- Compact context preview for the selected project
+
+This UI stays intentionally lightweight. It supports browsing plus resolving pending items from the pending pane, but it does not create new entries, edit content, manage workflows, or behave like a kanban board.
 
 ---
 
@@ -13,6 +90,21 @@ skillvault init
 ```
 
 Idempotent: if `~/.skillvault/` already exists, it only ensures subdirectories are present.
+
+Alias: `skillvault setup`
+
+---
+
+## `doctor`
+
+Check whether the local vault exists and whether the database and required directories are usable.
+
+```bash
+skillvault doctor
+skillvault check
+```
+
+This command is read-only. It does not initialize the vault.
 
 ---
 
@@ -82,6 +174,8 @@ Search uses FTS5 with `porter unicode61` tokenizer. It searches title, summary, 
 
 `--vector` enables semantic search with GloVe vectors (if configured via `SKILLVAULT_GLOVE_PATH`).
 
+Alias: `skillvault find "query"`
+
 ---
 
 ## `get`
@@ -105,6 +199,8 @@ Returns:
   "created_at": "2026-06-20T..."
 }
 ```
+
+Alias: `skillvault read <entry-id-or-slug>`
 
 ---
 
@@ -166,6 +262,21 @@ skillvault get-context \
 
 If content exceeds `max_chars`, lowest-priority sections are truncated first.
 
+Alias: `skillvault context --project myapp --mode planning`
+
+---
+
+## `backup`
+
+Write a dated JSON snapshot into `~/.skillvault/exports/`.
+
+```bash
+skillvault backup
+skillvault backup all
+```
+
+Use `export` when you want a specific filename or pack export options.
+
 ---
 
 ## `add-project`
@@ -173,6 +284,7 @@ If content exceeds `max_chars`, lowest-priority sections are truncated first.
 Create a project.
 
 ```bash
+skillvault project start --name "MyApp"
 skillvault add-project \
   --name "MyApp" \
   --description "Example web application"
@@ -537,20 +649,36 @@ Save an AI prompt result as a vault entry.
 
 ```bash
 skillvault save-result --name "My result" --content "Model response..." [flags]
+skillvault save-result --name "My result" --body "Model response..." [flags]
 ```
 
 | Flag | Required | Description |
 |------|----------|-------------|
 | `--name` | ✅ | Result name (generates slug) |
 | `--content` | ✅ | Result content |
-| `--type` | ❌ | Type (default: `ai_output`) |
+| `--body` | ✅ | Alias for `--content` |
+| `--type` | ❌ | Type (default: `note`) |
 | `--category` | ❌ | Optional category |
 | `--tags` | ❌ | Comma-separated tags |
-| `--project` | ❌ | Project slug |
-| `--source-prompt` | ❌ | ID of the prompt entry that generated this result |
+| `--project-id` | ❌ | Target project ID |
+| `--source-prompt-id` | ❌ | ID of the prompt entry that generated this result |
 | `--model` | ❌ | Model that generated the result |
 
 **MCP equivalent:** `save_result` (available in MCP mode).
+
+---
+
+## `mcp config`
+
+Print a ready-to-paste MCP client config snippet for SkillVault.
+
+```bash
+skillvault mcp config
+skillvault setup mcp
+# Alias: skillvault mcp-config
+```
+
+Use this when wiring SkillVault into `opencode.json` or `claude_desktop_config.json` without manually writing the JSON snippet.
 
 ---
 
