@@ -6,9 +6,82 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
+
+func testCollectorSocketPath(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	if runtime.GOOS == "darwin" {
+		shortDir, err := os.MkdirTemp("/tmp", "agenttelemetry-")
+		if err != nil {
+			t.Fatalf("MkdirTemp: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = os.RemoveAll(shortDir)
+		})
+		dir = shortDir
+	}
+
+	return filepath.Join(dir, "test.sock")
+}
+
+func startTestCollector(t *testing.T, collector *Collector, socketPath string) (context.CancelFunc, <-chan error) {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- collector.Listen(ctx)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn, err := net.DialTimeout("unix", socketPath, 25*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return cancel, errCh
+		}
+
+		select {
+		case listenErr := <-errCh:
+			cancel()
+			if listenErr == nil {
+				t.Fatal("collector listener exited before becoming ready")
+			}
+			t.Fatalf("collector listen: %v", listenErr)
+		default:
+		}
+
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("collector socket %q was not ready before timeout: %v", socketPath, err)
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func stopTestCollector(t *testing.T, collector *Collector, cancel context.CancelFunc, errCh <-chan error) {
+	t.Helper()
+
+	cancel()
+	if err := collector.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("collector listen: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("collector listener did not exit")
+	}
+}
 
 func TestCollectorIngestValidEvent(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
@@ -18,20 +91,11 @@ func TestCollectorIngestValidEvent(t *testing.T) {
 	}
 	defer store.Close()
 
-	socketPath := filepath.Join(t.TempDir(), "test.sock")
+	socketPath := testCollectorSocketPath(t)
 	collector := NewCollector(store, socketPath)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Start listener in background.
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- collector.Listen(ctx)
-	}()
-
-	// Wait for socket to be ready.
-	time.Sleep(50 * time.Millisecond)
+	cancel, errCh := startTestCollector(t, collector, socketPath)
+	defer stopTestCollector(t, collector, cancel, errCh)
 
 	// Connect client.
 	conn, err := net.Dial("unix", socketPath)
@@ -69,9 +133,6 @@ func TestCollectorIngestValidEvent(t *testing.T) {
 		t.Errorf("expected 1 event in store, got %d", count)
 	}
 
-	// Shutdown.
-	cancel()
-	collector.Shutdown(context.Background())
 }
 
 func TestCollectorIngestInvalidEvent(t *testing.T) {
@@ -82,18 +143,11 @@ func TestCollectorIngestInvalidEvent(t *testing.T) {
 	}
 	defer store.Close()
 
-	socketPath := filepath.Join(t.TempDir(), "test.sock")
+	socketPath := testCollectorSocketPath(t)
 	collector := NewCollector(store, socketPath)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- collector.Listen(ctx)
-	}()
-
-	time.Sleep(50 * time.Millisecond)
+	cancel, errCh := startTestCollector(t, collector, socketPath)
+	defer stopTestCollector(t, collector, cancel, errCh)
 
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
@@ -103,7 +157,9 @@ func TestCollectorIngestInvalidEvent(t *testing.T) {
 
 	// Send invalid JSON (missing run_id).
 	eventJSON := `{"event_id":"evt-001","event_type":"run.started","timestamp":"2026-07-22T10:00:00Z","agent_id":"opencode","source":"plugin","redaction_policy":"hash-args","confidence_level":"measured","payload":{}}` + "\n"
-	conn.Write([]byte(eventJSON))
+	if _, err := conn.Write([]byte(eventJSON)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 
 	reader := bufio.NewReader(conn)
 	line, err := reader.ReadString('\n')
@@ -114,9 +170,6 @@ func TestCollectorIngestInvalidEvent(t *testing.T) {
 	if line == `{"status":"ok"}`+"\n" {
 		t.Error("expected error ack for invalid event, got ok")
 	}
-
-	cancel()
-	collector.Shutdown(context.Background())
 }
 
 func TestCollectorMultipleEvents(t *testing.T) {
@@ -127,14 +180,11 @@ func TestCollectorMultipleEvents(t *testing.T) {
 	}
 	defer store.Close()
 
-	socketPath := filepath.Join(t.TempDir(), "test.sock")
+	socketPath := testCollectorSocketPath(t)
 	collector := NewCollector(store, socketPath)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go collector.Listen(ctx)
-	time.Sleep(50 * time.Millisecond)
+	cancel, errCh := startTestCollector(t, collector, socketPath)
+	defer stopTestCollector(t, collector, cancel, errCh)
 
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
@@ -173,9 +223,6 @@ func TestCollectorMultipleEvents(t *testing.T) {
 	if count != 3 {
 		t.Errorf("expected 3 events, got %d", count)
 	}
-
-	cancel()
-	collector.Shutdown(context.Background())
 }
 
 func TestCollectorMalformedJSON(t *testing.T) {
@@ -186,14 +233,11 @@ func TestCollectorMalformedJSON(t *testing.T) {
 	}
 	defer store.Close()
 
-	socketPath := filepath.Join(t.TempDir(), "test.sock")
+	socketPath := testCollectorSocketPath(t)
 	collector := NewCollector(store, socketPath)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go collector.Listen(ctx)
-	time.Sleep(50 * time.Millisecond)
+	cancel, errCh := startTestCollector(t, collector, socketPath)
+	defer stopTestCollector(t, collector, cancel, errCh)
 
 	conn, err := net.Dial("unix", socketPath)
 	if err != nil {
@@ -202,7 +246,9 @@ func TestCollectorMalformedJSON(t *testing.T) {
 	defer conn.Close()
 
 	// Send garbage.
-	conn.Write([]byte("not-json\n"))
+	if _, err := conn.Write([]byte("not-json\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
 
 	reader := bufio.NewReader(conn)
 	line, err := reader.ReadString('\n')
@@ -212,9 +258,6 @@ func TestCollectorMalformedJSON(t *testing.T) {
 	if line == AckOK {
 		t.Error("expected error ack for garbage input")
 	}
-
-	cancel()
-	collector.Shutdown(context.Background())
 }
 
 func TestCollectorShutdown(t *testing.T) {
@@ -225,16 +268,13 @@ func TestCollectorShutdown(t *testing.T) {
 	}
 	defer store.Close()
 
-	socketPath := filepath.Join(t.TempDir(), "test.sock")
+	socketPath := testCollectorSocketPath(t)
 	collector := NewCollector(store, socketPath)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go collector.Listen(ctx)
-	time.Sleep(50 * time.Millisecond)
+	cancel, errCh := startTestCollector(t, collector, socketPath)
 
 	// Shutdown should close the socket.
+	cancel()
 	if err := collector.Shutdown(context.Background()); err != nil {
 		t.Fatalf("Shutdown: %v", err)
 	}
@@ -242,5 +282,14 @@ func TestCollectorShutdown(t *testing.T) {
 	// Socket file should be removed.
 	if _, err := os.Stat(socketPath); !os.IsNotExist(err) {
 		t.Error("socket file should be removed after shutdown")
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("collector listen: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("collector listener did not exit")
 	}
 }
