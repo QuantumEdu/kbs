@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +11,9 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -28,77 +31,28 @@ import (
 
 const version = "v3"
 
-var commandDescs = map[string]string{
-	"version":              "Print version information",
-	"init":                 "Initialize vault directory, database, and subdirectories. Use --with-secrets to also install q-secrets, --with-telemetry for telemetryd/telemetryctl, or --all for both.",
-	"mcp":                  "Start MCP JSON-RPC 2.0 server over stdio",
-	"http":                 "Start HTTP REST API server on 127.0.0.1:7438",
-	"add-entry":            "Save a new entry to the vault",
-	"search":               "Full-text or vector search across vault entries",
-	"get":                  "Retrieve an entry by ID or slug",
-	"save-artifact":        "Save a file-backed artifact to the vault",
-	"get-context":          "Compile a context pack for AI agent consumption",
-	"add-project":          "Create a new project in the vault",
-	"list-projects":        "List all projects in the vault",
-	"archive":              "Soft-delete an entry (status → archived)",
-	"add-workflow":         "Create a workflow from a JSON definition file",
-	"render-workflow":      "Render a workflow as a human-readable checklist",
-	"run":                  "Execute a workflow pipeline with input",
-	"session-wrap":         "Create a session entry with decisions, pending, learnings",
-	"export":               "Export vault contents to a JSON file",
-	"import":               "Import vault contents from a JSON file",
-	"import-workflow":      "Import a workflow-builder YAML file as entries + workflow",
-	"route":                "Resolve a scenario to its matching workflow or skill",
-	"save-result":          "Save an AI prompt result to the vault",
-	"stats":                "Show vault statistics and entry counts",
-	"memory-index":         "Index pi-memory markdown files into the vault",
-	"memory-reindex":       "Reindex all memory entries from external sources",
-	"memory-list-external": "List shadow entries linked to external memory files",
-	"compare-entries":      "Show unified diff between two entries",
-	"setup-vectors":        "Load GloVe word vectors for semantic search",
-	"reindex-embeddings":   "Recompute vector embeddings for all vault entries",
-	"graph":                "Traverse and render the entry reference graph",
-	"sync-push":            "Push vault snapshot to remote storage",
-	"sync-pull":            "Pull vault snapshot from remote storage",
-	"entry-ref":            "Manage entry reference links (add/list/remove)",
-	"entry-history":        "Show version history for an entry",
-	"entry-restore":        "Restore an entry to a previous version",
-	"tui":                  "Start the interactive Bubble Tea terminal UI",
-	"update":              "Rebuild and reinstall the skillvault binary from source",
-	"install-telemetry":   "Build and install telemetryd, telemetryctl, and telemetrywrap from the kbs repo",
-	"secrets":             "Run q-secrets (optional secret manager subprogram). Use 'secrets install' to install it, or pass --with-secrets to 'init'. Passes all other arguments through to q-secrets.",
-}
-
-func traceCmd(cmd string) {
-	desc, ok := commandDescs[cmd]
-	if !ok {
-		desc = "Execute " + cmd + " command"
-	}
-	fmt.Fprintf(os.Stderr, "[sk-vault] %s — %s\n", cmd, desc)
-}
-
 type vaultServices struct {
-	store          *db.Store
-	entrySvc       *app.EntryService
+	store           *db.Store
+	entrySvc        *app.EntryService
 	entryVersionSvc *app.EntryVersionService
 	packExportSvc   *app.VaultPackExportService
-	entryRefSvc    *app.EntryRefService
-	memoryIndexSvc *app.MemoryIndexService
-	artifactSvc    *app.ArtifactService
-	workflowSvc    *app.WorkflowService
-	workflowRunSvc *app.WorkflowRunService
-	seriesSvc      *app.SeriesService
-	projectSvc     *app.ProjectService
-	contextSvc     *app.ContextService
-	sessionSvc     *app.SessionService
-	exportSvc      *app.VaultExportService
-	importSvc      *app.VaultImportService
-	saveResultSvc  *app.SavePromptResultService
-	compareSvc     *app.VectorService
-	statsSvc       *app.StatsService
-	fileSvc        *files.ArtifactFileService
-	scanner        *security.SecretScanner
-	syncSvc        *app.SyncService
+	entryRefSvc     *app.EntryRefService
+	memoryIndexSvc  *app.MemoryIndexService
+	artifactSvc     *app.ArtifactService
+	workflowSvc     *app.WorkflowService
+	workflowRunSvc  *app.WorkflowRunService
+	seriesSvc       *app.SeriesService
+	projectSvc      *app.ProjectService
+	contextSvc      *app.ContextService
+	sessionSvc      *app.SessionService
+	exportSvc       *app.VaultExportService
+	importSvc       *app.VaultImportService
+	saveResultSvc   *app.SavePromptResultService
+	compareSvc      *app.VectorService
+	statsSvc        *app.StatsService
+	fileSvc         *files.ArtifactFileService
+	scanner         *security.SecretScanner
+	syncSvc         *app.SyncService
 }
 
 func main() {
@@ -107,8 +61,16 @@ func main() {
 		return
 	}
 
+	if handled, exitCode := handleHelp(os.Args); handled {
+		if exitCode != 0 {
+			os.Exit(exitCode)
+		}
+		return
+	}
+	os.Args = cli.NormalizeArgs(os.Args)
+
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "SkillVault %s — [sk-vault] prefix on all stderr traces\nUsage: skillvault <command> [args...]\n", version)
+		printTopLevelUsage(os.Stderr)
 		os.Exit(1)
 	}
 
@@ -125,6 +87,11 @@ func main() {
 	case "init":
 		traceCmd("init")
 		runInit()
+	case "doctor":
+		traceCmd("doctor")
+		if !runDoctor(os.Stdout) {
+			os.Exit(1)
+		}
 	case "mcp":
 		traceCmd("mcp")
 		runMCP()
@@ -154,6 +121,15 @@ func main() {
 		traceCmd("install-telemetry")
 		installDir := defaultInstallDir()
 		installTelemetry(installDir)
+	case "mcp-config":
+		traceCmd("mcp-config")
+		if err := printMCPConfigSnippet(os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "[sk-vault] error: print MCP config snippet: %v\n", err)
+			os.Exit(1)
+		}
+	case "backup":
+		traceCmd("backup")
+		runCLI("backup")
 	case "secrets":
 		traceCmd("secrets")
 		runSecrets()
@@ -161,6 +137,86 @@ func main() {
 		traceCmd(cmd)
 		runCLI(cmd)
 	}
+}
+
+func runDoctor(w io.Writer) bool {
+	vd := vaultDir()
+	db := dbPath()
+	checks := []struct {
+		name string
+		ok   bool
+		info string
+	}{
+		{name: "Vault home", ok: pathExists(vd), info: vd},
+		{name: "Database", ok: fileExists(db), info: db},
+		{name: "Objects dir", ok: dirExists(filepath.Join(vd, "objects")), info: filepath.Join(vd, "objects")},
+		{name: "Exports dir", ok: dirExists(filepath.Join(vd, "exports")), info: filepath.Join(vd, "exports")},
+		{name: "Cache dir", ok: dirExists(filepath.Join(vd, "cache")), info: filepath.Join(vd, "cache")},
+	}
+
+	healthy := true
+	fmt.Fprintln(w, "SkillVault doctor")
+	fmt.Fprintf(w, "  Vault home: %s\n", vd)
+	for _, check := range checks {
+		status := "OK"
+		if !check.ok {
+			status = "MISSING"
+			healthy = false
+		}
+		fmt.Fprintf(w, "  %-12s %-7s %s\n", check.name+":", status, check.info)
+	}
+
+	if fileExists(db) {
+		status := "OK"
+		info := "SQLite opened successfully"
+		if err := pingVaultDB(db); err != nil {
+			status = "ERROR"
+			info = err.Error()
+			healthy = false
+		}
+		fmt.Fprintf(w, "  %-12s %-7s %s\n", "DB open:", status, info)
+	}
+
+	secretPath := resolveQSecretsBin()
+	if secretPath == "" {
+		fmt.Fprintf(w, "  %-12s %-7s %s\n", "q-secrets:", "INFO", "not installed")
+	} else {
+		fmt.Fprintf(w, "  %-12s %-7s %s\n", "q-secrets:", "OK", secretPath)
+	}
+
+	if healthy {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "SkillVault is ready.")
+		return true
+	}
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "SkillVault needs setup or repair. Run `skillvault init` first if this vault is new.")
+	return false
+}
+
+func pingVaultDB(path string) error {
+	dbConn, err := sql.Open("sqlite", path)
+	if err != nil {
+		return err
+	}
+	defer dbConn.Close()
+	return dbConn.Ping()
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func vaultDir() string {
@@ -622,27 +678,27 @@ func openVault() *vaultServices {
 	syncSvc := app.NewSyncService(exportSvc, importSvc, gzipTransport)
 
 	return &vaultServices{
-		store:            store,
-		entrySvc:         entrySvc,
-		entryVersionSvc:  entryVersionSvc,
-		packExportSvc:    packExportSvc,
-		entryRefSvc:      entryRefSvc,
-		memoryIndexSvc: memoryIndexSvc,
-		artifactSvc:    artifactSvc,
-		workflowSvc:    workflowSvc,
-		workflowRunSvc: workflowRunSvc,
-		seriesSvc:      seriesSvc,
-		projectSvc:     projectSvc,
-		contextSvc:     contextSvc,
-		sessionSvc:     sessionSvc,
-		exportSvc:      exportSvc,
-		importSvc:      importSvc,
-		saveResultSvc:  saveResultSvc,
-		compareSvc:     compareSvc,
-		statsSvc:       statsSvc,
-		fileSvc:        fileSvc,
-		scanner:        scanner,
-		syncSvc:        syncSvc,
+		store:           store,
+		entrySvc:        entrySvc,
+		entryVersionSvc: entryVersionSvc,
+		packExportSvc:   packExportSvc,
+		entryRefSvc:     entryRefSvc,
+		memoryIndexSvc:  memoryIndexSvc,
+		artifactSvc:     artifactSvc,
+		workflowSvc:     workflowSvc,
+		workflowRunSvc:  workflowRunSvc,
+		seriesSvc:       seriesSvc,
+		projectSvc:      projectSvc,
+		contextSvc:      contextSvc,
+		sessionSvc:      sessionSvc,
+		exportSvc:       exportSvc,
+		importSvc:       importSvc,
+		saveResultSvc:   saveResultSvc,
+		compareSvc:      compareSvc,
+		statsSvc:        statsSvc,
+		fileSvc:         fileSvc,
+		scanner:         scanner,
+		syncSvc:         syncSvc,
 	}
 }
 
@@ -826,6 +882,7 @@ func runCLI(cmd string) {
 			Mode:     flags.Mode,
 			Project:  flags.Project,
 			Query:    flags.Query,
+			Include:  cli.SplitLines(flags.Include),
 			MaxChars: flags.MaxChars,
 		})
 		if err != nil {
@@ -854,6 +911,109 @@ func runCLI(cmd string) {
 		fmt.Printf("Project saved: %s\n", proj.ID)
 		fmt.Printf("  Name:        %s\n", proj.Name)
 		fmt.Printf("  Description: %s\n", proj.Description)
+
+	case "pending-add":
+		flags, err := cli.ParsePendingAddFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		result, err := svc.entrySvc.SavePending(ctx, app.SavePendingInput{
+			Project: flags.Project,
+			Title:   flags.Title,
+			Note:    flags.Note,
+			Tags:    cli.TagItems(flags.Tags),
+		})
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Pending saved: %s\n", result.Entry.Entry.ID)
+		fmt.Printf("  Project: %s\n", flags.Project)
+		fmt.Printf("  Title:   %s\n", result.Entry.Entry.Title)
+		if result.Entry.Entry.BodyOptional != "" {
+			fmt.Printf("  Note:    %s\n", result.Entry.Entry.BodyOptional)
+		}
+
+	case "pending-list":
+		flags, err := cli.ParsePendingListFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		items, err := svc.entrySvc.ListPendingWithOptions(ctx, app.ListPendingInput{
+			Project:         flags.Project,
+			IncludeArchived: flags.IncludeArchived,
+			Query:           flags.Query,
+			Tag:             flags.Tag,
+			Limit:           flags.Limit,
+		})
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+		if len(items) == 0 && flags.Query == "" && flags.Tag == "" && !flags.IncludeArchived {
+			fmt.Printf("No pending items for project %s.\n", flags.Project)
+			return
+		}
+		printPendingList(os.Stdout, "Pending items", flags.Project, items, flags.Query, flags.Tag, flags.IncludeArchived)
+
+	case "pending-review":
+		flags, err := cli.ParsePendingListFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		items, err := svc.entrySvc.ListPendingWithOptions(ctx, app.ListPendingInput{
+			Project:         flags.Project,
+			IncludeArchived: flags.IncludeArchived,
+			Query:           flags.Query,
+			Tag:             flags.Tag,
+			Limit:           flags.Limit,
+		})
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+		printPendingList(os.Stdout, "Pending review", flags.Project, items, flags.Query, flags.Tag, flags.IncludeArchived)
+		if len(items) == 0 {
+			fmt.Println("Next: add one with `skillvault pending add --project <project> \"Title\"`.")
+			return
+		}
+		fmt.Println("Next:")
+		fmt.Println("  skillvault pending show <id>")
+		fmt.Println("  skillvault pending done <id>")
+
+	case "pending-show":
+		flags, err := cli.ParsePendingShowFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		item, err := svc.entrySvc.GetPending(ctx, flags.ID, true)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+		printPendingDetails(os.Stdout, item)
+
+	case "pending-done":
+		flags, err := cli.ParsePendingDoneFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		if err := svc.entrySvc.ResolvePending(ctx, flags.ID); err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+		fmt.Printf("Resolved pending item: %s\n", flags.ID)
 
 	case "list-projects":
 		projects, err := svc.projectSvc.ListProjects(ctx)
@@ -1055,6 +1215,18 @@ func runCLI(cmd string) {
 			os.Exit(1)
 		}
 		fmt.Printf("Exported to %s\n", flags.OutputPath)
+
+	case "backup":
+		outputPath := filepath.Join(vaultDir(), "exports", fmt.Sprintf("skillvault-backup-%s.json", time.Now().Format("20060102-150405")))
+		if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
+			cli.PrintError(fmt.Errorf("prepare backup directory: %w", err))
+			os.Exit(1)
+		}
+		if err := svc.exportSvc.Export(ctx, outputPath); err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+		fmt.Printf("Backup written to %s\n", outputPath)
 
 	case "import":
 		flags, err := cli.ParseImportFlags(os.Args)
@@ -1642,4 +1814,76 @@ func runMCP() {
 		os.Exit(1)
 	}
 	fmt.Fprintln(os.Stderr, "[sk-vault] MCP server shut down.")
+}
+
+func printPendingList(w io.Writer, heading, project string, items []domain.EntryListResult, query, tag string, includeArchived bool) {
+	activeCount := 0
+	archivedCount := 0
+	for _, item := range items {
+		if item.Entry.Status == domain.StatusArchived {
+			archivedCount++
+		} else {
+			activeCount++
+		}
+	}
+
+	state := "active"
+	if includeArchived {
+		state = "active + resolved"
+	}
+	filterSummary := []string{state}
+	if strings.TrimSpace(query) != "" {
+		filterSummary = append(filterSummary, fmt.Sprintf("query=%q", strings.TrimSpace(query)))
+	}
+	if strings.TrimSpace(tag) != "" {
+		filterSummary = append(filterSummary, fmt.Sprintf("tag=%q", strings.TrimSpace(tag)))
+	}
+
+	fmt.Fprintf(w, "%s for project %s\n", heading, project)
+	fmt.Fprintf(w, "Showing %d item(s) [%s]\n", len(items), strings.Join(filterSummary, "; "))
+	fmt.Fprintf(w, "Counts: active=%d resolved=%d\n", activeCount, archivedCount)
+	if len(items) == 0 {
+		return
+	}
+
+	for _, item := range items {
+		fmt.Fprintf(w, "\n[%s] %s\n", item.Entry.ID, item.Entry.Title)
+		fmt.Fprintf(w, "  Status: %s\n", item.Entry.Status)
+		if item.Entry.BodyOptional != "" {
+			fmt.Fprintf(w, "  Note:   %s\n", item.Entry.BodyOptional)
+		}
+		if tags := pendingTagNames(item.Tags); len(tags) > 0 {
+			fmt.Fprintf(w, "  Tags:   %s\n", strings.Join(tags, ", "))
+		}
+	}
+}
+
+func printPendingDetails(w io.Writer, item domain.EntryResult) {
+	project := "global"
+	if item.Entry.ProjectID != nil {
+		project = *item.Entry.ProjectID
+	}
+
+	fmt.Fprintf(w, "Pending item: %s\n", item.Entry.ID)
+	fmt.Fprintf(w, "  Title:   %s\n", item.Entry.Title)
+	fmt.Fprintf(w, "  Project: %s\n", project)
+	fmt.Fprintf(w, "  Status:  %s\n", item.Entry.Status)
+	if item.Entry.BodyOptional != "" {
+		fmt.Fprintf(w, "  Note:    %s\n", item.Entry.BodyOptional)
+	}
+	if tags := pendingTagNames(item.Tags); len(tags) > 0 {
+		fmt.Fprintf(w, "  Tags:    %s\n", strings.Join(tags, ", "))
+	}
+	fmt.Fprintln(w, "  Next:    skillvault pending done "+item.Entry.ID)
+}
+
+func pendingTagNames(tags []domain.Tag) []string {
+	if len(tags) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		names = append(names, tag.Name)
+	}
+	return names
 }

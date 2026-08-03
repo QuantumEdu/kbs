@@ -16,22 +16,47 @@ func TestParseSubcommand(t *testing.T) {
 		{"init", []string{"skillvault", "init"}, "init", false},
 		{"add-entry", []string{"skillvault", "add-entry", "--title", "T", "--summary", "S"}, "add-entry", false},
 		{"search", []string{"skillvault", "search", "query"}, "search", false},
+		{"find alias", []string{"skillvault", "find", "query"}, "search", false},
+		{"lookup alias", []string{"skillvault", "lookup", "query"}, "search", false},
 		{"get", []string{"skillvault", "get", "entry-id"}, "get", false},
+		{"read alias", []string{"skillvault", "read", "entry-id"}, "get", false},
+		{"open alias", []string{"skillvault", "open", "entry-id"}, "get", false},
 		{"save-artifact", []string{"skillvault", "save-artifact", "--title", "A", "--file", "f.md"}, "save-artifact", false},
 		{"get-context", []string{"skillvault", "get-context", "--project", "p"}, "get-context", false},
+		{"context alias", []string{"skillvault", "context", "--project", "p"}, "get-context", false},
+		{"context project alias", []string{"skillvault", "context", "project", "--project", "p"}, "get-context", false},
 		{"add-project", []string{"skillvault", "add-project", "--name", "P"}, "add-project", false},
+		{"project add alias", []string{"skillvault", "project", "add", "--name", "P"}, "add-project", false},
 		{"list-projects", []string{"skillvault", "list-projects"}, "list-projects", false},
+		{"projects alias", []string{"skillvault", "projects"}, "list-projects", false},
+		{"projects fuzzy typo", []string{"skillvault", "projcts"}, "list-projects", false},
+		{"pending add", []string{"skillvault", "pending", "add", "--project", "codex", "Update", "presentation"}, "pending-add", false},
+		{"pending list", []string{"skillvault", "pending", "list", "--project", "codex"}, "pending-list", false},
+		{"pending ls", []string{"skillvault", "pending", "ls", "--project", "codex"}, "pending-list", false},
+		{"pending review", []string{"skillvault", "pending", "review", "--project", "codex"}, "pending-review", false},
+		{"pending show", []string{"skillvault", "pending", "show", "update-presentation"}, "pending-show", false},
+		{"pending details alias", []string{"skillvault", "pending", "details", "update-presentation"}, "pending-show", false},
+		{"pending done", []string{"skillvault", "pending", "done", "update-presentation"}, "pending-done", false},
+		{"todo alias", []string{"skillvault", "todo", "list", "--project", "codex"}, "pending-list", false},
 		{"archive", []string{"skillvault", "archive", "entry-id"}, "archive", false},
 		{"add-workflow", []string{"skillvault", "add-workflow", "wf.json"}, "add-workflow", false},
 		{"render-workflow", []string{"skillvault", "render-workflow", "wf-id"}, "render-workflow", false},
 		{"session-wrap", []string{"skillvault", "session-wrap", "--summary", "S"}, "session-wrap", false},
 		{"export", []string{"skillvault", "export"}, "export", false},
+		{"backup", []string{"skillvault", "backup"}, "backup", false},
 		{"import", []string{"skillvault", "import", "file.json"}, "import", false},
 		{"import-workflow", []string{"skillvault", "import-workflow", "--file", "wf.yaml"}, "import-workflow", false},
+		{"workflow import alias", []string{"skillvault", "workflow", "import", "--file", "wf.yaml"}, "import-workflow", false},
 
 		// Legacy commands
 		{"version", []string{"skillvault", "version"}, "version", false},
+		{"doctor", []string{"skillvault", "doctor"}, "doctor", false},
+		{"check alias", []string{"skillvault", "check"}, "doctor", false},
+		{"setup doctor alias", []string{"skillvault", "setup", "doctor"}, "doctor", false},
+		{"doctor fuzzy typo", []string{"skillvault", "docter"}, "doctor", false},
 		{"mcp", []string{"skillvault", "mcp"}, "mcp", false},
+		{"mcp config nested", []string{"skillvault", "mcp", "config"}, "mcp-config", false},
+		{"mcp config flattened", []string{"skillvault", "mcp-config"}, "mcp-config", false},
 		{"save-result", []string{"skillvault", "save-result", "--name", "X", "--content", "Y"}, "save-result", false},
 
 		// Required args
@@ -72,6 +97,7 @@ func TestParseSubcommand(t *testing.T) {
 		// Route command
 		{"route", []string{"skillvault", "route", "research"}, "route", false},
 		{"route no arg", []string{"skillvault", "route"}, "route", false},
+		{"pending no subcommand", []string{"skillvault", "pending"}, "", true},
 
 		// Errors
 		{"no args", []string{"skillvault"}, "", true},
@@ -434,6 +460,73 @@ func TestParseGetEntryFlags(t *testing.T) {
 	_, err = ParseGetEntryFlags([]string{"skillvault", "get"})
 	if err == nil {
 		t.Fatal("expected error for missing ID")
+	}
+}
+
+func TestParsePendingAddFlags(t *testing.T) {
+	flags, err := ParsePendingAddFlags([]string{"skillvault", "pending", "add", "--project", "codex", "Update", "presentation"})
+	if err != nil {
+		t.Fatalf("ParsePendingAddFlags failed: %v", err)
+	}
+	if flags.Project != "codex" {
+		t.Fatalf("Project = %q, want codex", flags.Project)
+	}
+	if flags.Title != "Update presentation" {
+		t.Fatalf("Title = %q, want \"Update presentation\"", flags.Title)
+	}
+
+	flags, err = ParsePendingAddFlags([]string{"skillvault", "pending", "add", "--project", "codex", "--title", "Review PR", "--note", "After tests", "--tags", "review,pr"})
+	if err != nil {
+		t.Fatalf("ParsePendingAddFlags with flags failed: %v", err)
+	}
+	if flags.Note != "After tests" || flags.Tags != "review,pr" {
+		t.Fatalf("unexpected parsed flags: %+v", flags)
+	}
+
+	if _, err := ParsePendingAddFlags([]string{"skillvault", "pending", "add", "Review PR"}); err == nil {
+		t.Fatal("expected missing project error")
+	}
+}
+
+func TestParsePendingListFlags(t *testing.T) {
+	flags, err := ParsePendingListFlags([]string{"skillvault", "pending", "list", "--project", "codex", "--include-archived", "--query", "review", "--tag", "pr", "--limit", "5"})
+	if err != nil {
+		t.Fatalf("ParsePendingListFlags failed: %v", err)
+	}
+	if flags.Project != "codex" || !flags.IncludeArchived || flags.Query != "review" || flags.Tag != "pr" || flags.Limit != 5 {
+		t.Fatalf("unexpected parsed flags: %+v", flags)
+	}
+
+	if _, err := ParsePendingListFlags([]string{"skillvault", "pending", "list"}); err == nil {
+		t.Fatal("expected missing project error")
+	}
+}
+
+func TestParsePendingShowFlags(t *testing.T) {
+	flags, err := ParsePendingShowFlags([]string{"skillvault", "pending", "show", "item-1"})
+	if err != nil {
+		t.Fatalf("ParsePendingShowFlags failed: %v", err)
+	}
+	if flags.ID != "item-1" {
+		t.Fatalf("ID = %q, want item-1", flags.ID)
+	}
+
+	if _, err := ParsePendingShowFlags([]string{"skillvault", "pending", "show"}); err == nil {
+		t.Fatal("expected missing ID error")
+	}
+}
+
+func TestParsePendingDoneFlags(t *testing.T) {
+	flags, err := ParsePendingDoneFlags([]string{"skillvault", "pending", "done", "item-1"})
+	if err != nil {
+		t.Fatalf("ParsePendingDoneFlags failed: %v", err)
+	}
+	if flags.ID != "item-1" {
+		t.Fatalf("ID = %q, want item-1", flags.ID)
+	}
+
+	if _, err := ParsePendingDoneFlags([]string{"skillvault", "pending", "done"}); err == nil {
+		t.Fatal("expected missing ID error")
 	}
 }
 

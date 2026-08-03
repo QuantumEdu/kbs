@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -14,6 +15,14 @@ import (
 
 func main() {
 	log.SetFlags(0)
+
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "help", "--help", "-h":
+			usage()
+			return
+		}
+	}
 
 	cfg := agenttelemetry.DefaultConfig()
 
@@ -91,4 +100,16 @@ func main() {
 	}
 
 	log.Println("telemetryd: shutdown complete")
+}
+
+func usage() {
+	fmt.Fprint(os.Stdout, `Usage: telemetryd
+
+Starts the telemetry daemon using the configured database and Unix socket paths.
+
+Environment:
+  TELEMETRY_DB_PATH  Override database path
+  TELEMETRY_SOCKET   Override Unix socket path
+  XDG_RUNTIME_DIR    Default base directory for telemetryd.sock
+`)
 }

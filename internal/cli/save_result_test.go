@@ -22,6 +22,15 @@ func TestParseSaveResultFlags(t *testing.T) {
 			},
 		},
 		{
+			name: "body alias",
+			args: []string{"skillvault", "save-result", "--name", "Test", "--body", "body"},
+			want: SaveResultFlags{
+				Name:    "Test",
+				Content: "body",
+				Type:    "note",
+			},
+		},
+		{
 			name: "all flags",
 			args: []string{"skillvault", "save-result",
 				"--name", "Arch Review",
@@ -45,13 +54,13 @@ func TestParseSaveResultFlags(t *testing.T) {
 			},
 		},
 		{
-			name: "missing name",
-			args: []string{"skillvault", "save-result", "--content", "body"},
+			name:    "missing name",
+			args:    []string{"skillvault", "save-result", "--content", "body"},
 			wantErr: true,
 		},
 		{
-			name: "missing content",
-			args: []string{"skillvault", "save-result", "--name", "Test"},
+			name:    "missing content",
+			args:    []string{"skillvault", "save-result", "--name", "Test"},
 			wantErr: true,
 		},
 	}
@@ -96,6 +105,16 @@ func TestParseSaveResultFlags(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseSaveResultFlags_MissingContentErrorMentionsAlias(t *testing.T) {
+	_, err := ParseSaveResultFlags([]string{"skillvault", "save-result", "--name", "Test"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--content or --body") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

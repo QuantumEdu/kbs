@@ -10,16 +10,9 @@ import (
 	"github.com/quantum-6/skillvault/internal/app"
 )
 
-// Run starts the Bubble Tea TUI with the given entry service.
-func Run(entrySvc *app.EntryService) {
-	m := NewModel(entrySvc)
-
-	p := tea.NewProgram(
-		m,
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
-	)
-
+func Run(entrySvc *app.EntryService, projectSvc *app.ProjectService, contextSvc *app.ContextService) {
+	m := NewModel(entrySvc, projectSvc, contextSvc)
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
 		os.Exit(1)
