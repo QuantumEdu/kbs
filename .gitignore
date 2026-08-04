@@ -25,3 +25,6 @@ skillvault.db
 telemetryd
 telemetryctl
 telemetrywrap
+
+# TUI binary (built by make build-tui)
+skillvault-tui
