@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	_ "modernc.org/sqlite"
@@ -67,6 +68,8 @@ var commandDescs = map[string]string{
 	"update":              "Rebuild and reinstall the skillvault binary from source",
 	"install-telemetry":   "Build and install telemetryd, telemetryctl, and telemetrywrap from the kbs repo",
 	"secrets":             "Run q-secrets (optional secret manager subprogram). Use 'secrets install' to install it, or pass --with-secrets to 'init'. Passes all other arguments through to q-secrets.",
+	"audit":               "Run security audit against vault entries, markdown files, or skill packs for prompt injections and secret leaks",
+	"mcp-audit":           "Scan client MCP configuration files (Cursor, Claude, Windsurf, OpenCode) for security risks and exposed secrets",
 }
 
 func traceCmd(cmd string) {
@@ -93,6 +96,7 @@ type vaultServices struct {
 	sessionSvc     *app.SessionService
 	exportSvc      *app.VaultExportService
 	importSvc      *app.VaultImportService
+	auditSvc       *app.AuditService
 	saveResultSvc  *app.SavePromptResultService
 	compareSvc     *app.VectorService
 	statsSvc       *app.StatsService
@@ -590,6 +594,8 @@ func openVault() *vaultServices {
 	sessionSvc := app.NewSessionService(entrySvc, artifactSvc, projectSvc, store.Entries, store.Artifacts, store.Projects)
 	exportSvc := app.NewVaultExportService(store.ImportExport, store.Artifacts, store.Entries, store.Projects, store.Workflows)
 	importSvc := app.NewVaultImportService(store.ImportExport, store.Entries, store.Projects, store.Artifacts)
+	auditSvc := app.NewAuditService(store.Entries, security.NewAuditor())
+	importSvc.SetAuditor(auditSvc.Auditor())
 	entryVersionSvc := app.NewEntryVersionService(store.EntryVersions, store.Entries)
 	packExportSvc := app.NewVaultPackExportService(store.ImportExport, store.Entries, store.Projects, store.Artifacts, store.Workflows)
 	statsSvc := app.NewStatsService(store.Entries, store.Artifacts, store.Projects).WithWorkflowRunStore(store.WorkflowRuns)
@@ -637,6 +643,7 @@ func openVault() *vaultServices {
 		sessionSvc:     sessionSvc,
 		exportSvc:      exportSvc,
 		importSvc:      importSvc,
+		auditSvc:       auditSvc,
 		saveResultSvc:  saveResultSvc,
 		compareSvc:     compareSvc,
 		statsSvc:       statsSvc,
@@ -1063,8 +1070,11 @@ func runCLI(cmd string) {
 			os.Exit(1)
 		}
 
-		if err := svc.importSvc.ImportWithPrefix(ctx, flags.FilePath, flags.Prefix); err != nil {
+		if err := svc.importSvc.ImportWithPrefixAndAudit(ctx, flags.FilePath, flags.Prefix, flags.StrictAudit); err != nil {
 			cli.PrintError(err)
+			if flags.StrictAudit && strings.Contains(err.Error(), "security audit failed") {
+				os.Exit(2)
+			}
 			os.Exit(1)
 		}
 		fmt.Println("Import completed.")
@@ -1215,6 +1225,103 @@ func runCLI(cmd string) {
 			if flags.WorkflowRuns && stats.WorkflowRuns != nil {
 				fmt.Print(app.FormatWorkflowRunStats(stats.WorkflowRuns))
 			}
+		}
+
+	case "audit":
+		flags, err := cli.ParseAuditFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		var report security.AuditReport
+		if flags.PackPath != "" {
+			report, err = svc.auditSvc.AuditPath(flags.PackPath)
+		} else if flags.Target != "" {
+			report, err = svc.auditSvc.AuditPath(flags.Target)
+		} else {
+			report, err = svc.auditSvc.AuditVault(ctx)
+		}
+
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		if flags.Format == "json" {
+			data, err := json.MarshalIndent(report, "", "  ")
+			if err != nil {
+				cli.PrintError(fmt.Errorf("marshal audit report: %w", err))
+				os.Exit(1)
+			}
+			fmt.Println(string(data))
+		} else if flags.Format == "sarif" {
+			sarifStr, err := security.FormatSARIF(report)
+			if err != nil {
+				cli.PrintError(fmt.Errorf("format sarif report: %w", err))
+				os.Exit(1)
+			}
+			fmt.Println(sarifStr)
+		} else {
+			printAuditReport(report)
+		}
+
+		failed := false
+		switch flags.FailOn {
+		case "critical":
+			failed = report.CriticalCount > 0
+		case "high":
+			failed = report.CriticalCount > 0 || report.HighCount > 0
+		case "medium":
+			failed = report.CriticalCount > 0 || report.HighCount > 0 || report.MediumCount > 0
+		}
+
+		if failed {
+			os.Exit(2)
+		}
+
+	case "mcp-audit":
+		flags, err := cli.ParseMCPAuditFlags(os.Args)
+		if err != nil {
+			cli.PrintError(err)
+			os.Exit(1)
+		}
+
+		auditor := security.NewMCPConfigAuditor()
+		var targetPaths []string
+		if flags.ConfigPath != "" {
+			targetPaths = append(targetPaths, flags.ConfigPath)
+		} else {
+			for _, kp := range security.GetKnownConfigPaths() {
+				if _, err := os.Stat(kp.Path); err == nil {
+					targetPaths = append(targetPaths, kp.Path)
+				}
+			}
+			if len(targetPaths) == 0 {
+				fmt.Println("[sk-vault] No standard MCP config files found. Pass --config <path> to audit a custom file.")
+				return
+			}
+		}
+
+		var reports []security.MCPConfigAuditReport
+		for _, p := range targetPaths {
+			rep, err := auditor.AuditConfigFile(p)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[sk-vault] Warning: failed to audit %s: %v\n", p, err)
+				continue
+			}
+			reports = append(reports, rep)
+		}
+
+		if flags.Format == "json" {
+			data, err := json.MarshalIndent(reports, "", "  ")
+			if err != nil {
+				cli.PrintError(fmt.Errorf("marshal mcp audit reports: %w", err))
+				os.Exit(1)
+			}
+			fmt.Println(string(data))
+		} else {
+			printMCPAuditReports(reports)
 		}
 
 	case "memory-index", "memory-reindex", "memory-list-external":
@@ -1643,3 +1750,77 @@ func runMCP() {
 	}
 	fmt.Fprintln(os.Stderr, "[sk-vault] MCP server shut down.")
 }
+
+func printAuditReport(report security.AuditReport) {
+	fmt.Println("======================================================================")
+	fmt.Printf("SKILLVAULT SECURITY AUDIT REPORT\n")
+	fmt.Printf("Target:  %s\n", report.Target)
+	fmt.Printf("Scanned: %d items\n", report.ScannedItems)
+	if report.Passed {
+		fmt.Printf("Status:  PASSED (0 critical, 0 high, %d medium, %d low)\n", report.MediumCount, report.LowCount)
+	} else {
+		fmt.Printf("Status:  FAILED (%d critical, %d high, %d medium, %d low)\n", report.CriticalCount, report.HighCount, report.MediumCount, report.LowCount)
+	}
+	fmt.Println("======================================================================")
+
+	if len(report.Findings) == 0 {
+		fmt.Println("✓ No security risks, prompt injections, or exposed secrets detected.")
+		return
+	}
+
+	for _, f := range report.Findings {
+		lineStr := ""
+		if f.LineNumber > 0 {
+			lineStr = fmt.Sprintf(" - Line %d", f.LineNumber)
+		}
+		fmt.Printf("\n[%s] %s (%s)%s\n", strings.ToUpper(f.Severity), f.RuleID, f.Category, lineStr)
+		fmt.Printf("  Description: %s\n", f.Description)
+		if f.MatchSnippet != "" {
+			fmt.Printf("  Match:       %s\n", f.MatchSnippet)
+		}
+		if f.Suggestion != "" {
+			fmt.Printf("  Suggestion:  %s\n", f.Suggestion)
+		}
+	}
+	fmt.Println("\n======================================================================")
+}
+
+func printMCPAuditReports(reports []security.MCPConfigAuditReport) {
+	fmt.Println("======================================================================")
+	fmt.Println("SKILLVAULT MCP CONFIGURATION SECURITY AUDIT")
+	fmt.Printf("Configurations Scanned: %d\n", len(reports))
+	fmt.Println("======================================================================")
+
+	totalFindings := 0
+	for _, rep := range reports {
+		fmt.Printf("\nClient / File: %s (%s)\n", rep.ClientType, rep.ConfigPath)
+		fmt.Printf("Servers Defined: %d\n", rep.ServersFound)
+		if rep.Passed {
+			fmt.Println("Status: PASSED (No security risks detected)")
+		} else {
+			fmt.Printf("Status: FAILED (%d critical, %d high, %d medium, %d low)\n",
+				rep.CriticalCount, rep.HighCount, rep.MediumCount, rep.LowCount)
+		}
+
+		for _, f := range rep.Findings {
+			totalFindings++
+			fmt.Printf("\n  [%s] %s in [%s] -> %s\n", strings.ToUpper(f.Severity), f.RuleID, f.ServerName, f.Location)
+			fmt.Printf("    Description: %s\n", f.Description)
+			if f.MatchSnippet != "" {
+				fmt.Printf("    Match:       %s\n", f.MatchSnippet)
+			}
+			if f.Suggestion != "" {
+				fmt.Printf("    Suggestion:  %s\n", f.Suggestion)
+			}
+		}
+	}
+
+	fmt.Println("\n======================================================================")
+	if totalFindings > 0 {
+		fmt.Println("Recommendation: Move hardcoded secrets into SkillVault's encrypted store:")
+		fmt.Println("  skillvault secrets set <KEY> <VALUE>")
+		fmt.Println("======================================================================")
+	}
+}
+
+

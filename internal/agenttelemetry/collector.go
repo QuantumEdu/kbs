@@ -27,8 +27,9 @@ type Collector struct {
 	closed          bool
 	loopDetector    *LoopDetector
 	stallDetector   *StallDetector
-	streakDetector  *StreakDetector
-	tokenCounter    *TokenCounter
+	streakDetector    *StreakDetector
+	tokenCounter      *TokenCounter
+	injectionDetector *InjectionDetector
 }
 
 // NewCollector creates a new Collector bound to the given socket path.
@@ -89,6 +90,11 @@ func (c *Collector) SetStreakDetector(sd *StreakDetector) {
 // SetTokenCounter attaches a token counter to the collector.
 func (c *Collector) SetTokenCounter(tc *TokenCounter) {
 	c.tokenCounter = tc
+}
+
+// SetInjectionDetector attaches an injection detector to the collector.
+func (c *Collector) SetInjectionDetector(id *InjectionDetector) {
+	c.injectionDetector = id
 }
 
 // Listen binds the Unix socket and accepts connections. Each connection is handled
@@ -204,6 +210,13 @@ func (c *Collector) ingest(ctx context.Context, raw []byte) string {
 			} else {
 				c.streakDetector.RecordSuccess(e.RunID)
 			}
+		}
+	}
+
+	// Injection detector: check for prompt injection or command hazards.
+	if c.injectionDetector != nil {
+		if signal := c.injectionDetector.Check(e); signal != nil {
+			emitSignalEvent(c.store, ctx, e, "policy.violation", signal)
 		}
 	}
 

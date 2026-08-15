@@ -46,11 +46,12 @@ func main() {
 	collector.SetDBPath(cfg.DBPath)
 	collector.SetPromptStorage(cfg.StorePrompts)
 
-	// Wire quality signal detectors.
+	// Wire quality signal and threat detectors.
 	collector.SetLoopDetector(agenttelemetry.NewLoopDetector())
 	collector.SetStallDetector(agenttelemetry.NewStallDetector())
 	collector.SetStreakDetector(agenttelemetry.NewStreakDetector())
 	collector.SetTokenCounter(agenttelemetry.NewTokenCounter())
+	collector.SetInjectionDetector(agenttelemetry.NewInjectionDetector())
 
 	// Start with retry.
 	ctx, cancel := context.WithCancel(context.Background())

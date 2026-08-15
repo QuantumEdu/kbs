@@ -205,9 +205,9 @@ Custom patterns can be added via `TELEMETRY_REDACTION_PATTERNS` (comma-separated
 Best-effort detection of base64-encoded secrets: tokens with an alphanumeric ratio
 > 0.75 and length > 20 are flagged with `redaction_policy: scanned-warning`.
 
-## Quality Signals
+## Quality & Security Signals
 
-Four detectors run synchronously on each event write:
+Five detectors run synchronously on each event write:
 
 | Detector | Trigger | Emitted Event |
 |----------|---------|---------------|
@@ -215,6 +215,7 @@ Four detectors run synchronously on each event write:
 | StallDetector | No events for 60s on active run | `policy.violation` |
 | StreakDetector | 5+ consecutive failures or 3+ no-change | `policy.violation` |
 | TokenCounter | Efficiency ratio < 0.05 | `policy.violation` |
+| InjectionDetector | Prompt injection markers or dangerous command hazards | `policy.violation` |
 
 ## Event Types (20 canonical)
 

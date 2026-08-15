@@ -15,9 +15,14 @@ func ParseCommand(args []string) (string, error) {
 
 	sub := args[1]
 	switch sub {
-	case "graph":
+	case "mcp":
+		if len(args) > 2 && args[2] == "audit" {
+			return "mcp-audit", nil
+		}
 		return sub, nil
-	case "init", "version", "mcp", "http", "list-projects", "export", "tui", "stats":
+	case "mcp-audit":
+		return sub, nil
+	case "graph", "init", "version", "http", "list-projects", "export", "tui", "stats", "audit":
 		return sub, nil
 	case "add-entry", "search", "save-artifact", "get-context", "add-project", "session-wrap":
 		return sub, nil
@@ -534,9 +539,10 @@ func ParseExportPackFlags(args []string) (*ExportPackFlags, error) {
 
 // ImportFlags holds parsed import command flags.
 type ImportFlags struct {
-	FilePath string
-	Prefix   string
-	Pack     bool
+	FilePath    string
+	Prefix      string
+	Pack        bool
+	StrictAudit bool
 }
 
 // RunFlags holds parsed run command flags.
@@ -669,6 +675,7 @@ func ParseImportFlags(args []string) (*ImportFlags, error) {
 	fs := flag.NewFlagSet("import", flag.ContinueOnError)
 	fs.StringVar(&flags.Prefix, "prefix", "", "Prefix all imported entity IDs (e.g. 'ns/')")
 	fs.BoolVar(&flags.Pack, "pack", false, "Import as a skill pack")
+	fs.BoolVar(&flags.StrictAudit, "strict-audit", false, "Abort import if critical or high severity security findings are found")
 
 	fs.SetOutput(&nullWriter{})
 
@@ -915,3 +922,94 @@ func ParseSyncFlags(args []string) (*SyncFlags, error) {
 
 	return flags, nil
 }
+
+// AuditFlags holds parsed audit command flags.
+type AuditFlags struct {
+	Target   string // Path to file/dir or empty for vault audit
+	PackPath string
+	Format   string // "text" or "json"
+	FailOn   string // "critical", "high", "medium", or ""
+}
+
+// ParseAuditFlags parses audit-specific flags from args.
+// Usage:
+//   skillvault audit [target] [--pack <path>] [--format text|json] [--fail-on <severity>]
+func ParseAuditFlags(args []string) (*AuditFlags, error) {
+	flags := &AuditFlags{
+		Format: "text",
+	}
+
+	fs := flag.NewFlagSet("audit", flag.ContinueOnError)
+	fs.StringVar(&flags.PackPath, "pack", "", "Path to .svpack or JSON export file to audit")
+	fs.StringVar(&flags.Format, "format", "text", "Output format: text or json")
+	fs.StringVar(&flags.FailOn, "fail-on", "high", "Severity threshold to return exit code 2 (critical, high, medium)")
+	fs.SetOutput(&nullWriter{})
+
+	// Check for optional positional target (e.g. `skillvault audit my-skill.md`)
+	var remainingArgs []string
+	if len(args) > 2 {
+		for i := 2; i < len(args); i++ {
+			arg := args[i]
+			if strings.HasPrefix(arg, "-") {
+				remainingArgs = args[i:]
+				break
+			}
+			if flags.Target == "" {
+				flags.Target = arg
+			}
+		}
+	}
+
+	if len(remainingArgs) > 0 {
+		if err := fs.Parse(remainingArgs); err != nil {
+			return nil, fmt.Errorf("parse audit flags: %w", err)
+		}
+	}
+
+	if flags.Format != "text" && flags.Format != "json" && flags.Format != "sarif" {
+		return nil, fmt.Errorf("invalid format %q: must be text, json, or sarif", flags.Format)
+	}
+
+	return flags, nil
+}
+
+// MCPAuditFlags holds parsed mcp audit command flags.
+type MCPAuditFlags struct {
+	ConfigPath string
+	All        bool
+	Format     string // "text" or "json"
+}
+
+// ParseMCPAuditFlags parses mcp audit specific flags from args.
+// Usage:
+//   skillvault mcp audit [--all] [--config <path>] [--format text|json]
+func ParseMCPAuditFlags(args []string) (*MCPAuditFlags, error) {
+	flags := &MCPAuditFlags{
+		Format: "text",
+	}
+
+	fs := flag.NewFlagSet("mcp-audit", flag.ContinueOnError)
+	fs.StringVar(&flags.ConfigPath, "config", "", "Path to specific MCP configuration file")
+	fs.BoolVar(&flags.All, "all", false, "Scan all known client MCP configs (Cursor, Claude, Windsurf, OpenCode)")
+	fs.StringVar(&flags.Format, "format", "text", "Output format: text or json")
+	fs.SetOutput(&nullWriter{})
+
+	parseFrom := 2
+	if len(args) > 2 && args[1] == "mcp" && args[2] == "audit" {
+		parseFrom = 3
+	}
+
+	if len(args) > parseFrom {
+		if err := fs.Parse(args[parseFrom:]); err != nil {
+			return nil, fmt.Errorf("parse mcp audit flags: %w", err)
+		}
+	}
+
+	if flags.Format != "text" && flags.Format != "json" {
+		return nil, fmt.Errorf("invalid format %q: must be text or json", flags.Format)
+	}
+
+	return flags, nil
+}
+
+

@@ -644,3 +644,57 @@ skillvault http
 | `--api-key` | ❌ | API key for HTTP Basic authentication |
 
 Endpoints: health, entries CRUD, artifacts, context, projects, sessions, workflows, export/import. See [`docs/quickstart.md`](quickstart.md) or [`docs/architecture.md`](architecture.md) for details.
+
+---
+
+## `audit`
+
+Run static security analysis against active vault entries, markdown skill files, or skill packs (`.svpack`).
+
+```bash
+# Audit all active entries in the vault
+skillvault audit
+
+# Audit a markdown skill file or directory
+skillvault audit my-skill.md
+skillvault audit ./skills/
+
+# Audit a skill pack before importing
+skillvault audit --pack community.svpack
+
+# Export report in SARIF v2.1.0 format for CI/CD pipelines
+skillvault audit --format sarif
+
+# JSON output with strict exit code threshold
+skillvault audit --format json --fail-on critical
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--pack` | ❌ | Path to `.svpack` or JSON export file to audit |
+| `--format` | ❌ | Output format: `text` (default), `json`, or `sarif` |
+| `--fail-on` | ❌ | Severity threshold to return exit code 2: `critical`, `high` (default), `medium` |
+
+---
+
+## `mcp audit`
+
+Scan local agent MCP client configuration files (Cursor, Claude Desktop, Windsurf, OpenCode) for security risks.
+
+```bash
+# Scan all known client configuration files
+skillvault mcp audit --all
+
+# Scan a custom configuration file
+skillvault mcp audit --config ~/.cursor/mcp.json
+
+# Output as JSON
+skillvault mcp audit --all --format json
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--all` | ❌ | Automatically detect and scan all known MCP client config paths |
+| `--config` | ❌ | Path to a specific MCP JSON configuration file |
+| `--format` | ❌ | Output format: `text` (default) or `json` |
+
