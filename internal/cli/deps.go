@@ -32,6 +32,7 @@ type Services struct {
 	sessionSvc      *app.SessionService
 	exportSvc       *app.VaultExportService
 	importSvc       *app.VaultImportService
+	auditSvc        *app.AuditService
 	saveResultSvc   *app.SavePromptResultService
 	compareSvc      *app.VectorService
 	statsSvc        *app.StatsService
@@ -107,6 +108,9 @@ func openVault() *Services {
 	sessionSvc := app.NewSessionService(entrySvc, artifactSvc, projectSvc, store.Entries, store.Artifacts, store.Projects)
 	exportSvc := app.NewVaultExportService(store.ImportExport, store.Artifacts, store.Entries, store.Projects, store.Workflows)
 	importSvc := app.NewVaultImportService(store.ImportExport, store.Entries, store.Projects, store.Artifacts)
+	auditor := security.NewAuditor()
+	importSvc.SetAuditor(auditor)
+	auditSvc := app.NewAuditService(store.Entries, auditor)
 	entryVersionSvc := app.NewEntryVersionService(store.EntryVersions, store.Entries)
 	packExportSvc := app.NewVaultPackExportService(store.ImportExport, store.Entries, store.Projects, store.Artifacts, store.Workflows)
 	statsSvc := app.NewStatsService(store.Entries, store.Artifacts, store.Projects).WithWorkflowRunStore(store.WorkflowRuns)
@@ -154,6 +158,7 @@ func openVault() *Services {
 		sessionSvc:      sessionSvc,
 		exportSvc:       exportSvc,
 		importSvc:       importSvc,
+		auditSvc:        auditSvc,
 		saveResultSvc:   saveResultSvc,
 		compareSvc:      compareSvc,
 		statsSvc:        statsSvc,

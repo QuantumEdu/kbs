@@ -77,5 +77,9 @@ func Run(cmd string, args []string) {
 		runEntryRef(ctx, svc, args)
 	case "http":
 		runHTTPServer(ctx, svc, args)
+	case "audit":
+		runAudit(ctx, svc, args)
+	case "mcp-audit":
+		runMCPAudit(ctx, svc, args)
 	}
 }

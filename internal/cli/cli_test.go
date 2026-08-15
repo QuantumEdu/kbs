@@ -1201,3 +1201,124 @@ func TestParseUpdateFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestParseAuditFlags(t *testing.T) {
+	t.Run("default flags without args", func(t *testing.T) {
+		flags, err := ParseAuditFlags([]string{"skillvault", "audit"})
+		if err != nil {
+			t.Fatalf("ParseAuditFlags failed: %v", err)
+		}
+		if flags.Format != "text" {
+			t.Errorf("Format = %q, want text", flags.Format)
+		}
+		if flags.FailOn != "high" {
+			t.Errorf("FailOn = %q, want high", flags.FailOn)
+		}
+		if flags.Target != "" {
+			t.Errorf("Target = %q, want empty", flags.Target)
+		}
+	})
+
+	t.Run("with target file and json format", func(t *testing.T) {
+		flags, err := ParseAuditFlags([]string{"skillvault", "audit", "my-skill.md", "--format", "json", "--fail-on", "critical"})
+		if err != nil {
+			t.Fatalf("ParseAuditFlags failed: %v", err)
+		}
+		if flags.Target != "my-skill.md" {
+			t.Errorf("Target = %q, want my-skill.md", flags.Target)
+		}
+		if flags.Format != "json" {
+			t.Errorf("Format = %q, want json", flags.Format)
+		}
+		if flags.FailOn != "critical" {
+			t.Errorf("FailOn = %q, want critical", flags.FailOn)
+		}
+	})
+
+	t.Run("with pack flag", func(t *testing.T) {
+		flags, err := ParseAuditFlags([]string{"skillvault", "audit", "--pack", "community.svpack"})
+		if err != nil {
+			t.Fatalf("ParseAuditFlags failed: %v", err)
+		}
+		if flags.PackPath != "community.svpack" {
+			t.Errorf("PackPath = %q, want community.svpack", flags.PackPath)
+		}
+	})
+
+	t.Run("sarif format", func(t *testing.T) {
+		flags, err := ParseAuditFlags([]string{"skillvault", "audit", "--format", "sarif"})
+		if err != nil {
+			t.Fatalf("ParseAuditFlags failed: %v", err)
+		}
+		if flags.Format != "sarif" {
+			t.Errorf("Format = %q, want sarif", flags.Format)
+		}
+	})
+
+	t.Run("invalid format", func(t *testing.T) {
+		_, err := ParseAuditFlags([]string{"skillvault", "audit", "--format", "xml"})
+		if err == nil {
+			t.Fatal("expected error for invalid format, got nil")
+		}
+	})
+}
+
+func TestParseImportFlagsWithStrictAudit(t *testing.T) {
+	flags, err := ParseImportFlags([]string{"skillvault", "import", "pack.svpack", "--strict-audit"})
+	if err != nil {
+		t.Fatalf("ParseImportFlags failed: %v", err)
+	}
+	if !flags.StrictAudit {
+		t.Error("expected StrictAudit=true")
+	}
+}
+
+func TestParseCommandMCPAudit(t *testing.T) {
+	cmd, err := ParseCommand([]string{"skillvault", "mcp", "audit"})
+	if err != nil {
+		t.Fatalf("ParseCommand failed: %v", err)
+	}
+	if cmd != "mcp-audit" {
+		t.Errorf("cmd = %q, want mcp-audit", cmd)
+	}
+}
+
+func TestParseMCPAuditFlags(t *testing.T) {
+	t.Run("default flags", func(t *testing.T) {
+		flags, err := ParseMCPAuditFlags([]string{"skillvault", "mcp", "audit"})
+		if err != nil {
+			t.Fatalf("ParseMCPAuditFlags failed: %v", err)
+		}
+		if flags.Format != "text" {
+			t.Errorf("Format = %q, want text", flags.Format)
+		}
+		if flags.All {
+			t.Error("expected All=false")
+		}
+	})
+
+	t.Run("with custom config and json", func(t *testing.T) {
+		flags, err := ParseMCPAuditFlags([]string{"skillvault", "mcp", "audit", "--config", "/tmp/mcp.json", "--format", "json"})
+		if err != nil {
+			t.Fatalf("ParseMCPAuditFlags failed: %v", err)
+		}
+		if flags.ConfigPath != "/tmp/mcp.json" {
+			t.Errorf("ConfigPath = %q, want /tmp/mcp.json", flags.ConfigPath)
+		}
+		if flags.Format != "json" {
+			t.Errorf("Format = %q, want json", flags.Format)
+		}
+	})
+
+	t.Run("with all flag", func(t *testing.T) {
+		flags, err := ParseMCPAuditFlags([]string{"skillvault", "mcp", "audit", "--all"})
+		if err != nil {
+			t.Fatalf("ParseMCPAuditFlags failed: %v", err)
+		}
+		if !flags.All {
+			t.Error("expected All=true")
+		}
+	})
+}
+
+

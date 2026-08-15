@@ -11,6 +11,7 @@ import (
 
 	"github.com/quantum-6/skillvault/internal/db"
 	"github.com/quantum-6/skillvault/internal/domain"
+	"github.com/quantum-6/skillvault/internal/security"
 )
 
 type VaultExportService struct {
@@ -26,6 +27,7 @@ type VaultImportService struct {
 	entryStore    db.EntryStore
 	projectStore  db.ProjectStore
 	artifactStore db.ArtifactStore
+	auditor       *security.Auditor
 }
 
 type ExportVaultInput struct {
@@ -60,7 +62,12 @@ func NewVaultImportService(
 		entryStore:    entryStore,
 		projectStore:  projectStore,
 		artifactStore: artifactStore,
+		auditor:       security.NewAuditor(),
 	}
+}
+
+func (s *VaultImportService) SetAuditor(auditor *security.Auditor) {
+	s.auditor = auditor
 }
 
 func (s *VaultExportService) Export(ctx context.Context, path string) error {
@@ -94,18 +101,33 @@ func (s *VaultExportService) ExportVault(ctx context.Context, input ExportVaultI
 }
 
 func (s *VaultImportService) Import(ctx context.Context, path string) error {
-	return s.ImportWithPrefix(ctx, path, "")
+	return s.ImportWithPrefixAndAudit(ctx, path, "", false)
 }
 
-// ImportWithPrefix reads a JSON file (bare VaultExport or VaultPackExport)
-// and imports its contents. When the file contains a "pack" top-level key,
-// the entry is treated as a pack export; otherwise it is treated as a bare
-// export. If a non-empty prefix is provided, all entity IDs in the imported
-// data are prefixed (e.g. "ns/my-entry-id").
 func (s *VaultImportService) ImportWithPrefix(ctx context.Context, path string, prefix string) error {
+	return s.ImportWithPrefixAndAudit(ctx, path, prefix, false)
+}
+
+// ImportWithPrefixAndAudit reads a JSON file (bare VaultExport or VaultPackExport)
+// and imports its contents. If strictAudit is true, the payload is audited first
+// and import is rejected if critical or high severity security findings exist.
+func (s *VaultImportService) ImportWithPrefixAndAudit(ctx context.Context, path string, prefix string, strictAudit bool) error {
 	jsonBytes, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("read import file: %w", err)
+	}
+
+	if strictAudit {
+		if s.auditor == nil {
+			s.auditor = security.NewAuditor()
+		}
+		report, err := s.auditor.AuditPack(jsonBytes)
+		if err != nil {
+			return fmt.Errorf("security audit pre-check error: %w", err)
+		}
+		if !report.Passed {
+			return fmt.Errorf("security audit failed (%d critical, %d high findings): import blocked by --strict-audit", report.CriticalCount, report.HighCount)
+		}
 	}
 
 	// Detect pack format: try unmarshalling as pack first.
