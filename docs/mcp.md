@@ -14,7 +14,15 @@ go build -o ~/tools/skillvault ./cmd/skillvault
 
 ### 2. Configuration
 
-Add to your `opencode.json` (or `claude_desktop_config.json`, depending on the client):
+Fast path:
+
+```bash
+skillvault mcp config
+```
+
+That command prints the snippet to paste under `mcpServers` in `opencode.json` or `claude_desktop_config.json`.
+
+Equivalent manual config:
 
 ```json
 {

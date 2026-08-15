@@ -3,13 +3,61 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/quantum-6/skillvault/internal/agenttelemetry"
 )
+
+func testPluginSocketPath(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	if runtime.GOOS == "darwin" {
+		shortDir, err := os.MkdirTemp("/tmp", "agenttelemetry-")
+		if err != nil {
+			t.Fatalf("MkdirTemp: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = os.RemoveAll(shortDir)
+		})
+		dir = shortDir
+	}
+
+	return filepath.Join(dir, "test.sock")
+}
+
+func waitForCollectorReady(t *testing.T, socketPath string, errCh <-chan error) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn, err := net.DialTimeout("unix", socketPath, 25*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return
+		}
+
+		select {
+		case listenErr := <-errCh:
+			if listenErr == nil {
+				t.Fatal("collector listener exited before becoming ready")
+			}
+			t.Fatalf("collector listen: %v", listenErr)
+		default:
+		}
+
+		if time.Now().After(deadline) {
+			t.Fatalf("collector socket %q was not ready before timeout: %v", socketPath, err)
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
 // startTempDaemon creates a real Collector + Store on a temp socket and
 // returns the socket path, store, and cancel function.
@@ -22,26 +70,34 @@ func startTempDaemon(t *testing.T) (string, *agenttelemetry.Store, context.Cance
 		t.Fatalf("OpenStore: %v", err)
 	}
 
-	socketPath := filepath.Join(t.TempDir(), "test.sock")
+	socketPath := testPluginSocketPath(t)
 	collector := agenttelemetry.NewCollector(store, socketPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
 
 	// Remove stale socket if exists.
 	_ = os.Remove(socketPath)
 
 	go func() {
-		_ = collector.Listen(ctx)
+		errCh <- collector.Listen(ctx)
 	}()
 
-	// Wait for socket to be ready.
-	time.Sleep(100 * time.Millisecond)
+	waitForCollectorReady(t, socketPath, errCh)
 
 	t.Cleanup(func() {
 		cancel()
-		collector.Shutdown(context.Background())
-		// Give the listener goroutine time to exit.
-		time.Sleep(50 * time.Millisecond)
+		if err := collector.Shutdown(context.Background()); err != nil {
+			t.Errorf("Shutdown: %v", err)
+		}
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Errorf("collector listen: %v", err)
+			}
+		case <-time.After(time.Second):
+			t.Error("collector listener did not exit")
+		}
 		store.Close()
 	})
 

@@ -49,6 +49,7 @@ func TestValidateEntryType(t *testing.T) {
 		{"valid decision", "decision", true},
 		{"valid artifact_summary", "artifact_summary", true},
 		{"valid handoff", "handoff", true},
+		{"valid pending", "pending", true},
 		{"valid routing", "routing", true},
 		{"invalid empty", "", false},
 		{"invalid random", "unknown", false},
@@ -170,6 +171,9 @@ func TestValidateEntryTypeErrorMessage(t *testing.T) {
 	}
 	if !strings.Contains(msg, "routing") {
 		t.Errorf("error message missing 'routing': %s", msg)
+	}
+	if !strings.Contains(msg, "pending") {
+		t.Errorf("error message missing 'pending': %s", msg)
 	}
 }
 

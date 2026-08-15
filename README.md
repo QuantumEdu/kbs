@@ -2,7 +2,7 @@
 
 **Local-first knowledge operating system for developers and AI agents.**
 
-Store, search, and retrieve prompts, skills, workflows, decisions, project memory, session summaries, and long AI outputs — all from one portable Go binary.
+Store, search, and retrieve prompts, skills, workflows, decisions, project memory, session summaries, and long AI outputs from the SkillVault CLI in the broader kbs local-first tool suite.
 
 ```
    _____ _ _    _  __     __          _          _
@@ -120,6 +120,9 @@ That's it. One binary. No daemon, no database server, no frameworks.
 ## Quickstart
 
 ```bash
+# Check your local setup first
+skillvault doctor
+
 # Create a project
 skillvault add-project --name "MyApp" --description "My application"
 
@@ -133,10 +136,19 @@ skillvault add-entry \
   --tags "architecture,review"
 
 # Search your vault
-skillvault search "architecture"
+skillvault find "architecture"
 
 # Filter by LifeOS-style purpose
 skillvault search "architecture" --purpose KNOWLEDGE
+
+# Capture a per-project pending item without breaking flow
+skillvault pending add --project myapp "Update presentation"
+
+# Review or resolve it later
+skillvault pending review --project myapp
+skillvault pending list --project myapp --query presentation
+skillvault pending show update-presentation
+skillvault pending done update-presentation
 
 # Save a long AI output as an artifact (stored on disk, indexed in DB)
 skillvault save-artifact \
@@ -147,7 +159,14 @@ skillvault save-artifact \
   --tags "security,audit"
 
 # Get compact context for your agent
-skillvault get-context --mode planning --project myapp --max-chars 5000
+skillvault context --mode planning --project myapp --max-chars 5000
+
+# Optional: build and open the lightweight TUI dashboard
+make build-tui
+./skillvault-tui tui
+
+# Write a dated backup snapshot
+skillvault backup
 
 # Wrap up a session with decisions
 skillvault session-wrap \
@@ -233,14 +252,17 @@ cmd/skillvault/
 | Command | Description | Example |
 |---------|-------------|---------|
 | `init` | Create vault directories + DB | `skillvault init` |
+| `doctor` | Check whether the local vault is ready | `skillvault doctor` |
 | `add-entry` | Save a reusable entry | `skillvault add-entry --title "..." --type skill --summary "..."` |
-| `search` | FTS5 search with filters | `skillvault search "auth" --type skill --project myapp` |
-| `get` | Get entry by ID or slug | `skillvault get clean-architecture-review` |
+| `search` / `find` | FTS5 search with filters | `skillvault find "auth" --type skill --project myapp` |
+| `get` / `read` | Get entry by ID or slug | `skillvault read clean-architecture-review` |
 | `save-artifact` | Save a long file-backed artifact | `skillvault save-artifact --title "..." --type pdf_analysis --file report.md` |
 | `save-result` | Save an AI result as a vault entry | `skillvault save-result --name "result" --content "..."` |
-| `get-context` | Compile Qu@ntum context pack | `skillvault get-context --mode planning --project myapp` |
+| `mcp config` | Print a ready-to-paste MCP client snippet | `skillvault mcp config` |
+| `get-context` / `context` | Compile Qu@ntum context pack | `skillvault context --mode planning --project myapp` |
 | `add-project` | Create a project | `skillvault add-project --name "MyApp" --description "..."` |
-| `list-projects` | List all projects | `skillvault list-projects` |
+| `list-projects` / `projects` | List all projects | `skillvault projects` |
+| `pending` / `todo` | Capture, list, and resolve per-project pending items | `skillvault pending add --project myapp "Update presentation"` |
 | `archive` | Archive an entry | `skillvault archive clean-architecture-review` |
 | `add-workflow` | Create a workflow (JSON file) | `skillvault add-workflow workflow.json` |
 | `import-workflow` | Import workflow-builder YAML | `skillvault import-workflow --file workflow.yaml --project myapp` |
@@ -254,6 +276,7 @@ cmd/skillvault/
 | `entry history` | Show version history for an entry | `skillvault entry history clean-architecture-review` |
 | `entry restore` | Restore an entry to a previous version | `skillvault entry restore clean-architecture-review --version 2` |
 | `memory index/reindex/list-external` | Index pi-memory.md files | `skillvault memory index --path ~/memory --project myapp` |
+| `backup` | Write a dated backup under `~/.skillvault/exports/` | `skillvault backup` |
 | `export` | Export vault to JSON or skill pack (`.svpack`) | `skillvault export vault.json [--pack --author ...]` |
 | `import` | Import vault from JSON or skill pack | `skillvault import vault.json [--pack --prefix ns/]` |
 | `version` | Show vault version | `skillvault version` |

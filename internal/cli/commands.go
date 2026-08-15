@@ -1,17 +1,22 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 )
 
+const purposeValuesHelp = "WORK, KNOWLEDGE, LEARNING, RELATIONSHIP, STATE, OBSERVABILITY"
+
 // ParseCommand determines the subcommand from command-line arguments.
 func ParseCommand(args []string) (string, error) {
 	if len(args) < 2 {
 		return "", fmt.Errorf("usage: skillvault <command> [args...]")
 	}
+
+	args = NormalizeArgs(args)
 
 	sub := args[1]
 	switch sub {
@@ -22,7 +27,44 @@ func ParseCommand(args []string) (string, error) {
 		return sub, nil
 	case "mcp-audit":
 		return sub, nil
-	case "graph", "init", "version", "http", "list-projects", "export", "tui", "stats", "audit":
+	case "init", "version", "http", "list-projects", "export", "backup", "doctor", "tui", "stats", "mcp-config", "audit", "graph":
+		return sub, nil
+	case "memory-index", "memory-reindex", "memory-list-external", "entry-ref", "sync-push", "sync-pull":
+		return sub, nil
+	case "pending":
+		if len(args) < 3 {
+			return "", fmt.Errorf("pending requires a subcommand (add, list, review, show, done)")
+		}
+		sub2 := args[2]
+		switch sub2 {
+		case "add":
+			return "pending-add", nil
+		case "list", "ls":
+			return "pending-list", nil
+		case "review":
+			return "pending-review", nil
+		case "show", "details", "view", "open":
+			if len(args) < 4 {
+				return "", fmt.Errorf("pending show requires an entry ID")
+			}
+			return "pending-show", nil
+		case "done", "resolve", "archive":
+			if len(args) < 4 {
+				return "", fmt.Errorf("pending done requires an entry ID")
+			}
+			return "pending-done", nil
+		default:
+			return "", fmt.Errorf("unknown pending subcommand: %s", sub2)
+		}
+	case "entry-history":
+		if len(args) < 3 {
+			return "", fmt.Errorf("entry history requires an entry ID")
+		}
+		return sub, nil
+	case "entry-restore":
+		if len(args) < 3 {
+			return "", fmt.Errorf("entry restore requires an entry ID")
+		}
 		return sub, nil
 	case "add-entry", "search", "save-artifact", "get-context", "add-project", "session-wrap":
 		return sub, nil
@@ -127,7 +169,7 @@ func ParseCommand(args []string) (string, error) {
 			return "", fmt.Errorf("unknown sync subcommand: %s", sub2)
 		}
 	default:
-		return "", fmt.Errorf("unknown command: %s", sub)
+		return "", errors.New(UnknownCommandMessage(sub))
 	}
 }
 
@@ -155,7 +197,7 @@ func ParseAddEntryFlags(args []string) (*AddEntryFlags, error) {
 	fs.StringVar(&flags.Project, "project", "", "Project slug or ID")
 	fs.StringVar(&flags.Tags, "tags", "", "Comma-separated tags")
 	fs.StringVar(&flags.Status, "status", "", "Entry status")
-	fs.StringVar(&flags.Purpose, "purpose", "", "Entry purpose (WORK, KNOWLEDGE, LEARNING, RELATIONSHIP, STATE)")
+	fs.StringVar(&flags.Purpose, "purpose", "", "Entry purpose ("+purposeValuesHelp+")")
 
 	fs.SetOutput(&nullWriter{})
 
@@ -202,7 +244,7 @@ func ParseSearchFlags(args []string) (*SearchFlags, error) {
 	fs.BoolVar(&flags.IncludeArchived, "include-archived", false, "Include archived entries")
 	fs.IntVar(&flags.Limit, "limit", 20, "Max results")
 	fs.BoolVar(&flags.Vector, "vector", false, "Use vector/cosine similarity search")
-	fs.StringVar(&flags.Purpose, "purpose", "", "Filter by purpose (WORK, KNOWLEDGE, LEARNING, RELATIONSHIP, STATE)")
+	fs.StringVar(&flags.Purpose, "purpose", "", "Filter by purpose ("+purposeValuesHelp+")")
 
 	fs.SetOutput(&nullWriter{})
 
@@ -218,6 +260,95 @@ func ParseSearchFlags(args []string) (*SearchFlags, error) {
 // GetEntryFlags holds the entry identifier for get/archive commands.
 type GetEntryFlags struct {
 	ID string
+}
+
+type PendingAddFlags struct {
+	Project string
+	Title   string
+	Note    string
+	Tags    string
+}
+
+func ParsePendingAddFlags(args []string) (*PendingAddFlags, error) {
+	flags := &PendingAddFlags{}
+
+	fs := flag.NewFlagSet("pending add", flag.ContinueOnError)
+	fs.StringVar(&flags.Project, "project", "", "Project slug or ID (required)")
+	fs.StringVar(&flags.Title, "title", "", "Pending item title")
+	fs.StringVar(&flags.Note, "note", "", "Optional detail or next-step note")
+	fs.StringVar(&flags.Tags, "tags", "", "Comma-separated tags")
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 3 {
+		if err := fs.Parse(args[3:]); err != nil {
+			return nil, fmt.Errorf("parse pending add flags: %w", err)
+		}
+	}
+
+	if flags.Project == "" {
+		return nil, fmt.Errorf("--project is required")
+	}
+	if flags.Title == "" {
+		flags.Title = strings.TrimSpace(strings.Join(fs.Args(), " "))
+	}
+	if flags.Title == "" {
+		return nil, fmt.Errorf("pending title is required")
+	}
+
+	return flags, nil
+}
+
+type PendingListFlags struct {
+	Project         string
+	IncludeArchived bool
+	Query           string
+	Tag             string
+	Limit           int
+}
+
+func ParsePendingListFlags(args []string) (*PendingListFlags, error) {
+	flags := &PendingListFlags{}
+
+	fs := flag.NewFlagSet("pending list", flag.ContinueOnError)
+	fs.StringVar(&flags.Project, "project", "", "Project slug or ID (required)")
+	fs.BoolVar(&flags.IncludeArchived, "include-archived", false, "Include resolved pending items")
+	fs.StringVar(&flags.Query, "query", "", "Filter by title, ID, note, or tag text")
+	fs.StringVar(&flags.Tag, "tag", "", "Filter by exact tag")
+	fs.IntVar(&flags.Limit, "limit", 0, "Max items to show (0 = all)")
+	fs.SetOutput(&nullWriter{})
+
+	if len(args) > 3 {
+		if err := fs.Parse(args[3:]); err != nil {
+			return nil, fmt.Errorf("parse pending list flags: %w", err)
+		}
+	}
+	if flags.Project == "" {
+		return nil, fmt.Errorf("--project is required")
+	}
+
+	return flags, nil
+}
+
+type PendingShowFlags struct {
+	ID string
+}
+
+func ParsePendingShowFlags(args []string) (*PendingShowFlags, error) {
+	if len(args) < 4 {
+		return nil, fmt.Errorf("pending show requires an entry ID")
+	}
+	return &PendingShowFlags{ID: args[3]}, nil
+}
+
+type PendingDoneFlags struct {
+	ID string
+}
+
+func ParsePendingDoneFlags(args []string) (*PendingDoneFlags, error) {
+	if len(args) < 4 {
+		return nil, fmt.Errorf("pending entry ID is required")
+	}
+	return &PendingDoneFlags{ID: args[3]}, nil
 }
 
 // ParseGetEntryFlags parses the entry ID from positional args.

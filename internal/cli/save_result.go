@@ -33,6 +33,7 @@ func ParseSaveResultFlags(args []string) (*SaveResultFlags, error) {
 	fs := flag.NewFlagSet("save-result", flag.ContinueOnError)
 	fs.StringVar(&flags.Name, "name", "", "Result name (required)")
 	fs.StringVar(&flags.Content, "content", "", "Result content (required)")
+	fs.StringVar(&flags.Content, "body", "", "Alias for --content")
 	fs.StringVar(&flags.Type, "type", "note", "Entry type (skill|agent|workflow|prompt|context|note)")
 	fs.StringVar(&flags.Category, "category", "", "Classification label")
 	var tagsRaw string
@@ -54,7 +55,7 @@ func ParseSaveResultFlags(args []string) (*SaveResultFlags, error) {
 		return nil, fmt.Errorf("--name is required")
 	}
 	if flags.Content == "" {
-		return nil, fmt.Errorf("--content is required")
+		return nil, fmt.Errorf("--content or --body is required")
 	}
 
 	// Parse comma-separated tags (raw — normalization happens in service layer)

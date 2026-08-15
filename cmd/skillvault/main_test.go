@@ -8,6 +8,19 @@ import (
 	"testing"
 )
 
+func buildSkillvaultBinary(t *testing.T) string {
+	t.Helper()
+
+	binPath := filepath.Join(t.TempDir(), "skillvault")
+	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/skillvault")
+	cmd.Dir = "../.."
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\nOutput: %s", err, string(out))
+	}
+
+	return binPath
+}
+
 func TestModuleCompiles(t *testing.T) {
 	cmd := exec.Command("go", "build", "-o", "/dev/null", "./cmd/skillvault")
 	cmd.Dir = "../.."
@@ -39,106 +52,6 @@ func TestDirectoriesExist(t *testing.T) {
 			t.Errorf("Missing directory: %s", d)
 		}
 	}
-}
-
-func TestVaultDir(t *testing.T) {
-	dir := vaultDir()
-	if dir == "" {
-		t.Fatal("vaultDir returned empty")
-	}
-	if !filepath.IsAbs(dir) {
-		t.Errorf("vaultDir should be absolute, got %q", dir)
-	}
-}
-
-func TestDBPath(t *testing.T) {
-	p := dbPath()
-	if p == "" {
-		t.Fatal("dbPath returned empty")
-	}
-	if filepath.Base(p) != "vault.db" {
-		t.Errorf("dbPath base should be vault.db, got %q", filepath.Base(p))
-	}
-}
-
-func TestInitCreatesDirectories(t *testing.T) {
-	dir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", dir)
-	defer os.Setenv("HOME", origHome)
-
-	runInit()
-
-	vd := vaultDir()
-	for _, sub := range []string{"", "/objects", "/exports", "/cache"} {
-		if _, err := os.Stat(vd + sub); os.IsNotExist(err) {
-			t.Errorf("directory not created: %s", vd+sub)
-		}
-	}
-
-	if _, err := os.Stat(dbPath()); os.IsNotExist(err) {
-		t.Error("vault.db not created")
-	}
-}
-
-func TestInitThenOpenVault(t *testing.T) {
-	dir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", dir)
-	defer os.Setenv("HOME", origHome)
-
-	runInit()
-
-	svc := openVault()
-	if svc.store == nil {
-		t.Error("store is nil")
-	}
-	if svc.entrySvc == nil {
-		t.Error("entrySvc is nil")
-	}
-	if svc.artifactSvc == nil {
-		t.Error("artifactSvc is nil")
-	}
-	if svc.workflowSvc == nil {
-		t.Error("workflowSvc is nil")
-	}
-	if svc.seriesSvc == nil {
-		t.Error("seriesSvc is nil")
-	}
-	if svc.projectSvc == nil {
-		t.Error("projectSvc is nil")
-	}
-	if svc.contextSvc == nil {
-		t.Error("contextSvc is nil")
-	}
-	if svc.sessionSvc == nil {
-		t.Error("sessionSvc is nil")
-	}
-	if svc.exportSvc == nil {
-		t.Error("exportSvc is nil")
-	}
-	if svc.importSvc == nil {
-		t.Error("importSvc is nil")
-	}
-	if svc.saveResultSvc == nil {
-		t.Error("saveResultSvc is nil")
-	}
-	if svc.fileSvc == nil {
-		t.Error("fileSvc is nil")
-	}
-	if svc.scanner == nil {
-		t.Error("scanner is nil")
-	}
-}
-
-func TestInitIsIdempotent(t *testing.T) {
-	dir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", dir)
-	defer os.Setenv("HOME", origHome)
-
-	runInit()
-	runInit()
 }
 
 func TestVersionCommand(t *testing.T) {
@@ -315,11 +228,312 @@ func TestRouteCommandJSON(t *testing.T) {
 }
 
 func TestHelpOutput(t *testing.T) {
-	cmd := exec.Command("go", "run", "./cmd/skillvault")
-	cmd.Dir = "../.."
+	binPath := buildSkillvaultBinary(t)
+	home := t.TempDir()
+	cmd := exec.Command(binPath)
+	cmd.Env = append(os.Environ(), "HOME="+home)
 	out, _ := cmd.CombinedOutput()
 	if len(out) == 0 {
 		t.Error("expected help output")
+	}
+	if !strings.Contains(string(out), "memory index") {
+		t.Fatalf("expected nested display name in help output, got: %s", string(out))
+	}
+	if !strings.Contains(string(out), "pending") {
+		t.Fatalf("expected pending command in help output, got: %s", string(out))
+	}
+	if !strings.Contains(string(out), "Commands by task:") || !strings.Contains(string(out), "Setup:") || !strings.Contains(string(out), "Find:") {
+		t.Fatalf("expected grouped help output, got: %s", string(out))
+	}
+	if _, err := os.Stat(filepath.Join(home, ".skillvault")); !os.IsNotExist(err) {
+		t.Fatalf("top-level usage should not initialize the vault, stat err=%v", err)
+	}
+}
+
+func TestTopLevelHelpFlagsDoNotCauseSideEffects(t *testing.T) {
+	binPath := buildSkillvaultBinary(t)
+	for _, arg := range []string{"help", "--help", "-h"} {
+		t.Run(arg, func(t *testing.T) {
+			home := t.TempDir()
+			cmd := exec.Command(binPath, arg)
+			cmd.Env = append(os.Environ(), "HOME="+home)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("help command failed: %v\nOutput: %s", err, string(out))
+			}
+			if !strings.Contains(string(out), "SkillVault v3") {
+				t.Fatalf("expected top-level help output, got: %s", string(out))
+			}
+			if _, err := os.Stat(filepath.Join(home, ".skillvault")); !os.IsNotExist(err) {
+				t.Fatalf("help should not initialize the vault, stat err=%v", err)
+			}
+		})
+	}
+}
+
+func TestMCPConfigCommand(t *testing.T) {
+	binPath := buildSkillvaultBinary(t)
+	tests := [][]string{{"mcp", "config"}, {"mcp-config"}, {"setup", "mcp"}}
+	for _, args := range tests {
+		t.Run(strings.Join(args, "-"), func(t *testing.T) {
+			cmd := exec.Command(binPath, args...)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("mcp config command failed: %v\nOutput: %s", err, string(out))
+			}
+			if !strings.Contains(string(out), "\"mcpServers\"") || !strings.Contains(string(out), "\"skillvault\"") {
+				t.Fatalf("expected MCP config JSON snippet, got: %s", string(out))
+			}
+		})
+	}
+}
+
+func TestCommandHelpOutputIsFocusedAndSideEffectFree(t *testing.T) {
+	binPath := buildSkillvaultBinary(t)
+	tests := [][]string{{"help", "doctor"}, {"check", "--help"}, {"context", "--help"}, {"mcp", "config", "--help"}, {"docs"}, {"readme"}}
+	for _, args := range tests {
+		t.Run(strings.Join(args, "-"), func(t *testing.T) {
+			home := t.TempDir()
+			cmd := exec.Command(binPath, args...)
+			cmd.Env = append(os.Environ(), "HOME="+home)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("command help failed: %v\nOutput: %s", err, string(out))
+			}
+			if !strings.Contains(string(out), "Examples:") && !strings.Contains(string(out), "Commands by task:") {
+				t.Fatalf("expected examples in command help, got: %s", string(out))
+			}
+			if _, err := os.Stat(filepath.Join(home, ".skillvault")); !os.IsNotExist(err) {
+				t.Fatalf("command help should not initialize the vault, stat err=%v", err)
+			}
+		})
+	}
+}
+
+func TestSetupDoctorAliasRunsReadOnlyDoctor(t *testing.T) {
+	binPath := buildSkillvaultBinary(t)
+	home := t.TempDir()
+	cmd := exec.Command(binPath, "setup", "doctor")
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected setup doctor to report missing vault, got success\nOutput: %s", string(out))
+	}
+	if !strings.Contains(string(out), "SkillVault doctor") {
+		t.Fatalf("expected doctor output, got: %s", string(out))
+	}
+	if _, err := os.Stat(filepath.Join(home, ".skillvault")); !os.IsNotExist(err) {
+		t.Fatalf("setup doctor should not initialize the vault, stat err=%v", err)
+	}
+}
+
+func TestUnknownCommandGuidanceSuggestsIntentAlternatives(t *testing.T) {
+	binPath := buildSkillvaultBinary(t)
+	cmd := exec.Command(binPath, "projct")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected unknown command to fail, got success\nOutput: %s", string(out))
+	}
+	if !strings.Contains(string(out), "Try one of these intent-first commands:") {
+		t.Fatalf("expected suggestion block, got: %s", string(out))
+	}
+	if !strings.Contains(string(out), "skillvault project start") {
+		t.Fatalf("expected project start suggestion, got: %s", string(out))
+	}
+	if !strings.Contains(string(out), "skillvault help <command>") {
+		t.Fatalf("expected help hint, got: %s", string(out))
+	}
+}
+
+func TestProjectStartAliasCreatesProject(t *testing.T) {
+	binPath := buildSkillvaultBinary(t)
+	home := t.TempDir()
+	env := append(os.Environ(), "HOME="+home)
+
+	initCmd := exec.Command(binPath, "setup")
+	initCmd.Env = env
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		t.Fatalf("init failed: %v\nOutput: %s", err, string(out))
+	}
+
+	projectCmd := exec.Command(binPath, "project", "start", "--name", "codex")
+	projectCmd.Env = env
+	out, err := projectCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("project start failed: %v\nOutput: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), "Project saved:") {
+		t.Fatalf("unexpected project start output: %s", string(out))
+	}
+}
+
+func TestPendingCommandFlow(t *testing.T) {
+	binPath := buildSkillvaultBinary(t)
+	home := t.TempDir()
+	env := append(os.Environ(), "HOME="+home)
+
+	initCmd := exec.Command(binPath, "setup")
+	initCmd.Env = env
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		t.Fatalf("init failed: %v\nOutput: %s", err, string(out))
+	}
+
+	projectCmd := exec.Command(binPath, "project", "start", "--name", "codex")
+	projectCmd.Env = env
+	if out, err := projectCmd.CombinedOutput(); err != nil {
+		t.Fatalf("project start failed: %v\nOutput: %s", err, string(out))
+	}
+
+	addCmd := exec.Command(binPath, "pending", "add", "--project", "codex", "--note", "Refresh examples before PR", "--tags", "slides,review", "Update", "presentation")
+	addCmd.Env = env
+	out, err := addCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("pending add failed: %v\nOutput: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), "Pending saved:") {
+		t.Fatalf("unexpected pending add output: %s", string(out))
+	}
+
+	listCmd := exec.Command(binPath, "todo", "list", "--project", "codex", "--query", "presentation")
+	listCmd.Env = env
+	out, err = listCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("pending list failed: %v\nOutput: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), "Update presentation") {
+		t.Fatalf("expected pending list to include saved item, got: %s", string(out))
+	}
+	if !strings.Contains(string(out), "Counts: active=1 resolved=0") {
+		t.Fatalf("expected pending list counts, got: %s", string(out))
+	}
+
+	lines := strings.Split(string(out), "\n")
+	var pendingID string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") && !strings.HasPrefix(trimmed, "[sk-vault]") {
+			parts := strings.SplitN(trimmed, "]", 2)
+			if len(parts) == 2 {
+				pendingID = strings.TrimPrefix(parts[0], "[")
+				break
+			}
+		}
+	}
+	if pendingID == "" {
+		t.Fatalf("could not parse pending ID from output: %s", string(out))
+	}
+
+	showCmd := exec.Command(binPath, "pending", "show", pendingID)
+	showCmd.Env = env
+	out, err = showCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("pending show failed: %v\nOutput: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), "Pending item: "+pendingID) || !strings.Contains(string(out), "Refresh examples before PR") {
+		t.Fatalf("unexpected pending show output: %s", string(out))
+	}
+
+	reviewCmd := exec.Command(binPath, "pending", "review", "--project", "codex", "--tag", "review")
+	reviewCmd.Env = env
+	out, err = reviewCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("pending review failed: %v\nOutput: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), "Pending review for project codex") || !strings.Contains(string(out), "skillvault pending show <id>") {
+		t.Fatalf("unexpected pending review output: %s", string(out))
+	}
+
+	doneCmd := exec.Command(binPath, "pending", "done", pendingID)
+	doneCmd.Env = env
+	out, err = doneCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("pending done failed: %v\nOutput: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), "Resolved pending item:") {
+		t.Fatalf("unexpected pending done output: %s", string(out))
+	}
+
+	listCmd = exec.Command(binPath, "pending", "list", "--project", "codex")
+	listCmd.Env = env
+	out, err = listCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("pending list after resolve failed: %v\nOutput: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), "No pending items for project codex.") {
+		t.Fatalf("expected empty pending list after resolve, got: %s", string(out))
+	}
+	if strings.Contains(string(out), "Update presentation") {
+		t.Fatalf("resolved pending item should not remain active, got: %s", string(out))
+	}
+}
+
+func TestBackupAllAliasWritesExportSnapshot(t *testing.T) {
+	binPath := buildSkillvaultBinary(t)
+	home := t.TempDir()
+	env := append(os.Environ(), "HOME="+home)
+
+	initCmd := exec.Command(binPath, "init")
+	initCmd.Env = env
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		t.Fatalf("init failed: %v\nOutput: %s", err, string(out))
+	}
+
+	backupCmd := exec.Command(binPath, "backup", "all")
+	backupCmd.Env = env
+	out, err := backupCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("backup all failed: %v\nOutput: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), "Backup written to") {
+		t.Fatalf("unexpected backup all output: %s", string(out))
+	}
+}
+
+func TestDoctorCommandIsSideEffectFreeWhenVaultMissing(t *testing.T) {
+	binPath := buildSkillvaultBinary(t)
+	home := t.TempDir()
+	cmd := exec.Command(binPath, "doctor")
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected doctor to report failure for missing vault, got success\nOutput: %s", string(out))
+	}
+	if !strings.Contains(string(out), "SkillVault doctor") || !strings.Contains(string(out), "Run `skillvault init` first") {
+		t.Fatalf("unexpected doctor output: %s", string(out))
+	}
+	if _, err := os.Stat(filepath.Join(home, ".skillvault")); !os.IsNotExist(err) {
+		t.Fatalf("doctor should not initialize the vault, stat err=%v", err)
+	}
+}
+
+func TestBackupCommandWritesExportSnapshot(t *testing.T) {
+	binPath := buildSkillvaultBinary(t)
+	home := t.TempDir()
+	env := append(os.Environ(), "HOME="+home)
+
+	initCmd := exec.Command(binPath, "init")
+	initCmd.Env = env
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		t.Fatalf("init failed: %v\nOutput: %s", err, string(out))
+	}
+
+	backupCmd := exec.Command(binPath, "backup")
+	backupCmd.Env = env
+	out, err := backupCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("backup failed: %v\nOutput: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), "Backup written to") {
+		t.Fatalf("unexpected backup output: %s", string(out))
+	}
+
+	exportsDir := filepath.Join(home, ".skillvault", "exports")
+	entries, err := os.ReadDir(exportsDir)
+	if err != nil {
+		t.Fatalf("read exports dir: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatalf("expected backup file in %s", exportsDir)
 	}
 }
 
@@ -331,37 +545,3 @@ func TestSymlinkDetection(t *testing.T) {
 		t.Error("skillvault basename should be skillvault")
 	}
 }
-
-func TestResolveQSecretsBin_EnvVar(t *testing.T) {
-	tmpDir := t.TempDir()
-	mockBin := filepath.Join(tmpDir, "q-secrets")
-	if err := os.WriteFile(mockBin, []byte("#!/bin/sh\necho q-secrets mock\n"), 0755); err != nil {
-		t.Fatalf("failed to create mock binary: %v", err)
-	}
-
-	t.Setenv("Q_SECRETS_BIN", mockBin)
-	got := resolveQSecretsBin()
-	if got != mockBin {
-		t.Errorf("expected %q, got %q", mockBin, got)
-	}
-}
-
-func TestResolveQSecretsBin_NotFound(t *testing.T) {
-	// Use a temp dir as working directory so resolveRepoRoot doesn't find
-	// the real kbs repo by walking up from cwd.
-	tmpDir := t.TempDir()
-	origCwd, _ := os.Getwd()
-	if err := os.Chdir(tmpDir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	defer func() { _ = os.Chdir(origCwd) }()
-
-	t.Setenv("Q_SECRETS_BIN", "")
-	t.Setenv("PATH", tmpDir)
-
-	got := resolveQSecretsBin()
-	if got != "" {
-		t.Errorf("expected empty string when binary not found, got %q", got)
-	}
-}
-

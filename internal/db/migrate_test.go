@@ -285,8 +285,8 @@ func TestMigrationIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to count migrations: %v", err)
 	}
-	if count != 9 {
-		t.Errorf("expected 9 migration records (v1..v9), got %d", count)
+	if count != 10 {
+		t.Errorf("expected 10 migration records (v1..v10), got %d", count)
 	}
 }
 
@@ -624,10 +624,10 @@ func TestMigration008OBSERVABILITY(t *testing.T) {
 	defer rows.Close()
 
 	expected := map[string]string{
-		"e-empty":    "",
+		"e-empty":     "",
 		"e-knowledge": "KNOWLEDGE",
-		"e-state":    "STATE",
-		"e-work":     "WORK",
+		"e-state":     "STATE",
+		"e-work":      "WORK",
 	}
 	for rows.Next() {
 		var id, purpose string
@@ -682,5 +682,59 @@ func TestMigration008OBSERVABILITY(t *testing.T) {
 	// --- RunMigrations is idempotent after 008 ---
 	if err := RunMigrations(db); err != nil {
 		t.Errorf("RunMigrations should be idempotent after 008 but failed: %v", err)
+	}
+}
+
+func TestMigration010PendingEntryType(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open in-memory DB: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(`CREATE TABLE schema_migrations (
+		version     INTEGER PRIMARY KEY,
+		name        TEXT NOT NULL,
+		applied_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`); err != nil {
+		t.Fatalf("failed to create schema_migrations: %v", err)
+	}
+
+	for v := 1; v <= 9; v++ {
+		applyMigrationVersion(t, db, v)
+	}
+
+	if _, err := db.Exec(`
+		INSERT INTO entries (id, name, title, slug, type, summary, body_optional, purpose, status) VALUES
+		('e-existing', 'Existing Entry', 'Existing Entry', 'existing-entry', 'prompt', 'existing summary', '', 'WORK', 'active')
+	`); err != nil {
+		t.Fatalf("failed to seed entries before migration 010: %v", err)
+	}
+
+	applyMigrationVersion(t, db, 10)
+
+	var version int
+	if err := db.QueryRow("SELECT version FROM schema_migrations WHERE version = 10").Scan(&version); err != nil {
+		t.Fatalf("migration version 10 not recorded: %v", err)
+	}
+
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM entries WHERE id = 'e-existing'").Scan(&count); err != nil {
+		t.Fatalf("failed to count preserved entries: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected preserved entry after migration 010, got %d", count)
+	}
+
+	if _, err := db.Exec("INSERT INTO entries (id, name, title, slug, type, summary, body_optional, purpose, status) VALUES ('e-pending', 'Pending Entry', 'Pending Entry', 'pending-entry', 'pending', 'pending summary', '', 'WORK', 'active')"); err != nil {
+		t.Fatalf("CHECK constraint rejected pending type: %v", err)
+	}
+
+	if _, err := db.Exec("INSERT INTO entries (id, name, title, slug, type, summary, body_optional, purpose, status) VALUES ('e-bad-type', 'Bad Type', 'Bad Type', 'bad-type', 'bogus', 'bad summary', '', 'WORK', 'active')"); err == nil {
+		t.Fatal("CHECK constraint accepted invalid type 'bogus'")
+	}
+
+	if err := RunMigrations(db); err != nil {
+		t.Fatalf("RunMigrations should remain idempotent after 010: %v", err)
 	}
 }
