@@ -16,17 +16,18 @@ const AckOK = `{"status":"ok"}` + "\n"
 
 // Collector listens on a Unix socket and dispatches events to validation and storage.
 type Collector struct {
-	store           *Store
-	security        *SecurityPipeline
-	socketPath      string
-	dbPath          string
-	promptStorage   bool
-	daemonStartTime time.Time
-	listener        net.Listener
-	mu              sync.Mutex
-	closed          bool
-	loopDetector    *LoopDetector
-	stallDetector   *StallDetector
+	store             *Store
+	security          *SecurityPipeline
+	socketPath        string
+	dbPath            string
+	promptStorage     bool
+	daemonStartTime   time.Time
+	listener          net.Listener
+	mu                sync.Mutex
+	closed            bool
+	runMu             sync.Mutex // serializes agent_runs projections across connection goroutines
+	loopDetector      *LoopDetector
+	stallDetector     *StallDetector
 	streakDetector    *StreakDetector
 	tokenCounter      *TokenCounter
 	injectionDetector *InjectionDetector
@@ -175,6 +176,12 @@ func (c *Collector) ingest(ctx context.Context, raw []byte) string {
 		return fmt.Sprintf(`{"status":"error","error":%q}`+"\n", err.Error())
 	}
 
+	// Project run lifecycle events onto agent_runs so telemetryctl run
+	// queries and the stall detector's running-run gate have data.
+	if e.EventType == "run.started" || e.EventType == "run.completed" || e.EventType == "run.failed" {
+		c.projectRunEvent(ctx, e)
+	}
+
 	// Run quality signal detectors after successful save.
 
 	// Loop detector: check tool.called events.
@@ -221,6 +228,115 @@ func (c *Collector) ingest(ctx context.Context, raw []byte) string {
 	}
 
 	return AckOK
+}
+
+// runStartInfo holds run metadata extracted from a run.started payload.
+type runStartInfo struct {
+	Workspace string
+	RepoURL   string
+	Branch    string
+	CommitSHA string
+}
+
+// runStartFromPayload extracts run metadata from a run.started payload.
+// Native plugins embed RunOpts fields ("workspace", "repo_url", ...);
+// telemetrywrap sends {"command": ..., "cwd": ...}. Missing keys stay empty.
+func runStartFromPayload(raw json.RawMessage) runStartInfo {
+	var p struct {
+		Workspace string `json:"workspace"`
+		Cwd       string `json:"cwd"`
+		RepoURL   string `json:"repo_url"`
+		Branch    string `json:"branch"`
+		CommitSHA string `json:"commit_sha"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return runStartInfo{}
+	}
+	ws := p.Workspace
+	if ws == "" {
+		ws = p.Cwd
+	}
+	return runStartInfo{Workspace: ws, RepoURL: p.RepoURL, Branch: p.Branch, CommitSHA: p.CommitSHA}
+}
+
+// failureFromPayload extracts optional error details from a run.failed
+// payload. Known producers send {"error": "..."}; "error_type" is honored
+// when present but no producer emits it yet.
+func failureFromPayload(raw json.RawMessage) (errorType, errorMessage string) {
+	var p struct {
+		ErrorType string `json:"error_type"`
+		Error     string `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return "", ""
+	}
+	return p.ErrorType, p.Error
+}
+
+// projectRunEvent upserts an AgentRun row for run lifecycle events. Terminal
+// events merge into the stored row so fields recorded at start (AgentVersion,
+// RepoURL, ...) survive SaveRun's INSERT OR REPLACE. Serialized by runMu
+// because ingest runs on per-connection goroutines and terminal projection is
+// a GetRun+SaveRun cycle on a shared row. Best-effort: projection failures
+// never affect the ingestion ack.
+func (c *Collector) projectRunEvent(ctx context.Context, e Event) {
+	c.runMu.Lock()
+	defer c.runMu.Unlock()
+
+	switch e.EventType {
+	case "run.started":
+		// Instant commands may deliver run.completed before run.started
+		// (the wrapper dials a fresh connection per event). Never resurrect
+		// a run that already reached a terminal state.
+		if existing, err := c.store.GetRun(ctx, e.RunID); err == nil &&
+			existing.Status != "running" {
+			break
+		}
+		start := runStartFromPayload(e.Payload)
+		run := AgentRun{
+			ID:           e.RunID,
+			AgentID:      e.AgentID,
+			AgentVersion: e.AgentVersion,
+			RepoURL:      start.RepoURL,
+			Branch:       start.Branch,
+			CommitSHA:    start.CommitSHA,
+			Workspace:    start.Workspace,
+			StartedAt:    e.Timestamp,
+			Status:       "running",
+		}
+		_ = c.store.SaveRun(ctx, run)
+	case "run.completed":
+		c.completeProjectedRun(ctx, e, "completed")
+	case "run.failed":
+		c.completeProjectedRun(ctx, e, "failed")
+	}
+}
+
+// completeProjectedRun marks a run terminal, merging into the stored run when
+// one exists and creating a minimal record otherwise.
+func (c *Collector) completeProjectedRun(ctx context.Context, e Event, status string) {
+	completedAt := e.Timestamp
+	run, err := c.store.GetRun(ctx, e.RunID)
+	if err != nil {
+		// Run never started (or was lost): persist a minimal completed run
+		// rather than dropping the terminal event.
+		run = AgentRun{
+			ID:           e.RunID,
+			AgentID:      e.AgentID,
+			AgentVersion: e.AgentVersion,
+			Workspace:    "",
+			StartedAt:    e.Timestamp,
+			Status:       status,
+			CompletedAt:  &completedAt,
+		}
+	} else {
+		run.Status = status
+		run.CompletedAt = &completedAt
+	}
+	if e.EventType == "run.failed" {
+		run.ErrorType, run.ErrorMessage = failureFromPayload(e.Payload)
+	}
+	_ = c.store.SaveRun(ctx, run)
 }
 
 // emitSignalEvent marshals a signal payload and saves it as an event.
