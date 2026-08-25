@@ -250,6 +250,24 @@ func TestStoreWALMode(t *testing.T) {
 	}
 }
 
+func TestStoreBusyTimeout(t *testing.T) {
+	dbPath := tempDBPath(t)
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	defer store.Close()
+
+	var busyTimeout int
+	err = store.db.QueryRow("PRAGMA busy_timeout").Scan(&busyTimeout)
+	if err != nil {
+		t.Fatalf("pragma busy_timeout: %v", err)
+	}
+	if busyTimeout != 5000 {
+		t.Errorf("expected busy_timeout=5000, got %d", busyTimeout)
+	}
+}
+
 func TestStoreRunWithCompletedAt(t *testing.T) {
 	dbPath := tempDBPath(t)
 	store, err := OpenStore(dbPath)
