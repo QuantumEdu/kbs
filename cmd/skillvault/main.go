@@ -6,9 +6,10 @@ import (
 	"path/filepath"
 
 	"github.com/quantum-6/skillvault/internal/cli"
+	appversion "github.com/quantum-6/skillvault/internal/version"
 )
 
-const version = "v3"
+var version = appversion.Display()
 
 func main() {
 	if filepath.Base(os.Args[0]) == "mcp" {

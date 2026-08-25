@@ -2,6 +2,12 @@
 
 All notable changes to SkillVault Qu@ntum are documented here.
 
+## Unreleased
+
+### Changed
+
+- Adopted Semantic Versioning (`MAJOR.MINOR.PATCH`) with `internal/version` as the single source of truth; binary, MCP initialize response, and export stamps now report `v3.0.0` instead of bare `v3`.
+
 ## v3.0.0 — Workflow Pipelines
 
 **2026-06-23**

@@ -140,7 +140,7 @@ func TestSeriesRefStruct(t *testing.T) {
 func TestVaultExportStruct(t *testing.T) {
 	e := VaultExport{
 		SchemaVersion: 2,
-		AppVersion:    "v3",
+		AppVersion:    "v3.0.0",
 		ExportedAt:    "2026-06-10T18:30:00Z",
 		Source:        "skillvault",
 		Data:          VaultData{},
@@ -149,25 +149,25 @@ func TestVaultExportStruct(t *testing.T) {
 	if e.SchemaVersion != 2 {
 		t.Errorf("SchemaVersion = %d, want 2", e.SchemaVersion)
 	}
-	if e.AppVersion != "v3" {
-		t.Errorf("AppVersion = %q, want 'v3'", e.AppVersion)
+	if e.AppVersion != "v3.0.0" {
+		t.Errorf("AppVersion = %q, want 'v3.0.0'", e.AppVersion)
 	}
 }
 
 func TestVaultDataStruct(t *testing.T) {
 	d := VaultData{
-		Projects:       []Project{},
-		Entries:        []Entry{},
-		EntryTags:      []EntryTag{},
-		Tags:           []Tag{},
-		Series:         []Series{},
-		SeriesEntries:  []SeriesEntry{},
-		Workflows:      []Workflow{},
-		WorkflowSteps:  []WorkflowStep{},
-		WorkflowRuns:   []WorkflowRun{},
+		Projects:         []Project{},
+		Entries:          []Entry{},
+		EntryTags:        []EntryTag{},
+		Tags:             []Tag{},
+		Series:           []Series{},
+		SeriesEntries:    []SeriesEntry{},
+		Workflows:        []Workflow{},
+		WorkflowSteps:    []WorkflowStep{},
+		WorkflowRuns:     []WorkflowRun{},
 		WorkflowRunSteps: []WorkflowRunStep{},
-		Artifacts:      []Artifact{},
-		EntryLinks:     []EntryLink{},
+		Artifacts:        []Artifact{},
+		EntryLinks:       []EntryLink{},
 	}
 
 	if d.Projects == nil {
