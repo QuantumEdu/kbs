@@ -194,17 +194,10 @@ func (c *Collector) ingest(ctx context.Context, raw []byte) string {
 		}
 	}
 
-	// Stall detector: record activity on every event, then check.
-	if c.stallDetector != nil {
-		c.stallDetector.Record(e.RunID, time.Now())
-		if signal := c.stallDetector.Check(e.RunID); signal != nil {
-			// Only fire for active (running) runs.
-			run, err := c.store.GetRun(ctx, e.RunID)
-			if err == nil && run.Status == "running" {
-				emitSignalEvent(c.store, ctx, e, "policy.violation", signal)
-			}
-		}
-	}
+	// Stall detector: record activity lazily and emit violations for running
+	// runs idle past the threshold. Terminal runs are forgotten so the
+	// tracker's map stays bounded.
+	c.handleStallDetection(ctx, e, time.Now())
 
 	// Streak detector: check tool status for failures.
 	if e.EventType == "tool.called" && c.streakDetector != nil {
@@ -228,6 +221,31 @@ func (c *Collector) ingest(ctx context.Context, raw []byte) string {
 	}
 
 	return AckOK
+}
+
+// handleStallDetection records activity for the event's run and emits a
+// policy.violation when the gap since the run's previous activity crosses the
+// stall threshold — but only while the run is still projected as running.
+// now is a parameter so tests can simulate idle gaps deterministically; ingest
+// passes time.Now(). Runs reaching a terminal state are forgotten afterwards
+// (after this event's own activity is recorded) to keep the tracker bounded.
+func (c *Collector) handleStallDetection(ctx context.Context, e Event, now time.Time) {
+	if c.stallDetector == nil {
+		return
+	}
+
+	if signal := c.stallDetector.RecordAndCheck(e.RunID, now); signal != nil {
+		// Only fire for active (running) runs.
+		run, err := c.store.GetRun(ctx, e.RunID)
+		if err == nil && run.Status == "running" {
+			emitSignalEvent(c.store, ctx, e, "policy.violation", signal)
+		}
+	}
+
+	switch e.EventType {
+	case "run.completed", "run.failed":
+		c.stallDetector.Forget(e.RunID)
+	}
 }
 
 // runStartInfo holds run metadata extracted from a run.started payload.

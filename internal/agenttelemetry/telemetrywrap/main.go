@@ -13,6 +13,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -59,11 +60,19 @@ func run(agentID string, cmdArgs []string) int {
 	})
 	emitEvent(socketPath, agentEvent(agentID, runID, "command.started", "heuristic", cmdPayload))
 
-	// Start the command.
+	// Start the command. stdout is tee'd: the user sees the child's output
+	// live while the parser scans the same stream for model/token usage.
+	// stderr passes through untouched.
 	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
 	cmd.Stdin = os.Stdin
-	stdoutPipe, _ := cmd.StdoutPipe()
-	stderrPipe, _ := cmd.StderrPipe()
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		emitEvent(socketPath, agentEvent(agentID, runID, "run.failed", "heuristic",
+			json.RawMessage(fmt.Sprintf(`{"error":%q}`, err.Error()))))
+		return 1
+	}
+	cmd.Stdout = io.MultiWriter(os.Stdout, stdoutW)
+	cmd.Stderr = os.Stderr
 
 	// Start git polling in background.
 	gitPollDone := make(chan struct{})
@@ -71,16 +80,14 @@ func run(agentID string, cmdArgs []string) int {
 
 	// Start stdout parsing in background.
 	modelDone := make(chan struct{})
-	go parseStdoutForModels(socketPath, agentID, runID, stdoutPipe, modelDone)
-
-	// Discard stderr (or log it).
-	go io.Copy(io.Discard, stderrPipe)
+	go parseStdoutForModels(socketPath, agentID, runID, stdoutR, modelDone)
 
 	// Run the command.
-	err := cmd.Start()
+	err = cmd.Start()
 	if err != nil {
 		emitEvent(socketPath, agentEvent(agentID, runID, "run.failed", "heuristic",
 			json.RawMessage(fmt.Sprintf(`{"error":%q}`, err.Error()))))
+		stdoutW.Close() // parser scanner hits EOF and its goroutine exits
 		close(gitPollDone)
 		close(modelDone)
 		return 1
@@ -107,12 +114,27 @@ func run(agentID string, cmdArgs []string) int {
 		}
 	}
 
+	// cmd.Wait has reaped the child and its dup of the pipe write end on
+	// every path (normal exit, timeout SIGTERM, timeout SIGKILL), so closing
+	// our write end delivers EOF to the parser scanner and its goroutine
+	// exits. Single close per path: the Start-error branch above returns
+	// before reaching this point.
+	stdoutW.Close()
 	close(gitPollDone)
 	close(modelDone)
 
 	if runErr != nil {
 		errPayload, _ := json.Marshal(map[string]string{"error": runErr.Error()})
 		emitEvent(socketPath, agentEvent(agentID, runID, "run.failed", "heuristic", errPayload))
+		// Transparency: propagate the child's exit code. ExitCode returns -1
+		// when the process was killed by a signal; fall back to 1 there and
+		// for non-exit errors.
+		var exitErr *exec.ExitError
+		if errors.As(runErr, &exitErr) {
+			if code := exitErr.ExitCode(); code > 0 {
+				return code
+			}
+		}
 		return 1
 	}
 
