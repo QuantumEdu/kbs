@@ -112,6 +112,19 @@ func OpenStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("synchronous: %w", err)
 	}
 
+	// Single-writer discipline: SQLite allows one writer at a time, and the
+	// collector ingests on per-connection goroutines. Without a pool cap,
+	// concurrent writes race and fail fast with SQLITE_BUSY (no retry in the
+	// driver), silently dropping events whose emitters ignore acks.
+	db.SetMaxOpenConns(1)
+
+	// Wait instead of erroring when another process holds the write lock
+	// (e.g. telemetryctl or an operator's sqlite3 session).
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("busy timeout: %w", err)
+	}
+
 	// Create tables.
 	if _, err := db.Exec(ddl); err != nil {
 		db.Close()
