@@ -61,7 +61,7 @@ func TestVersionCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("version command failed: %v\nOutput: %s", err, string(out))
 	}
-	expected := "[sk-vault] version — Print version information\nSkillVault v3\n"
+	expected := "[sk-vault] version — Print version information\nSkillVault v3.0.0\n"
 	if string(out) != expected {
 		t.Errorf("unexpected version output: %q", string(out))
 	}
@@ -261,7 +261,7 @@ func TestTopLevelHelpFlagsDoNotCauseSideEffects(t *testing.T) {
 			if err != nil {
 				t.Fatalf("help command failed: %v\nOutput: %s", err, string(out))
 			}
-			if !strings.Contains(string(out), "SkillVault v3") {
+			if !strings.Contains(string(out), "SkillVault v3.0.0") {
 				t.Fatalf("expected top-level help output, got: %s", string(out))
 			}
 			if _, err := os.Stat(filepath.Join(home, ".skillvault")); !os.IsNotExist(err) {

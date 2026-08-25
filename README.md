@@ -14,7 +14,8 @@ Store, search, and retrieve prompts, skills, workflows, decisions, project memor
 ```
 
 **Codename:** Qu@ntum  
-**Status:** v3 — Workflow bridge + LifeOS taxonomy + workflow analytics + entry versioning + skill pack export
+**Status:** v3 — Workflow bridge + LifeOS taxonomy + workflow analytics + entry versioning + skill pack export  
+**Versioning:** Semantic Versioning `MAJOR.MINOR.PATCH` starting at `v3.0.0` — MINOR bumps per merged feature PR, PATCH per merged fix PR, MAJOR only on breaking changes. Single source of truth: `internal/version/version.go`.  
 **Binary size:** ~7 MB  
 **Dependencies:** Zero frameworks. Only `modernc.org/sqlite`.  
 **Language:** Go 1.26+

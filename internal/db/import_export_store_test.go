@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/quantum-6/skillvault/internal/domain"
+	"github.com/quantum-6/skillvault/internal/version"
 )
 
 func setupImportExportStore(t *testing.T) (EntryStore, WorkflowStore, SeriesStore, ProjectStore, ArtifactStore, EntryLinkStore, TagStore, WorkflowRunStore, ImportExportStore, func()) {
@@ -71,8 +72,8 @@ func TestExportRoundTrip(t *testing.T) {
 	if exported.SchemaVersion != 3 {
 		t.Errorf("SchemaVersion = %d, want 3", exported.SchemaVersion)
 	}
-	if exported.AppVersion != "v3" {
-		t.Errorf("AppVersion = %q, want 'v3'", exported.AppVersion)
+	if exported.AppVersion != version.Display() {
+		t.Errorf("AppVersion = %q, want %q", exported.AppVersion, version.Display())
 	}
 	if exported.ExportedAt == "" {
 		t.Error("ExportedAt should not be empty")
@@ -174,5 +175,3 @@ func TestImportRejectsHigherVersion(t *testing.T) {
 		t.Fatal("expected error for unsupported schema_version")
 	}
 }
-
-

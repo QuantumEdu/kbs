@@ -7,13 +7,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/quantum-6/skillvault/internal/version"
 )
 
 // Server is the MCP JSON-RPC server over stdio.
 type Server struct {
-	reader  *bufio.Reader
-	writer  io.Writer
-	tools   *ToolRegistry
+	reader *bufio.Reader
+	writer io.Writer
+	tools  *ToolRegistry
 }
 
 // NewServer creates a new MCP server.
@@ -71,7 +73,7 @@ func (s *Server) handleInitialize(req *JSONRPCRequest) JSONRPCResponse {
 		"protocolVersion": "2024-11-05",
 		"serverInfo": map[string]string{
 			"name":    "skillvault",
-			"version": "v3",
+			"version": version.Display(),
 		},
 		"capabilities": map[string]interface{}{
 			"tools": map[string]bool{},

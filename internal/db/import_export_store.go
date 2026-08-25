@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/quantum-6/skillvault/internal/domain"
+	"github.com/quantum-6/skillvault/internal/version"
 )
 
 const exportSchemaVersion = 3
@@ -15,7 +16,7 @@ const exportSchemaVersion = 3
 func (s *sqliteImportExportStore) ExportAll(ctx context.Context) (domain.VaultExport, error) {
 	export := domain.VaultExport{
 		SchemaVersion: exportSchemaVersion,
-		AppVersion:    "v3",
+		AppVersion:    version.Display(),
 		ExportedAt:    time.Now().UTC().Format(time.RFC3339),
 		Source:        "skillvault",
 	}
