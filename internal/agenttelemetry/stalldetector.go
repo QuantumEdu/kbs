@@ -14,9 +14,9 @@ type StallDetector struct {
 
 // StallSignal is emitted when a run has been inactive past the threshold.
 type StallSignal struct {
-	RunID          string        `json:"run_id"`
-	LastEvent      time.Time     `json:"last_event"`
-	InactiveSince  time.Duration `json:"inactive_seconds"`
+	RunID         string        `json:"run_id"`
+	LastEvent     time.Time     `json:"last_event"`
+	InactiveSince time.Duration `json:"inactive_seconds"`
 }
 
 // NewStallDetector creates a StallDetector with a 60s threshold.
@@ -55,4 +55,41 @@ func (sd *StallDetector) Check(runID string) *StallSignal {
 	}
 
 	return nil
+}
+
+// RecordAndCheck atomically records activity for a run and reports a stall
+// signal when the gap since the run's previous event exceeds the threshold.
+// The gap is measured lazily between consecutive events, so the first-ever
+// event for a run never produces a signal. RecordAndCheck supersedes calling
+// Record followed by Check, which could only ever measure a ~0ms gap.
+func (sd *StallDetector) RecordAndCheck(runID string, t time.Time) *StallSignal {
+	sd.mu.Lock()
+	defer sd.mu.Unlock()
+
+	var signal *StallSignal
+	if prev, exists := sd.lastEvent[runID]; exists && t.Sub(prev) > sd.threshold {
+		signal = &StallSignal{
+			RunID:         runID,
+			LastEvent:     prev,
+			InactiveSince: t.Sub(prev),
+		}
+	}
+	sd.lastEvent[runID] = t
+	return signal
+}
+
+// Forget drops all tracking state for a run. Call it once a run reaches a
+// terminal state so finished runs don't grow the map without bound.
+func (sd *StallDetector) Forget(runID string) {
+	sd.mu.Lock()
+	defer sd.mu.Unlock()
+	delete(sd.lastEvent, runID)
+}
+
+// size reports how many runs are currently tracked. Unexported on purpose:
+// tests in this package use it to assert cleanup without leaking the map.
+func (sd *StallDetector) size() int {
+	sd.mu.Lock()
+	defer sd.mu.Unlock()
+	return len(sd.lastEvent)
 }

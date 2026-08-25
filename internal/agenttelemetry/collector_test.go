@@ -522,6 +522,143 @@ func TestStallDetectorGateSeesRunningRuns(t *testing.T) {
 	}
 }
 
+// countStoredEvents counts stored events matching an event type and run ID.
+func countStoredEvents(t *testing.T, store *Store, eventType, runID string) int {
+	t.Helper()
+
+	var n int
+	if err := store.db.QueryRow(
+		"SELECT COUNT(*) FROM events WHERE event_type = ? AND run_id = ?",
+		eventType, runID).Scan(&n); err != nil {
+		t.Fatalf("count %s events for %s: %v", eventType, runID, err)
+	}
+	return n
+}
+
+func TestCollectorStallGapPersistsViolation(t *testing.T) {
+	cases := []struct {
+		name           string
+		gap            time.Duration
+		wantViolations int
+	}{
+		{"gap past threshold persists violation", 61 * time.Second, 1},
+		{"gap under threshold stays quiet", 10 * time.Second, 0},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			store, collector := newProjectionTestCollector(t)
+			collector.SetStallDetector(NewStallDetector())
+
+			ctx := context.Background()
+			runID := "run-stall-gap"
+
+			// Project the run so the GetRun gate sees status "running".
+			ingestRaw(t, collector, lifecycleEventJSON("run.started", runID, `{}`))
+
+			mkEvent := func(id string) Event {
+				return Event{EventID: id, EventType: "tool.called", RunID: runID, AgentID: "opencode"}
+			}
+
+			// Drive handleStallDetection with an injected clock so the idle
+			// gap is deterministic; ingest itself passes time.Now().
+			base := time.Now()
+			collector.handleStallDetection(ctx, mkEvent("evt-gap-1"), base)
+			collector.handleStallDetection(ctx, mkEvent("evt-gap-2"), base.Add(tt.gap))
+
+			if n := countStoredEvents(t, store, "policy.violation", runID); n != tt.wantViolations {
+				t.Fatalf("policy.violation count = %d, want %d", n, tt.wantViolations)
+			}
+			if tt.wantViolations == 0 {
+				return
+			}
+
+			// The persisted payload must carry the lazy-detection numbers:
+			// LastEvent points at the previous activity and InactiveSince
+			// equals the full gap between the two events.
+			var payload string
+			if err := store.db.QueryRow(
+				"SELECT payload FROM events WHERE event_type = ? AND run_id = ?",
+				"policy.violation", runID).Scan(&payload); err != nil {
+				t.Fatalf("load violation payload: %v", err)
+			}
+			var sig StallSignal
+			if err := json.Unmarshal([]byte(payload), &sig); err != nil {
+				t.Fatalf("unmarshal violation payload: %v", err)
+			}
+			if sig.RunID != runID {
+				t.Errorf("payload RunID = %q, want %q", sig.RunID, runID)
+			}
+			if !sig.LastEvent.Equal(base) {
+				t.Errorf("payload LastEvent = %v, want %v", sig.LastEvent, base)
+			}
+			if sig.InactiveSince != tt.gap {
+				t.Errorf("payload InactiveSince = %v, want %v", sig.InactiveSince, tt.gap)
+			}
+		})
+	}
+}
+
+func TestCollectorIngestFiresStallOnLazyGap(t *testing.T) {
+	store, collector := newProjectionTestCollector(t)
+	sd := NewStallDetector()
+	collector.SetStallDetector(sd)
+
+	runID := "run-stall-live"
+
+	ingestRaw(t, collector, lifecycleEventJSON("run.started", runID, `{}`))
+
+	// Backdate the run's last activity so the next ingested event lands past
+	// the 60s threshold without sleeping in the test. This exercises the real
+	// ingest() wiring: lazy gap detection, GetRun gate and emitSignalEvent.
+	sd.Record(runID, time.Now().Add(-61*time.Second))
+
+	ingestRaw(t, collector, lifecycleEventJSON("tool.called", runID, `{"tool_name":"bash","args_hash":"abc"}`))
+
+	if n := countStoredEvents(t, store, "policy.violation", runID); n != 1 {
+		t.Fatalf("policy.violation count = %d, want 1 from the real ingest path", n)
+	}
+}
+
+func TestCollectorTerminalEventForgetsStallEntry(t *testing.T) {
+	_, collector := newProjectionTestCollector(t)
+	sd := NewStallDetector()
+	collector.SetStallDetector(sd)
+
+	runID := "run-term-forget"
+
+	ingestRaw(t, collector, lifecycleEventJSON("run.started", runID, `{}`))
+	if got := sd.size(); got != 1 {
+		t.Fatalf("tracker size after run.started = %d, want 1", got)
+	}
+
+	ingestRaw(t, collector, lifecycleEventJSON("run.completed", runID, `{"status":"completed"}`))
+	if got := sd.size(); got != 0 {
+		t.Errorf("tracker size after run.completed = %d, want 0 (terminal runs must be forgotten)", got)
+	}
+}
+
+func TestCollectorStallGateSuppressesTerminalRuns(t *testing.T) {
+	store, collector := newProjectionTestCollector(t)
+	sd := NewStallDetector()
+	collector.SetStallDetector(sd)
+
+	runID := "run-gate"
+
+	ingestRaw(t, collector, lifecycleEventJSON("run.started", runID, `{}`))
+	ingestRaw(t, collector, lifecycleEventJSON("run.completed", runID, `{}`))
+
+	// Simulate a straggler event for the finished run carrying a stale gap:
+	// even though the detector builds a signal, the GetRun gate must keep it
+	// quiet because the projected status is no longer "running".
+	sd.Record(runID, time.Now().Add(-61*time.Second))
+	ingestRaw(t, collector, lifecycleEventJSON("tool.called", runID, `{"tool_name":"bash"}`))
+
+	if n := countStoredEvents(t, store, "policy.violation", runID); n != 0 {
+		t.Errorf("policy.violation count = %d, want 0 for terminal run", n)
+	}
+}
+
 func TestRunStartFromPayload(t *testing.T) {
 	cases := []struct {
 		name          string
