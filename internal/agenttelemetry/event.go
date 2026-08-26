@@ -8,17 +8,63 @@ import (
 // Event is the canonical JSON-L telemetry event.
 type Event struct {
 	EventID         string          `json:"event_id"`
-	EventType       string          `json:"event_type"`       // run.started, tool.called, ...
+	EventType       string          `json:"event_type"` // run.started, tool.called, ...
 	Timestamp       time.Time       `json:"timestamp"`
 	RunID           string          `json:"run_id"`
 	AgentID         string          `json:"agent_id"`
 	AgentVersion    string          `json:"agent_version"`
-	Source          string          `json:"source"`           // plugin|wrapper|daemon
+	Source          string          `json:"source"` // plugin|wrapper|daemon
 	CorrelationID   *string         `json:"correlation_id,omitempty"`
 	StepID          *string         `json:"step_id,omitempty"`
 	RedactionPolicy string          `json:"redaction_policy"` // hash-args|none|scanned-warning
 	ConfidenceLevel string          `json:"confidence_level"` // measured|estimated|heuristic
+	ProjectID       string          `json:"project_id,omitempty"`
+	ChangeID        string          `json:"change_id,omitempty"`
+	SessionID       string          `json:"session_id,omitempty"`
+	InteractionID   string          `json:"interaction_id,omitempty"`
+	Provider        string          `json:"provider,omitempty"`
+	Model           string          `json:"model,omitempty"`
+	Effort          string          `json:"effort,omitempty"`
+	Coverage        string          `json:"coverage,omitempty"`
 	Payload         json.RawMessage `json:"payload"`
+}
+
+const CoverageUnknown = "unknown"
+
+// EvidenceMeta carries explicit identity and provenance for an event. Missing
+// observations are represented as "unknown" so consumers never mistake them
+// for measured zero values.
+type EvidenceMeta struct {
+	ProjectID     string
+	ChangeID      string
+	SessionID     string
+	RunID         string
+	InteractionID string
+	AgentID       string
+	Provider      string
+	Model         string
+	Effort        string
+	Source        string
+	Confidence    string
+	Coverage      string
+}
+
+// EvidenceMetadata normalizes optional event identity without inventing facts.
+func (e Event) EvidenceMetadata() EvidenceMeta {
+	return EvidenceMeta{
+		ProjectID: unknown(e.ProjectID), ChangeID: unknown(e.ChangeID),
+		SessionID: unknown(e.SessionID), RunID: unknown(e.RunID),
+		InteractionID: unknown(e.InteractionID), AgentID: unknown(e.AgentID),
+		Provider: unknown(e.Provider), Model: unknown(e.Model), Effort: unknown(e.Effort),
+		Source: unknown(e.Source), Confidence: unknown(e.ConfidenceLevel), Coverage: unknown(e.Coverage),
+	}
+}
+
+func unknown(value string) string {
+	if value == "" {
+		return CoverageUnknown
+	}
+	return value
 }
 
 // EventEnvelope is the metadata wrapper without payload.

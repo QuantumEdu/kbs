@@ -1,6 +1,9 @@
 package agenttelemetry
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // SecurityPipeline orchestrates redaction, entropy scanning, and hashing on
 // incoming telemetry events. It is wired into the Collector's ingest path.
@@ -38,7 +41,12 @@ func NewSecurityPipeline(saltPath string, customPatterns []string) (*SecurityPip
 //  2. Scans the redacted payload for high-entropy tokens.
 //  3. Sets RedactionPolicy to "scanned-warning" if a high-entropy token is
 //     found, unless the policy is already "hash-args".
-func (sp *SecurityPipeline) Process(e *Event) {
+func (sp *SecurityPipeline) Process(e *Event) error {
+	if e.RedactionPolicy == "hash-args" {
+		if err := sp.hashProtectedPayload(e); err != nil {
+			return err
+		}
+	}
 	// 1. Redact payload.
 	redacted := sp.redactor.Redact(string(e.Payload))
 	e.Payload = json.RawMessage(redacted)
@@ -50,6 +58,27 @@ func (sp *SecurityPipeline) Process(e *Event) {
 			e.RedactionPolicy = "scanned-warning"
 		}
 	}
+	return nil
+}
+
+func (sp *SecurityPipeline) hashProtectedPayload(e *Event) error {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(e.Payload, &payload); err != nil {
+		return fmt.Errorf("parse protected payload: %w", err)
+	}
+	for _, key := range []string{"command", "args", "arguments"} {
+		if raw, ok := payload[key]; ok {
+			payload["args_hash"] = json.RawMessage(fmt.Sprintf("%q", sp.hasher.Hash([]string{string(raw)})))
+			delete(payload, key)
+		}
+	}
+	delete(payload, "raw_line")
+	transformed, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal protected payload: %w", err)
+	}
+	e.Payload = transformed
+	return nil
 }
 
 // SaltFingerprint returns the first 8 hex chars of SHA-256(salt), or empty

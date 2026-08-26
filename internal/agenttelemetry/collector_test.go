@@ -307,7 +307,13 @@ func newProjectionTestCollector(t *testing.T) (*Store, *Collector) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	return store, NewCollector(store, filepath.Join(t.TempDir(), "test.sock"))
+	collector := NewCollector(store, filepath.Join(t.TempDir(), "test.sock"))
+	pipeline, err := NewSecurityPipeline(filepath.Join(t.TempDir(), "salt"), nil)
+	if err != nil {
+		t.Fatalf("NewSecurityPipeline: %v", err)
+	}
+	collector.SetSecurityPipeline(pipeline)
+	return store, collector
 }
 
 // ingestRaw feeds a raw event line to the collector and requires an ok ack.

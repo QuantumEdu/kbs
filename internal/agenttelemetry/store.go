@@ -3,6 +3,7 @@ package agenttelemetry
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -131,7 +132,12 @@ func OpenStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("ddl: %w", err)
 	}
 
-	return &Store{db: db}, nil
+	store := &Store{db: db}
+	if err := store.MigrateEvidence(); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate evidence: %w", err)
+	}
+	return store, nil
 }
 
 // SaveRun inserts or replaces an agent run record.
@@ -249,6 +255,9 @@ func (s *Store) SaveEvent(ctx context.Context, e Event) error {
 	if s.db == nil {
 		return fmt.Errorf("store is closed")
 	}
+	if err := validatePersistablePayload(e); err != nil {
+		return err
+	}
 	query := `INSERT INTO events
 		(id, run_id, event_type, timestamp, source, correlation_id, step_id,
 		 redaction_policy, confidence_level, payload)
@@ -261,7 +270,32 @@ func (s *Store) SaveEvent(ctx context.Context, e Event) error {
 		e.RedactionPolicy, e.ConfidenceLevel,
 		string(e.Payload),
 	)
+	if err != nil {
+		return err
+	}
+	meta := e.EvidenceMetadata()
+	_, err = s.db.ExecContext(ctx, `INSERT OR REPLACE INTO evidence_metadata
+		(event_id, project_id, change_id, session_id, run_id, interaction_id, agent_id, provider, model, effort, source, confidence, coverage)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		e.EventID, meta.ProjectID, meta.ChangeID, meta.SessionID, meta.RunID, meta.InteractionID,
+		meta.AgentID, meta.Provider, meta.Model, meta.Effort, meta.Source, meta.Confidence, meta.Coverage)
 	return err
+}
+
+func validatePersistablePayload(e Event) error {
+	if e.RedactionPolicy != "hash-args" {
+		return nil
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(e.Payload, &payload); err != nil {
+		return fmt.Errorf("parse protected payload: %w", err)
+	}
+	for _, key := range []string{"command", "args", "arguments", "raw_line"} {
+		if _, found := payload[key]; found {
+			return fmt.Errorf("protected payload contains raw %s", key)
+		}
+	}
+	return nil
 }
 
 // Status returns daemon operational metrics.
@@ -374,11 +408,11 @@ func (s *Store) EventCountByType(ctx context.Context, runID, eventType string) (
 
 // EventRow holds a single event row from the database.
 type EventRow struct {
-	EventID        string
-	RunID          string
-	EventType      string
-	CorrelationID  *string
-	Timestamp      string
+	EventID       string
+	RunID         string
+	EventType     string
+	CorrelationID *string
+	Timestamp     string
 }
 
 // GetEventsByRun returns all events for a run, ordered by timestamp.
