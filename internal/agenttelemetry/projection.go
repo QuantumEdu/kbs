@@ -12,6 +12,8 @@ type UsageSample struct {
 	Provider, ID         string
 	Total                int64
 	Cumulative, Measured bool
+	Segment              string
+	Reset                bool
 }
 type UsageDelta struct {
 	Total             int64
@@ -33,6 +35,9 @@ func (a *UsageAccumulator) Add(s UsageSample) UsageDelta {
 	a.seen[key] = true
 	if !s.Cumulative {
 		return UsageDelta{Total: s.Total, Measured: s.Measured}
+	}
+	if s.Reset {
+		a.totals[s.Provider] = 0
 	}
 	previous := a.totals[s.Provider]
 	if s.Total < previous {
@@ -115,19 +120,37 @@ func (s *Store) ProjectEvents(ctx context.Context, version string) error {
 	if err := tx.QueryRowContext(ctx, `SELECT last_rowid FROM projector_checkpoints WHERE name='events' AND version=?`, version).Scan(&from); err != nil && err.Error() != "sql: no rows in result set" {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT rowid, id FROM events WHERE rowid > ? ORDER BY rowid`, from)
+	rows, err := tx.QueryContext(ctx, `SELECT e.rowid, e.id, e.run_id, e.event_type, e.payload, COALESCE(m.provider,''), COALESCE(m.interaction_id,'') FROM events e LEFT JOIN evidence_metadata m ON m.event_id=e.id WHERE e.rowid > ? ORDER BY e.rowid`, from)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var rowid int64
-		var id string
-		if err := rows.Scan(&rowid, &id); err != nil {
+		var e Event
+		var payload string
+		if err := rows.Scan(&rowid, &e.EventID, &e.RunID, &e.EventType, &payload, &e.Provider, &e.InteractionID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO projected_events(source_event_id,projector_version) VALUES (?,?)`, id, version); err != nil {
+		e.Payload = []byte(payload)
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO projected_events(source_event_id,projector_version) VALUES (?,?)`, e.EventID, version); err != nil {
 			return err
+		}
+		if p := DecodeProjectionPayload(e); p.Usage != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO usage_projection_samples VALUES (?,?,?,?,?)`, e.RunID, p.Usage.Provider, version+"\x00"+p.Usage.ID, p.Usage.Total, p.Usage.Measured); err != nil {
+				return err
+			}
+		}
+		if p := DecodeProjectionPayload(e); p.Activity != nil && !p.Activity.Interval.Start.IsZero() {
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO activity_projection_samples VALUES (?,?,?,?)`, e.RunID, p.Activity.Interval.Start, p.Activity.Interval.End, p.Activity.Interval.Measured); err != nil {
+				return err
+			}
+		}
+		if p := DecodeProjectionPayload(e); p.Git != nil {
+			g := p.Git
+			if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO git_projection_samples VALUES (?,?,?,?,?,?,?,?,?)`, e.RunID, g.Root, g.Head, g.Branch, g.Detached, g.Staged, g.Unstaged, g.Untracked, g.CapturedAt); err != nil {
+				return err
+			}
 		}
 		from = rowid
 	}
