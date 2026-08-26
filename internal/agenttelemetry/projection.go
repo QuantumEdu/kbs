@@ -138,23 +138,35 @@ func (s *Store) ProjectEvents(ctx context.Context, version string) error {
 		}
 		if p := DecodeProjectionPayload(e); p.Usage != nil {
 			total := p.Usage.Total
+			skipUsage := false
 			if p.Usage.Cumulative {
 				var previous int64
 				err := tx.QueryRowContext(ctx, `SELECT total FROM usage_cumulative_states WHERE run_id=? AND provider=? AND interaction_id=? AND segment_id=? AND projector_version=?`, e.RunID, p.Usage.Provider, e.InteractionID, p.Usage.Segment, version).Scan(&previous)
 				if err != nil && err.Error() != "sql: no rows in result set" {
 					return err
 				}
-				if p.Usage.Total < previous {
-					from = rowid
-					continue
+				reason := ""
+				if p.Usage.Reset && err == nil {
+					reason = "reset_reused_segment"
+				} else if p.Usage.Total < previous {
+					reason = "cumulative_regression"
 				}
-				total -= previous
-				if _, err := tx.ExecContext(ctx, `INSERT INTO usage_cumulative_states VALUES (?,?,?,?,?,?) ON CONFLICT(run_id,provider,interaction_id,segment_id,projector_version) DO UPDATE SET total=excluded.total`, e.RunID, p.Usage.Provider, e.InteractionID, p.Usage.Segment, version, p.Usage.Total); err != nil {
-					return err
+				if reason != "" {
+					skipUsage = true
+					if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO usage_projection_unknown_samples VALUES (?,?,?,?,?)`, e.RunID, p.Usage.Provider, p.Usage.ID, version, reason); err != nil {
+						return err
+					}
+				} else {
+					total -= previous
+					if _, err := tx.ExecContext(ctx, `INSERT INTO usage_cumulative_states VALUES (?,?,?,?,?,?) ON CONFLICT(run_id,provider,interaction_id,segment_id,projector_version) DO UPDATE SET total=excluded.total`, e.RunID, p.Usage.Provider, e.InteractionID, p.Usage.Segment, version, p.Usage.Total); err != nil {
+						return err
+					}
 				}
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO usage_projection_samples VALUES (?,?,?,?,?)`, e.RunID, p.Usage.Provider, version+"\x00"+p.Usage.ID, total, p.Usage.Measured); err != nil {
-				return err
+			if !skipUsage {
+				if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO usage_projection_samples VALUES (?,?,?,?,?)`, e.RunID, p.Usage.Provider, version+"\x00"+p.Usage.ID, total, p.Usage.Measured); err != nil {
+					return err
+				}
 			}
 		}
 		if p := DecodeProjectionPayload(e); p.Activity != nil && !p.Activity.Interval.Start.IsZero() {

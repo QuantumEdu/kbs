@@ -301,6 +301,33 @@ func TestProjectEventsProjectsCumulativeUsageAsDeltas(t *testing.T) {
 	}
 }
 
+func TestProjectEventsPersistsUnknownCumulativeRegressionAndInvalidReset(t *testing.T) {
+	store, err := OpenStore(tempDBPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	payload := func(id, segment string, total int, reset bool) []byte {
+		return []byte(fmt.Sprintf(`{"schema_version":1,"sample_id":%q,"interaction_id":"i","mode":"cumulative","segment_id":%q,"reset":%t,"method":"measured","estimated_method":null,"tokens":{"input":%d,"output":0,"cache_read":null,"cache_write":null,"reasoning":null}}`, id, segment, reset, total))
+	}
+	for _, e := range []Event{{EventID: "one", RunID: "r", EventType: "model.usage", Provider: "p", InteractionID: "i", Payload: payload("one", "first", 10, false)}, {EventID: "regression", RunID: "r", EventType: "model.usage", Provider: "p", InteractionID: "i", Payload: payload("regression", "first", 3, false)}, {EventID: "invalid-reset", RunID: "r", EventType: "model.usage", Provider: "p", InteractionID: "i", Payload: payload("invalid-reset", "first", 2, true)}, {EventID: "new-reset", RunID: "r", EventType: "model.usage", Provider: "p", InteractionID: "i", Payload: payload("new-reset", "second", 4, true)}} {
+		e.Timestamp, e.Source = time.Now(), "test"
+		if err := store.SaveEvent(context.Background(), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.ProjectEvents(context.Background(), "v2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ProjectEvents(context.Background(), "v2"); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM usage_projection_unknown_samples`).Scan(&n); err != nil || n != 2 {
+		t.Fatalf("unknown usage samples = %d, %v; want 2", n, err)
+	}
+}
+
 func TestCaptureGitSnapshotHandlesDetachedAndCommandFailure(t *testing.T) {
 	root := t.TempDir()
 	initGitRepo(t, root)

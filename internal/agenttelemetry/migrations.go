@@ -1,6 +1,9 @@
 package agenttelemetry
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // MigrateEvidence applies additive, idempotent evidence schema migrations.
 // Existing records retain their values but gain explicit unknown coverage.
@@ -23,7 +26,8 @@ func (s *Store) MigrateEvidence() error {
 		CREATE TABLE IF NOT EXISTS git_projection_samples (run_id TEXT PRIMARY KEY, root TEXT NOT NULL, head TEXT NOT NULL, branch TEXT NOT NULL, detached INTEGER NOT NULL, staged INTEGER NOT NULL, unstaged INTEGER NOT NULL, untracked INTEGER NOT NULL, captured_at DATETIME NOT NULL);
 		CREATE TABLE IF NOT EXISTS git_lifecycle_projection_samples (run_id TEXT NOT NULL, phase TEXT NOT NULL, projector_version TEXT NOT NULL, root TEXT NOT NULL, head TEXT NOT NULL, branch TEXT NOT NULL, detached INTEGER NOT NULL, staged INTEGER NOT NULL, unstaged INTEGER NOT NULL, untracked INTEGER NOT NULL, captured_at DATETIME NOT NULL, PRIMARY KEY(run_id, phase, projector_version));
 		CREATE TABLE IF NOT EXISTS activity_heartbeat_samples (run_id TEXT NOT NULL, clock_id TEXT NOT NULL, observed_at DATETIME NOT NULL, projector_version TEXT NOT NULL, PRIMARY KEY(run_id, clock_id, observed_at, projector_version));
-		CREATE TABLE IF NOT EXISTS analyzer_evidence (evidence_id TEXT PRIMARY KEY, tool TEXT NOT NULL, version TEXT NOT NULL, invocation_id TEXT NOT NULL, target_commit TEXT NOT NULL, artifact_hash TEXT NOT NULL, severity TEXT NOT NULL, location TEXT NOT NULL, confidence TEXT NOT NULL, coverage TEXT NOT NULL, evidence TEXT NOT NULL, stale INTEGER NOT NULL);
+		CREATE TABLE IF NOT EXISTS analyzer_evidence (evidence_id TEXT PRIMARY KEY, tool TEXT NOT NULL, version TEXT NOT NULL, invocation_id TEXT NOT NULL, target_commit TEXT NOT NULL, artifact_hash TEXT NOT NULL, severity TEXT NOT NULL, location TEXT NOT NULL, confidence TEXT NOT NULL, coverage TEXT NOT NULL, evidence TEXT NOT NULL, observed_at DATETIME NOT NULL DEFAULT '', stale INTEGER NOT NULL);
+		CREATE TABLE IF NOT EXISTS usage_projection_unknown_samples (run_id TEXT NOT NULL, provider TEXT NOT NULL, sample_id TEXT NOT NULL, projector_version TEXT NOT NULL, reason TEXT NOT NULL, PRIMARY KEY(provider, sample_id, projector_version));
 		CREATE TABLE IF NOT EXISTS run_evidence (
 			run_id TEXT PRIMARY KEY REFERENCES agent_runs(id),
 			token_coverage TEXT NOT NULL
@@ -41,5 +45,11 @@ func (s *Store) MigrateEvidence() error {
 		(event_id, project_id, change_id, session_id, run_id, interaction_id, agent_id, provider, model, effort, source, confidence, coverage)
 		SELECT id, 'unknown', 'unknown', 'unknown', run_id, 'unknown', 'unknown', 'unknown', 'unknown', 'unknown', source, confidence_level, 'unknown' FROM events;
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	if _, err = s.db.Exec(`ALTER TABLE analyzer_evidence ADD COLUMN observed_at DATETIME NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
+	}
+	return nil
 }
