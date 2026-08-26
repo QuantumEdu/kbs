@@ -22,6 +22,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/quantum-6/skillvault/internal/agenttelemetry"
 	_ "modernc.org/sqlite"
 )
 
@@ -65,6 +66,17 @@ func main() {
 		}
 	case "status":
 		runStatus(dbPath)
+	case "report":
+		if len(args) == 3 && args[1] == "next-change" && args[2] == "--help" {
+			fmt.Fprintln(os.Stdout, "Usage: telemetryctl report next-change\nPrint evidence-cited recommendations and coverage gaps.")
+			return
+		}
+		if len(args) != 2 || args[1] != "next-change" {
+			fmt.Fprintln(os.Stderr, "telemetryctl: report supports next-change")
+			usage()
+			os.Exit(1)
+		}
+		runNextChange(dbPath)
 	default:
 		fmt.Fprintf(os.Stderr, "telemetryctl: unknown command %q\n", args[0])
 		usage()
@@ -78,6 +90,7 @@ func usage() {
   telemetryctl run show   <run-id>
   telemetryctl run recent
   telemetryctl status
+  telemetryctl report next-change
 
 Global flags:
   -db PATH   Override database path (default: ~/.telemetry/telemetry.db or $TELEMETRY_DB_PATH)
@@ -457,6 +470,36 @@ func runRecent(dbPath string) {
 
 	if count == 0 {
 		fmt.Println("No runs found.")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// report
+// ---------------------------------------------------------------------------
+
+func runNextChange(dbPath string) {
+	db, err := openDB(dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "telemetryctl: open db: %v\n", err)
+		return
+	}
+	defer db.Close()
+	report, err := agenttelemetry.ReportNextChangesDB(context.Background(), db, "")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "telemetryctl: report next-change: %v\n", err)
+		return
+	}
+	fmt.Println("== Next Change Evidence ==")
+	fmt.Println("Time evidence: measured=unknown estimated=unknown inferred=unknown")
+	if len(report.Recommendations) == 0 {
+		fmt.Println("Recommendations: none (activity alone is not debt evidence)")
+	} else {
+		for _, item := range report.Recommendations {
+			fmt.Printf("- %s %s at %s [evidence:%s confidence:%s coverage:%s]\n", item.Severity, item.Tool, item.Location, item.EvidenceID, item.Confidence, item.Coverage)
+		}
+	}
+	for _, gap := range report.Gaps {
+		fmt.Printf("Gap: %s\n", gap)
 	}
 }
 

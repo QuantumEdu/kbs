@@ -155,6 +155,18 @@ telemetryctl status
 Shows: uptime, events ingested, DB size, salt fingerprint, redaction patterns,
 and prompt storage setting.
 
+### Next Change Evidence
+
+```bash
+telemetryctl report next-change
+```
+
+Shows only analyzer evidence tied to the available repository state, with each
+recommendation citing its evidence ID, confidence, and coverage. Missing or
+stale evidence is shown as a gap; activity alone never becomes a debt claim.
+Time categories render explicitly, including unknown measured, estimated, and
+inferred values when no time evidence is available.
+
 ## CLI Wrapper (telemetrywrap)
 
 Wraps any command and infers telemetry events:
