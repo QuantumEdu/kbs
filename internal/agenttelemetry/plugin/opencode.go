@@ -42,6 +42,9 @@ type ProviderUsage struct {
 // EmitUsage emits explicit provider identity and a v1 usage payload without
 // deriving values from OpenCode text output.
 func (e *OpenCodeEmitter) EmitUsage(ctx context.Context, usage ProviderUsage) error {
+	if usage.SampleID == "" || usage.InteractionID == "" || usage.Provider == "" || usage.Model == "" || (usage.Input == nil && usage.Output == nil && usage.CacheRead == nil && usage.CacheWrite == nil && usage.Reasoning == nil) {
+		return fmt.Errorf("provider usage is missing bounded identity or dimensions")
+	}
 	payload, err := json.Marshal(map[string]any{
 		"schema_version": 1, "sample_id": usage.SampleID, "interaction_id": usage.InteractionID,
 		"mode": "delta", "segment_id": "", "reset": false, "method": "measured", "estimated_method": nil,

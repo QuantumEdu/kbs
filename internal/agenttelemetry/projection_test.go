@@ -355,16 +355,20 @@ func TestProjectEventsPersistsScopedTokenEvidenceReplaySafe(t *testing.T) {
 	if err := store.SaveEvent(context.Background(), e); err != nil {
 		t.Fatal(err)
 	}
+	e.EventID, e.Payload = "scoped-second", []byte(`{"schema_version":1,"sample_id":"second","interaction_id":"interaction","mode":"delta","method":"measured","estimated_method":null,"tokens":{"input":4,"output":2,"cache_read":null,"cache_write":null,"reasoning":1}}`)
+	if err := store.SaveEvent(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
 	for range 2 {
 		if err := store.ProjectEvents(context.Background(), "v2"); err != nil {
 			t.Fatal(err)
 		}
 	}
 	var rows, input, output, cacheRead, cacheWrite, reasoning int
-	if err := store.db.QueryRow(`SELECT COUNT(*), SUM(input), SUM(output), SUM(cache_read), SUM(cache_write), SUM(reasoning) FROM usage_scope_projection_samples WHERE sample_id='sample'`).Scan(&rows, &input, &output, &cacheRead, &cacheWrite, &reasoning); err != nil {
+	if err := store.db.QueryRow(`SELECT COUNT(*), SUM(input), SUM(output), SUM(cache_read), SUM(cache_write), SUM(reasoning) FROM usage_scope_aggregates`).Scan(&rows, &input, &output, &cacheRead, &cacheWrite, &reasoning); err != nil {
 		t.Fatal(err)
 	}
-	if rows != 5 || input != 60 || output != 15 || cacheRead != 10 || cacheWrite != 5 || reasoning != 20 {
+	if rows != 5 || input != 80 || output != 25 || cacheRead != 10 || cacheWrite != 5 || reasoning != 25 {
 		t.Fatalf("scoped evidence rows=%d dimensions=%d/%d/%d/%d/%d", rows, input, output, cacheRead, cacheWrite, reasoning)
 	}
 }

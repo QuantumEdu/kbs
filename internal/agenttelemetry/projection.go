@@ -28,6 +28,13 @@ type UsageAccumulator struct {
 	totals map[string]int64
 }
 
+func tokenDimension(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
 func (a *UsageAccumulator) Add(s UsageSample) UsageDelta {
 	if a.seen == nil {
 		a.seen, a.totals = map[string]bool{}, map[string]int64{}
@@ -143,16 +150,23 @@ func (s *Store) ProjectEvents(ctx context.Context, version string) error {
 		if p := DecodeProjectionPayload(e); p.Usage != nil {
 			total := p.Usage.Total
 			skipUsage := false
+			dimensions := [5]int64{tokenDimension(p.Usage.Input), tokenDimension(p.Usage.Output), tokenDimension(p.Usage.CacheRead), tokenDimension(p.Usage.CacheWrite), tokenDimension(p.Usage.Reasoning)}
 			if p.Usage.Cumulative {
 				var previous int64
 				err := tx.QueryRowContext(ctx, `SELECT total FROM usage_cumulative_states WHERE run_id=? AND provider=? AND interaction_id=? AND segment_id=? AND projector_version=?`, e.RunID, p.Usage.Provider, e.InteractionID, p.Usage.Segment, version).Scan(&previous)
 				if err != nil && err.Error() != "sql: no rows in result set" {
 					return err
 				}
+				var priorJSON string
+				dimensionErr := tx.QueryRowContext(ctx, `SELECT dimensions FROM usage_dimension_cumulative_states WHERE run_id=? AND provider=? AND interaction_id=? AND segment_id=? AND projector_version=?`, e.RunID, p.Usage.Provider, e.InteractionID, p.Usage.Segment, version).Scan(&priorJSON)
+				var priorDimensions [5]int64
+				if dimensionErr == nil {
+					_ = json.Unmarshal([]byte(priorJSON), &priorDimensions)
+				}
 				reason := ""
 				if p.Usage.Reset && err == nil {
 					reason = "reset_reused_segment"
-				} else if p.Usage.Total < previous {
+				} else if p.Usage.Total < previous || (dimensionErr == nil && (dimensions[0] < priorDimensions[0] || dimensions[1] < priorDimensions[1] || dimensions[2] < priorDimensions[2] || dimensions[3] < priorDimensions[3] || dimensions[4] < priorDimensions[4])) {
 					reason = "cumulative_regression"
 				}
 				if reason != "" {
@@ -162,7 +176,14 @@ func (s *Store) ProjectEvents(ctx context.Context, version string) error {
 					}
 				} else {
 					total -= previous
+					for i := range dimensions {
+						dimensions[i] -= priorDimensions[i]
+					}
 					if _, err := tx.ExecContext(ctx, `INSERT INTO usage_cumulative_states VALUES (?,?,?,?,?,?) ON CONFLICT(run_id,provider,interaction_id,segment_id,projector_version) DO UPDATE SET total=excluded.total`, e.RunID, p.Usage.Provider, e.InteractionID, p.Usage.Segment, version, p.Usage.Total); err != nil {
+						return err
+					}
+					next, _ := json.Marshal([5]int64{tokenDimension(p.Usage.Input), tokenDimension(p.Usage.Output), tokenDimension(p.Usage.CacheRead), tokenDimension(p.Usage.CacheWrite), tokenDimension(p.Usage.Reasoning)})
+					if _, err := tx.ExecContext(ctx, `INSERT INTO usage_dimension_cumulative_states VALUES (?,?,?,?,?,?) ON CONFLICT(run_id,provider,interaction_id,segment_id,projector_version) DO UPDATE SET dimensions=excluded.dimensions`, e.RunID, p.Usage.Provider, e.InteractionID, p.Usage.Segment, version, string(next)); err != nil {
 						return err
 					}
 				}
@@ -176,10 +197,10 @@ func (s *Store) ProjectEvents(ctx context.Context, version string) error {
 				if err != nil {
 					return err
 				}
-				sample := TokenSample{SampleID: p.Usage.ID, Identity: identity, Method: p.Coverage, Coverage: e.Coverage, Input: p.Usage.Input, Output: p.Usage.Output, CacheRead: p.Usage.CacheRead, CacheWrite: p.Usage.CacheWrite, Reasoning: p.Usage.Reasoning}
+				sample := TokenSample{SampleID: p.Usage.ID, Identity: identity, Method: p.Coverage, Coverage: e.Coverage, Input: &dimensions[0], Output: &dimensions[1], CacheRead: &dimensions[2], CacheWrite: &dimensions[3], Reasoning: &dimensions[4]}
 				for scope, aggregate := range AggregateTokenSamples([]TokenSample{sample}) {
 					scopeID := map[TokenScope]string{InteractionScope: identity.InteractionID, RunScope: identity.RunID, SessionScope: identity.SessionID, ChangeScope: identity.ChangeID, ProjectScope: identity.ProjectID}[scope]
-					if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO usage_scope_projection_samples VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, p.Usage.ID, unknown(e.Provider), version, scope, scopeID, string(encoded), aggregate.Provenance, aggregate.Confidence, aggregate.Coverage, aggregate.Input, aggregate.Output, aggregate.CacheRead, aggregate.CacheWrite, aggregate.Reasoning); err != nil {
+					if _, err := tx.ExecContext(ctx, `INSERT INTO usage_scope_aggregates VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(provider,projector_version,scope,scope_id) DO UPDATE SET input=input+excluded.input,output=output+excluded.output,cache_read=cache_read+excluded.cache_read,cache_write=cache_write+excluded.cache_write,reasoning=reasoning+excluded.reasoning`, unknown(e.Provider), version, scope, scopeID, string(encoded), aggregate.Provenance, aggregate.Confidence, aggregate.Coverage, aggregate.Input, aggregate.Output, aggregate.CacheRead, aggregate.CacheWrite, aggregate.Reasoning); err != nil {
 						return err
 					}
 				}
