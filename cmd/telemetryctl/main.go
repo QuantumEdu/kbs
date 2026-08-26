@@ -12,11 +12,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -25,6 +27,24 @@ import (
 	"github.com/quantum-6/skillvault/internal/agenttelemetry"
 	_ "modernc.org/sqlite"
 )
+
+var errNoCurrentCommit = errors.New("current repository commit unavailable")
+
+var gitCurrentCommit = func() (string, error) {
+	out, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		return "", errNoCurrentCommit
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func currentReportCommit() (string, error) {
+	commit, err := gitCurrentCommit()
+	if err != nil || commit == "" {
+		return "", errNoCurrentCommit
+	}
+	return commit, nil
+}
 
 func main() {
 	// Global -db flag before subcommand.
@@ -478,13 +498,18 @@ func runRecent(dbPath string) {
 // ---------------------------------------------------------------------------
 
 func runNextChange(dbPath string) {
+	commit, err := currentReportCommit()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "telemetryctl: report next-change: %v\n", err)
+		return
+	}
 	db, err := openDB(dbPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "telemetryctl: open db: %v\n", err)
 		return
 	}
 	defer db.Close()
-	report, err := agenttelemetry.ReportNextChangesDB(context.Background(), db, "")
+	report, err := agenttelemetry.ReportNextChangesDB(context.Background(), db, commit)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "telemetryctl: report next-change: %v\n", err)
 		return
