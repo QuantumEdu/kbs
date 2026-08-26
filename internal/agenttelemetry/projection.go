@@ -140,3 +140,27 @@ func (s *Store) ProjectEvents(ctx context.Context, version string) error {
 	}
 	return tx.Commit()
 }
+
+// SaveTypedProjectionSamples persists narrow, replay-safe evidence projections.
+func (s *Store) SaveTypedProjectionSamples(ctx context.Context, runID string, usage []UsageSample, activity []ActivityInterval, git GitSnapshot) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, u := range usage {
+		if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO usage_projection_samples VALUES (?,?,?,?,?)`, runID, u.Provider, u.ID, u.Total, u.Measured); err != nil {
+			return err
+		}
+	}
+	for _, a := range activity {
+		if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO activity_projection_samples VALUES (?,?,?,?)`, runID, a.Start.UTC(), a.End.UTC(), a.Measured); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `INSERT OR REPLACE INTO git_projection_samples VALUES (?,?,?,?,?,?,?,?,?)`, runID, git.Root, git.Head, git.Branch, git.Detached, git.Staged, git.Unstaged, git.Untracked, git.CapturedAt.UTC())
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}

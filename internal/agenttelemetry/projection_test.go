@@ -92,3 +92,25 @@ func runGitAt(t *testing.T, root string, args ...string) {
 		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
 }
+
+func TestSaveTypedProjectionSamples(t *testing.T) {
+	store, err := OpenStore(tempDBPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	base := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	err = store.SaveTypedProjectionSamples(context.Background(), "run-1",
+		[]UsageSample{{Provider: "codex", ID: "sample-1", Total: 12, Measured: true}},
+		[]ActivityInterval{{Start: base, End: base.Add(time.Minute), Measured: true}},
+		GitSnapshot{Root: "/repo", Head: "abc", Branch: "main", CapturedAt: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"usage_projection_samples", "activity_projection_samples", "git_projection_samples"} {
+		var count int
+		if err := store.db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("%s = %d, %v", table, count, err)
+		}
+	}
+}
