@@ -9,11 +9,14 @@ import (
 // UsageSample is one provider usage observation. Cumulative samples produce
 // deltas only while the provider total remains monotonic.
 type UsageSample struct {
-	Provider, ID         string
-	Total                int64
-	Cumulative, Measured bool
-	Segment              string
-	Reset                bool
+	Provider, ID          string
+	Total                 int64
+	Cumulative, Measured  bool
+	Segment               string
+	Reset                 bool
+	Input, Output         *int64
+	CacheRead, CacheWrite *int64
+	Reasoning             *int64
 }
 type UsageDelta struct {
 	Total             int64
@@ -167,6 +170,12 @@ func (s *Store) ProjectEvents(ctx context.Context, version string) error {
 				if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO usage_projection_samples VALUES (?,?,?,?,?)`, e.RunID, p.Usage.Provider, version+"\x00"+p.Usage.ID, total, p.Usage.Measured); err != nil {
 					return err
 				}
+			}
+		} else if e.EventType == "model.usage" {
+			// Unsupported wrapper/provider payloads are durable unknown evidence,
+			// never a fabricated zero or a retained raw wrapper line.
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO usage_projection_unknown_samples VALUES (?,?,?,?,?)`, e.RunID, unknown(e.Provider), e.EventID, version, "unsupported_payload"); err != nil {
+				return err
 			}
 		}
 		if p := DecodeProjectionPayload(e); p.Activity != nil && !p.Activity.Interval.Start.IsZero() {
