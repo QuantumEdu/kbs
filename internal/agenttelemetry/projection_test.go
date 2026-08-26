@@ -343,3 +343,28 @@ func TestCaptureGitSnapshotHandlesDetachedAndCommandFailure(t *testing.T) {
 		t.Fatal("git command failure must not produce a snapshot")
 	}
 }
+
+func TestProjectEventsPersistsScopedTokenEvidenceReplaySafe(t *testing.T) {
+	store, err := OpenStore(tempDBPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	payload := []byte(`{"schema_version":1,"sample_id":"sample","interaction_id":"interaction","mode":"delta","method":"measured","estimated_method":null,"tokens":{"input":12,"output":3,"cache_read":2,"cache_write":1,"reasoning":4}}`)
+	e := Event{EventID: "scoped", RunID: "run", EventType: "model.usage", Timestamp: time.Now(), Source: "plugin", Provider: "opencode", Model: "gpt-5", Effort: "high", ProjectID: "project", ChangeID: "change", SessionID: "session", InteractionID: "interaction", Coverage: "complete", ConfidenceLevel: "measured", Payload: payload}
+	if err := store.SaveEvent(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := store.ProjectEvents(context.Background(), "v2"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var rows, input, output, cacheRead, cacheWrite, reasoning int
+	if err := store.db.QueryRow(`SELECT COUNT(*), SUM(input), SUM(output), SUM(cache_read), SUM(cache_write), SUM(reasoning) FROM usage_scope_projection_samples WHERE sample_id='sample'`).Scan(&rows, &input, &output, &cacheRead, &cacheWrite, &reasoning); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 5 || input != 60 || output != 15 || cacheRead != 10 || cacheWrite != 5 || reasoning != 20 {
+		t.Fatalf("scoped evidence rows=%d dimensions=%d/%d/%d/%d/%d", rows, input, output, cacheRead, cacheWrite, reasoning)
+	}
+}

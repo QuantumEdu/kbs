@@ -2,6 +2,7 @@ package agenttelemetry
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"time"
 )
@@ -123,7 +124,7 @@ func (s *Store) ProjectEvents(ctx context.Context, version string) error {
 	if err := tx.QueryRowContext(ctx, `SELECT last_rowid FROM projector_checkpoints WHERE name='events' AND version=?`, version).Scan(&from); err != nil && err.Error() != "sql: no rows in result set" {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT e.rowid, e.id, e.run_id, e.event_type, e.payload, COALESCE(m.provider,''), COALESCE(m.interaction_id,'') FROM events e LEFT JOIN evidence_metadata m ON m.event_id=e.id WHERE e.rowid > ? ORDER BY e.rowid`, from)
+	rows, err := tx.QueryContext(ctx, `SELECT e.rowid, e.id, e.run_id, e.event_type, e.payload, COALESCE(m.provider,''), COALESCE(m.interaction_id,''), COALESCE(m.project_id,''), COALESCE(m.change_id,''), COALESCE(m.session_id,''), COALESCE(m.agent_id,''), COALESCE(m.model,''), COALESCE(m.effort,''), COALESCE(m.source,''), COALESCE(m.confidence,''), COALESCE(m.coverage,'') FROM events e LEFT JOIN evidence_metadata m ON m.event_id=e.id WHERE e.rowid > ? ORDER BY e.rowid`, from)
 	if err != nil {
 		return err
 	}
@@ -132,7 +133,7 @@ func (s *Store) ProjectEvents(ctx context.Context, version string) error {
 		var rowid int64
 		var e Event
 		var payload string
-		if err := rows.Scan(&rowid, &e.EventID, &e.RunID, &e.EventType, &payload, &e.Provider, &e.InteractionID); err != nil {
+		if err := rows.Scan(&rowid, &e.EventID, &e.RunID, &e.EventType, &payload, &e.Provider, &e.InteractionID, &e.ProjectID, &e.ChangeID, &e.SessionID, &e.AgentID, &e.Model, &e.Effort, &e.Source, &e.ConfidenceLevel, &e.Coverage); err != nil {
 			return err
 		}
 		e.Payload = []byte(payload)
@@ -169,6 +170,18 @@ func (s *Store) ProjectEvents(ctx context.Context, version string) error {
 			if !skipUsage {
 				if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO usage_projection_samples VALUES (?,?,?,?,?)`, e.RunID, p.Usage.Provider, version+"\x00"+p.Usage.ID, total, p.Usage.Measured); err != nil {
 					return err
+				}
+				identity := e.EvidenceMetadata()
+				encoded, err := json.Marshal(identity)
+				if err != nil {
+					return err
+				}
+				sample := TokenSample{SampleID: p.Usage.ID, Identity: identity, Method: p.Coverage, Coverage: e.Coverage, Input: p.Usage.Input, Output: p.Usage.Output, CacheRead: p.Usage.CacheRead, CacheWrite: p.Usage.CacheWrite, Reasoning: p.Usage.Reasoning}
+				for scope, aggregate := range AggregateTokenSamples([]TokenSample{sample}) {
+					scopeID := map[TokenScope]string{InteractionScope: identity.InteractionID, RunScope: identity.RunID, SessionScope: identity.SessionID, ChangeScope: identity.ChangeID, ProjectScope: identity.ProjectID}[scope]
+					if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO usage_scope_projection_samples VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, p.Usage.ID, unknown(e.Provider), version, scope, scopeID, string(encoded), aggregate.Provenance, aggregate.Confidence, aggregate.Coverage, aggregate.Input, aggregate.Output, aggregate.CacheRead, aggregate.CacheWrite, aggregate.Reasoning); err != nil {
+						return err
+					}
 				}
 			}
 		} else if e.EventType == "model.usage" {

@@ -21,6 +21,12 @@ func (s *Store) MigrateEvidence() error {
 			PRIMARY KEY(source_event_id, projector_version)
 		);
 		CREATE TABLE IF NOT EXISTS usage_projection_samples (run_id TEXT NOT NULL, provider TEXT NOT NULL, sample_id TEXT NOT NULL, total INTEGER NOT NULL, measured INTEGER NOT NULL, PRIMARY KEY(provider, sample_id));
+		CREATE TABLE IF NOT EXISTS usage_scope_projection_samples (
+			sample_id TEXT NOT NULL, provider TEXT NOT NULL, projector_version TEXT NOT NULL, scope TEXT NOT NULL, scope_id TEXT NOT NULL, identity TEXT NOT NULL,
+			provenance TEXT NOT NULL, confidence TEXT NOT NULL, coverage TEXT NOT NULL,
+			input INTEGER NOT NULL, output INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL, reasoning INTEGER NOT NULL,
+			PRIMARY KEY(provider, sample_id, projector_version, scope)
+		);
 		CREATE TABLE IF NOT EXISTS usage_cumulative_states (run_id TEXT NOT NULL, provider TEXT NOT NULL, interaction_id TEXT NOT NULL, segment_id TEXT NOT NULL, projector_version TEXT NOT NULL, total INTEGER NOT NULL, PRIMARY KEY(run_id, provider, interaction_id, segment_id, projector_version));
 		CREATE TABLE IF NOT EXISTS activity_projection_samples (run_id TEXT NOT NULL, started_at DATETIME NOT NULL, completed_at DATETIME NOT NULL, measured INTEGER NOT NULL, PRIMARY KEY(run_id, started_at, completed_at, measured));
 		CREATE TABLE IF NOT EXISTS git_projection_samples (run_id TEXT PRIMARY KEY, root TEXT NOT NULL, head TEXT NOT NULL, branch TEXT NOT NULL, detached INTEGER NOT NULL, staged INTEGER NOT NULL, unstaged INTEGER NOT NULL, untracked INTEGER NOT NULL, captured_at DATETIME NOT NULL);
