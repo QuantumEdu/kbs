@@ -18,8 +18,12 @@ func (s *Store) MigrateEvidence() error {
 			PRIMARY KEY(source_event_id, projector_version)
 		);
 		CREATE TABLE IF NOT EXISTS usage_projection_samples (run_id TEXT NOT NULL, provider TEXT NOT NULL, sample_id TEXT NOT NULL, total INTEGER NOT NULL, measured INTEGER NOT NULL, PRIMARY KEY(provider, sample_id));
+		CREATE TABLE IF NOT EXISTS usage_cumulative_states (run_id TEXT NOT NULL, provider TEXT NOT NULL, interaction_id TEXT NOT NULL, segment_id TEXT NOT NULL, projector_version TEXT NOT NULL, total INTEGER NOT NULL, PRIMARY KEY(run_id, provider, interaction_id, segment_id, projector_version));
 		CREATE TABLE IF NOT EXISTS activity_projection_samples (run_id TEXT NOT NULL, started_at DATETIME NOT NULL, completed_at DATETIME NOT NULL, measured INTEGER NOT NULL, PRIMARY KEY(run_id, started_at, completed_at, measured));
 		CREATE TABLE IF NOT EXISTS git_projection_samples (run_id TEXT PRIMARY KEY, root TEXT NOT NULL, head TEXT NOT NULL, branch TEXT NOT NULL, detached INTEGER NOT NULL, staged INTEGER NOT NULL, unstaged INTEGER NOT NULL, untracked INTEGER NOT NULL, captured_at DATETIME NOT NULL);
+		CREATE TABLE IF NOT EXISTS git_lifecycle_projection_samples (run_id TEXT NOT NULL, phase TEXT NOT NULL, projector_version TEXT NOT NULL, root TEXT NOT NULL, head TEXT NOT NULL, branch TEXT NOT NULL, detached INTEGER NOT NULL, staged INTEGER NOT NULL, unstaged INTEGER NOT NULL, untracked INTEGER NOT NULL, captured_at DATETIME NOT NULL, PRIMARY KEY(run_id, phase, projector_version));
+		CREATE TABLE IF NOT EXISTS activity_heartbeat_samples (run_id TEXT NOT NULL, clock_id TEXT NOT NULL, observed_at DATETIME NOT NULL, projector_version TEXT NOT NULL, PRIMARY KEY(run_id, clock_id, observed_at, projector_version));
+		CREATE TABLE IF NOT EXISTS analyzer_evidence (evidence_id TEXT PRIMARY KEY, tool TEXT NOT NULL, version TEXT NOT NULL, invocation_id TEXT NOT NULL, target_commit TEXT NOT NULL, artifact_hash TEXT NOT NULL, severity TEXT NOT NULL, location TEXT NOT NULL, confidence TEXT NOT NULL, coverage TEXT NOT NULL, evidence TEXT NOT NULL, stale INTEGER NOT NULL);
 		CREATE TABLE IF NOT EXISTS run_evidence (
 			run_id TEXT PRIMARY KEY REFERENCES agent_runs(id),
 			token_coverage TEXT NOT NULL

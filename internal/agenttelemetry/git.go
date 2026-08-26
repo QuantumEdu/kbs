@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+var gitExecutable = "git"
+
 type GitSnapshot struct {
 	Root, Head, Branch          string
 	Detached                    bool
@@ -74,7 +76,7 @@ func CaptureGitContext() (repoURL, branch, commitSHA string) {
 	return runGitCmd("remote", "get-url", "origin"), runGitCmd("branch", "--show-current"), runGitCmd("rev-parse", "HEAD")
 }
 func runGitCmd(args ...string) string {
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command(gitExecutable, args...)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -82,7 +84,7 @@ func runGitCmd(args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 func gitAt(root string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	cmd := exec.Command(gitExecutable, append([]string{"-C", root}, args...)...)
 	out, err := cmd.Output()
 	return strings.TrimSpace(string(out)), err
 }

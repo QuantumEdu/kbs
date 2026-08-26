@@ -137,7 +137,23 @@ func (s *Store) ProjectEvents(ctx context.Context, version string) error {
 			return err
 		}
 		if p := DecodeProjectionPayload(e); p.Usage != nil {
-			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO usage_projection_samples VALUES (?,?,?,?,?)`, e.RunID, p.Usage.Provider, version+"\x00"+p.Usage.ID, p.Usage.Total, p.Usage.Measured); err != nil {
+			total := p.Usage.Total
+			if p.Usage.Cumulative {
+				var previous int64
+				err := tx.QueryRowContext(ctx, `SELECT total FROM usage_cumulative_states WHERE run_id=? AND provider=? AND interaction_id=? AND segment_id=? AND projector_version=?`, e.RunID, p.Usage.Provider, e.InteractionID, p.Usage.Segment, version).Scan(&previous)
+				if err != nil && err.Error() != "sql: no rows in result set" {
+					return err
+				}
+				if p.Usage.Total < previous {
+					from = rowid
+					continue
+				}
+				total -= previous
+				if _, err := tx.ExecContext(ctx, `INSERT INTO usage_cumulative_states VALUES (?,?,?,?,?,?) ON CONFLICT(run_id,provider,interaction_id,segment_id,projector_version) DO UPDATE SET total=excluded.total`, e.RunID, p.Usage.Provider, e.InteractionID, p.Usage.Segment, version, p.Usage.Total); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO usage_projection_samples VALUES (?,?,?,?,?)`, e.RunID, p.Usage.Provider, version+"\x00"+p.Usage.ID, total, p.Usage.Measured); err != nil {
 				return err
 			}
 		}
@@ -146,9 +162,33 @@ func (s *Store) ProjectEvents(ctx context.Context, version string) error {
 				return err
 			}
 		}
+		if p := DecodeProjectionPayload(e); p.Activity != nil && !p.Activity.Heartbeat.IsZero() {
+			var previous time.Time
+			err := tx.QueryRowContext(ctx, `SELECT observed_at FROM activity_heartbeat_samples WHERE run_id=? AND clock_id=? AND projector_version=? ORDER BY observed_at DESC LIMIT 1`, e.RunID, p.Activity.ClockID, version).Scan(&previous)
+			if err == nil && p.Activity.Heartbeat.After(previous) {
+				end := p.Activity.Heartbeat
+				if end.Sub(previous) > 5*time.Minute {
+					end = previous.Add(5 * time.Minute)
+				}
+				if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO activity_projection_samples VALUES (?,?,?,?)`, e.RunID, previous, end, false); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO activity_heartbeat_samples VALUES (?,?,?,?)`, e.RunID, p.Activity.ClockID, p.Activity.Heartbeat, version); err != nil {
+				return err
+			}
+		}
 		if p := DecodeProjectionPayload(e); p.Git != nil {
 			g := p.Git
+			if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO git_lifecycle_projection_samples VALUES (?,?,?,?,?,?,?,?,?,?,?)`, e.RunID, lifecyclePhase(e.EventType), version, g.Root, g.Head, g.Branch, g.Detached, g.Staged, g.Unstaged, g.Untracked, g.CapturedAt); err != nil {
+				return err
+			}
 			if _, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO git_projection_samples VALUES (?,?,?,?,?,?,?,?,?)`, e.RunID, g.Root, g.Head, g.Branch, g.Detached, g.Staged, g.Unstaged, g.Untracked, g.CapturedAt); err != nil {
+				return err
+			}
+		}
+		if s.projectEventsAfterRow != nil {
+			if err := s.projectEventsAfterRow(rowid); err != nil {
 				return err
 			}
 		}
