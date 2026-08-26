@@ -9,6 +9,14 @@ func (s *Store) MigrateEvidence() error {
 		return fmt.Errorf("store is closed")
 	}
 	_, err := s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS projector_checkpoints (
+			name TEXT NOT NULL, version TEXT NOT NULL, last_rowid INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY(name, version)
+		);
+		CREATE TABLE IF NOT EXISTS projected_events (
+			source_event_id TEXT NOT NULL REFERENCES events(id), projector_version TEXT NOT NULL,
+			PRIMARY KEY(source_event_id, projector_version)
+		);
 		CREATE TABLE IF NOT EXISTS run_evidence (
 			run_id TEXT PRIMARY KEY REFERENCES agent_runs(id),
 			token_coverage TEXT NOT NULL
