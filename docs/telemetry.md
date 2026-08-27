@@ -155,6 +155,22 @@ telemetryctl status
 Shows: uptime, events ingested, DB size, salt fingerprint, redaction patterns,
 and prompt storage setting.
 
+### Next Change Evidence
+
+```bash
+telemetryctl report next-change
+```
+
+Shows analyzer evidence tied to the available repository state, with each
+recommendation citing its evidence ID, confidence, and coverage. It also renders
+the five token dimensions (`input`, `output`, `cache_read`, `cache_write`, and
+`reasoning`) at every materialized scope, keeping measured/estimated provenance
+separate from coverage. Time is reported as wall, measured-active,
+inferred-active, and unknown. Git output preserves the start/end revisions and
+prints an explicit unknown transition/commit count until verified ancestry is
+materialized. Missing or stale evidence is a gap, never a zero; activity alone
+never becomes a debt claim.
+
 ## CLI Wrapper (telemetrywrap)
 
 Wraps any command and infers telemetry events:

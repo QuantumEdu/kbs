@@ -105,7 +105,7 @@ func decodeUsagePayload(e Event) ProjectionPayload {
 	if !known {
 		return ProjectionPayload{Coverage: CoverageUnknown}
 	}
-	return ProjectionPayload{Coverage: p.Method, Usage: &UsageSample{Provider: e.Provider, ID: p.SampleID, Total: total, Cumulative: p.Mode == "cumulative", Measured: p.Method == "measured", Segment: p.SegmentID, Reset: p.Reset}}
+	return ProjectionPayload{Coverage: p.Method, Usage: &UsageSample{Provider: e.Provider, ID: p.SampleID, Total: total, Cumulative: p.Mode == "cumulative", Measured: p.Method == "measured", Segment: p.SegmentID, Reset: p.Reset, Input: p.Tokens.Input, Output: p.Tokens.Output, CacheRead: p.Tokens.CacheRead, CacheWrite: p.Tokens.CacheWrite, Reasoning: p.Tokens.Reasoning}}
 }
 
 func decodeActivityPayload(e Event) ProjectionPayload {

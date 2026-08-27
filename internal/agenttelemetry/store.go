@@ -93,6 +93,8 @@ CREATE INDEX IF NOT EXISTS idx_agent_runs_status ON agent_runs(status);
 // Store provides CRUD access to the SQLite telemetry database.
 type Store struct {
 	db *sql.DB
+	// projectEventsAfterRow is a test-only transaction failure seam.
+	projectEventsAfterRow func(rowID int64) error
 }
 
 // OpenStore opens the SQLite database at dbPath, creates tables,
