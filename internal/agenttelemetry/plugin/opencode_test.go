@@ -383,3 +383,36 @@ type testError struct {
 }
 
 func (e *testError) Error() string { return e.msg }
+
+func TestOpenCodeEmitterEmitUsageRejectsUnboundedIdentity(t *testing.T) {
+	emitter := NewOpenCodeEmitter("opencode", "0.1.0", t.TempDir(), filepath.Join(t.TempDir(), "missing.sock"))
+	if err := emitter.EmitUsage(context.Background(), ProviderUsage{Provider: "opencode", Model: "gpt-5"}); err == nil {
+		t.Fatal("usage without bounded sample and interaction identity must fail")
+	}
+}
+
+func TestOpenCodeEmitterEmitUsageWritesBoundedProviderEvent(t *testing.T) {
+	socketPath, store, cancel := startTempDaemon(t)
+	defer cancel()
+	emitter := NewOpenCodeEmitter("opencode", "0.1.0", t.TempDir(), socketPath)
+	defer emitter.Close()
+	runID, err := emitter.StartRun(context.Background(), agenttelemetry.RunOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, output := int64(12), int64(3)
+	if err := emitter.EmitUsage(context.Background(), ProviderUsage{SampleID: "sample", InteractionID: "turn", Provider: "opencode", Model: "gpt-5", Effort: "high", Input: &input, Output: &output}); err != nil {
+		t.Fatal(err)
+	}
+	emitter.Close()
+	for range 10 {
+		time.Sleep(20 * time.Millisecond)
+		count, err := store.EventCountByType(context.Background(), runID, "model.usage")
+		if err != nil {
+			t.Fatal(err)
+		} else if count == 1 {
+			return
+		}
+	}
+	t.Fatal("bounded provider usage event was not persisted")
+}
