@@ -88,7 +88,7 @@ func main() {
 		runStatus(dbPath)
 	case "report":
 		if len(args) == 3 && args[1] == "next-change" && args[2] == "--help" {
-			fmt.Fprintln(os.Stdout, "Usage: telemetryctl report next-change\nPrint evidence-cited recommendations and coverage gaps.")
+			fmt.Fprintln(os.Stdout, "Usage: telemetryctl report next-change\nPrint evidence-cited recommendations plus token, time, and Git provenance.")
 			return
 		}
 		if len(args) != 2 || args[1] != "next-change" {
@@ -110,7 +110,7 @@ func usage() {
   telemetryctl run show   <run-id>
   telemetryctl run recent
   telemetryctl status
-  telemetryctl report next-change
+	telemetryctl report next-change
 
 Global flags:
   -db PATH   Override database path (default: ~/.telemetry/telemetry.db or $TELEMETRY_DB_PATH)
@@ -514,8 +514,13 @@ func runNextChange(dbPath string) {
 		fmt.Fprintf(os.Stderr, "telemetryctl: report next-change: %v\n", err)
 		return
 	}
+	evidence, err := agenttelemetry.ReportTelemetryEvidenceDB(context.Background(), db)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "telemetryctl: report next-change: %v\n", err)
+		return
+	}
 	fmt.Println("== Next Change Evidence ==")
-	fmt.Println("Time evidence: measured=unknown estimated=unknown inferred=unknown")
+	renderTelemetryEvidence(os.Stdout, evidence)
 	if len(report.Recommendations) == 0 {
 		fmt.Println("Recommendations: none (activity alone is not debt evidence)")
 	} else {
@@ -525,6 +530,45 @@ func runNextChange(dbPath string) {
 	}
 	for _, gap := range report.Gaps {
 		fmt.Printf("Gap: %s\n", gap)
+	}
+}
+
+func renderTelemetryEvidence(w io.Writer, report agenttelemetry.TelemetryEvidenceReport) {
+	number := func(value agenttelemetry.EvidenceNumber) string {
+		if !value.Known {
+			return "unknown"
+		}
+		return fmt.Sprintf("%d", value.Value)
+	}
+	duration := func(value agenttelemetry.EvidenceDuration) string {
+		if !value.Known {
+			return "unknown"
+		}
+		return value.Value.String()
+	}
+	if len(report.Tokens) == 0 {
+		fmt.Fprintln(w, "Token evidence: unknown (no projected token samples)")
+	} else {
+		fmt.Fprintln(w, "== Token Evidence ==")
+		for _, item := range report.Tokens {
+			fmt.Fprintf(w, "scope=%s:%s provider=%s input=%s output=%s cache_read=%s cache_write=%s reasoning=%s provenance=%s confidence=%s coverage=%s\n", item.Scope, item.ScopeID, item.Provider, number(item.Input), number(item.Output), number(item.CacheRead), number(item.CacheWrite), number(item.Reasoning), item.Provenance, item.Confidence, item.Coverage)
+		}
+	}
+	if len(report.Time) == 0 {
+		fmt.Fprintln(w, "Time evidence: unknown (no runs)")
+	} else {
+		fmt.Fprintln(w, "== Time Evidence ==")
+		for _, item := range report.Time {
+			fmt.Fprintf(w, "run=%s wall=%s measured_active=%s inferred_active=%s unknown=%s\n", item.RunID, duration(item.Wall), duration(item.Measured), duration(item.Inferred), duration(item.Unknown))
+		}
+	}
+	if len(report.Git) == 0 {
+		fmt.Fprintln(w, "Git evidence: unknown (no runs)")
+	} else {
+		fmt.Fprintln(w, "== Git Evidence ==")
+		for _, item := range report.Git {
+			fmt.Fprintf(w, "run=%s start=%s end=%s transition=%s commits=%s\n", item.RunID, item.StartRevision, item.EndRevision, item.Transition, item.CommitCount)
+		}
 	}
 }
 
