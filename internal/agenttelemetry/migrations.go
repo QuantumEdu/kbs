@@ -63,5 +63,10 @@ func (s *Store) MigrateEvidence() error {
 	if _, err = s.db.Exec(`ALTER TABLE analyzer_evidence ADD COLUMN observed_at DATETIME NOT NULL DEFAULT ''`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 		return err
 	}
+	for _, column := range []string{"input_known", "output_known", "cache_read_known", "cache_write_known", "reasoning_known"} {
+		if _, err = s.db.Exec(`ALTER TABLE usage_scope_aggregates ADD COLUMN ` + column + ` INTEGER NOT NULL DEFAULT 1`); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			return err
+		}
+	}
 	return nil
 }
