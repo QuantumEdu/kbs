@@ -24,12 +24,36 @@ type OpenCodeEmitter struct {
 	workspace    string
 	socketPath   string
 
-	mu            sync.Mutex
-	conn          net.Conn
-	buffer        []agenttelemetry.Event
-	lastCorrID    string
-	currentRunID  string
-	closed        bool
+	mu           sync.Mutex
+	conn         net.Conn
+	buffer       []agenttelemetry.Event
+	lastCorrID   string
+	currentRunID string
+	closed       bool
+}
+
+// ProviderUsage is the bounded provider-native usage contract accepted by the
+// v1 projector. All five dimensions are kept independently; nil is unknown.
+type ProviderUsage struct {
+	SampleID, InteractionID, Provider, Model, Effort string
+	Input, Output, CacheRead, CacheWrite, Reasoning  *int64
+}
+
+// EmitUsage emits explicit provider identity and a v1 usage payload without
+// deriving values from OpenCode text output.
+func (e *OpenCodeEmitter) EmitUsage(ctx context.Context, usage ProviderUsage) error {
+	if usage.SampleID == "" || usage.InteractionID == "" || usage.Provider == "" || usage.Model == "" || (usage.Input == nil && usage.Output == nil && usage.CacheRead == nil && usage.CacheWrite == nil && usage.Reasoning == nil) {
+		return fmt.Errorf("provider usage is missing bounded identity or dimensions")
+	}
+	payload, err := json.Marshal(map[string]any{
+		"schema_version": 1, "sample_id": usage.SampleID, "interaction_id": usage.InteractionID,
+		"mode": "delta", "segment_id": "", "reset": false, "method": "measured", "estimated_method": nil,
+		"tokens": map[string]*int64{"input": usage.Input, "output": usage.Output, "cache_read": usage.CacheRead, "cache_write": usage.CacheWrite, "reasoning": usage.Reasoning},
+	})
+	if err != nil {
+		return err
+	}
+	return e.EmitEvent(ctx, agenttelemetry.Event{EventType: "model.usage", InteractionID: usage.InteractionID, Provider: usage.Provider, Model: usage.Model, Effort: usage.Effort, Coverage: "provider_native", Payload: payload})
 }
 
 // NewOpenCodeEmitter creates a new OpenCodeEmitter. The emitter connects to

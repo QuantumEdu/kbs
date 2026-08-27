@@ -229,60 +229,55 @@ func parseStdoutForModels(socketPath, agentID, runID string, r io.Reader, done <
 			return
 		default:
 		}
-		line := scanner.Text()
-		if info := extractModelInfo(line); info != nil {
-			payload, _ := json.Marshal(info)
-			emitEvent(socketPath, agentEvent(agentID, runID, "model.usage", "heuristic", payload))
+		info, ok := parseUsageLine(scanner.Text())
+		if info == nil {
+			continue
 		}
+		payloadInfo := make(map[string]interface{}, len(info))
+		for key, value := range info {
+			payloadInfo[key] = value
+		}
+		delete(payloadInfo, "provider")
+		delete(payloadInfo, "model")
+		delete(payloadInfo, "effort")
+		payload, _ := json.Marshal(payloadInfo)
+		evt := agentEvent(agentID, runID, "model.usage", "heuristic", payload)
+		evt["coverage"] = "unknown"
+		if ok {
+			evt["provider"], evt["model"], evt["effort"] = info["provider"], info["model"], info["effort"]
+			evt["interaction_id"], evt["coverage"] = info["interaction_id"], "bounded"
+		}
+		emitEvent(socketPath, evt)
 	}
 }
 
-// extractModelInfo tries to detect model/token usage patterns in a line of output.
-// Returns a map of extracted info or nil if nothing was detected.
-func extractModelInfo(line string) map[string]interface{} {
-	lower := strings.ToLower(line)
-
-	// Look for patterns like:
-	//   "Model: claude-sonnet-4-5"
-	//   "tokens: 1234 input, 567 output"
-	//   "Usage: input_tokens=2450 output_tokens=820"
-	hasModel := strings.Contains(lower, "model") || strings.Contains(lower, "modelo")
-	hasToken := strings.Contains(lower, "token") || strings.Contains(lower, "tokens") ||
-		strings.Contains(lower, "input_token") || strings.Contains(lower, "output_token") ||
-		strings.Contains(lower, "usage")
-
-	if !hasModel && !hasToken {
-		return nil
+// parseUsageLine accepts only a bounded provider JSON contract. Ambiguous
+// human output becomes explicit unknown coverage and its raw line is discarded.
+func parseUsageLine(line string) (map[string]interface{}, bool) {
+	var input struct {
+		Provider      string `json:"provider"`
+		Model         string `json:"model"`
+		Effort        string `json:"effort"`
+		SampleID      string `json:"sample_id"`
+		InteractionID string `json:"interaction_id"`
+		Usage         struct {
+			Input      *int64 `json:"input"`
+			Output     *int64 `json:"output"`
+			CacheRead  *int64 `json:"cache_read"`
+			CacheWrite *int64 `json:"cache_write"`
+			Reasoning  *int64 `json:"reasoning"`
+		} `json:"usage"`
 	}
-
-	info := map[string]interface{}{
-		"raw_line":          line,
-		"estimation_method": "heuristic",
-		"source":            "wrapper-stdout",
-	}
-
-	// Crude extraction of model name.
-	modelIdx := strings.Index(lower, "model")
-	if modelIdx >= 0 {
-		end := modelIdx + 6 // len("model: ")
-		if end < len(line) {
-			rest := strings.TrimSpace(line[modelIdx:])
-			rest = strings.TrimPrefix(rest, "Model:")
-			rest = strings.TrimPrefix(rest, "model:")
-			rest = strings.TrimPrefix(rest, "Model ")
-			rest = strings.TrimPrefix(rest, "model ")
-			rest = strings.TrimSpace(rest)
-			if len(rest) > 0 && len(rest) < 50 {
-				// Take first word as model name.
-				parts := strings.Fields(rest)
-				if len(parts) > 0 {
-					info["model"] = strings.TrimRight(parts[0], ",;.")
-				}
-			}
+	err := json.Unmarshal([]byte(line), &input)
+	known := input.Usage.Input != nil || input.Usage.Output != nil || input.Usage.CacheRead != nil || input.Usage.CacheWrite != nil || input.Usage.Reasoning != nil
+	if err != nil || input.Provider == "" || input.Model == "" || input.SampleID == "" || input.InteractionID == "" || !known {
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "token") || strings.Contains(lower, "usage") {
+			return map[string]interface{}{"coverage": "unknown", "reason": "unsupported_wrapper"}, false
 		}
+		return nil, false
 	}
-
-	return info
+	return map[string]interface{}{"schema_version": 1, "sample_id": input.SampleID, "interaction_id": input.InteractionID, "mode": "delta", "segment_id": "", "reset": false, "method": "estimated", "estimated_method": "wrapper_bounded_json", "tokens": map[string]*int64{"input": input.Usage.Input, "output": input.Usage.Output, "cache_read": input.Usage.CacheRead, "cache_write": input.Usage.CacheWrite, "reasoning": input.Usage.Reasoning}, "provider": input.Provider, "model": input.Model, "effort": input.Effort}, true
 }
 
 // resolveSocket returns the telemetry daemon socket path.
