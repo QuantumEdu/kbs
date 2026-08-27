@@ -161,11 +161,15 @@ and prompt storage setting.
 telemetryctl report next-change
 ```
 
-Shows only analyzer evidence tied to the available repository state, with each
-recommendation citing its evidence ID, confidence, and coverage. Missing or
-stale evidence is shown as a gap; activity alone never becomes a debt claim.
-Time categories render explicitly, including unknown measured, estimated, and
-inferred values when no time evidence is available.
+Shows analyzer evidence tied to the available repository state, with each
+recommendation citing its evidence ID, confidence, and coverage. It also renders
+the five token dimensions (`input`, `output`, `cache_read`, `cache_write`, and
+`reasoning`) at every materialized scope, keeping measured/estimated provenance
+separate from coverage. Time is reported as wall, measured-active,
+inferred-active, and unknown. Git output preserves the start/end revisions and
+prints an explicit unknown transition/commit count until verified ancestry is
+materialized. Missing or stale evidence is a gap, never a zero; activity alone
+never becomes a debt claim.
 
 ## CLI Wrapper (telemetrywrap)
 
