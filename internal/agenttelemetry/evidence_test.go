@@ -65,6 +65,35 @@ func TestMigrateEvidencePreservesNonzeroLegacyTokenMarker(t *testing.T) {
 	}
 }
 
+func TestMigrateEvidenceMarksLegacyScopedTokenDimensionsUnknown(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy-scoped.db")
+	store, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, column := range []string{"input_known", "output_known", "cache_read_known", "cache_write_known", "reasoning_known"} {
+		if _, err := store.db.Exec("ALTER TABLE usage_scope_aggregates DROP COLUMN " + column); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.db.Exec(`INSERT INTO usage_scope_aggregates VALUES ('provider','v2','run','run','{}','measured','measured','complete',0,0,0,0,0)`); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	store, err = OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	var inputKnown, outputKnown int
+	if err := store.db.QueryRow(`SELECT input_known, output_known FROM usage_scope_aggregates`).Scan(&inputKnown, &outputKnown); err != nil {
+		t.Fatal(err)
+	}
+	if inputKnown != 0 || outputKnown != 0 {
+		t.Fatalf("legacy zero dimensions must remain unknown: %d/%d", inputKnown, outputKnown)
+	}
+}
+
 func TestSecurityPipelineHashesCommandBeforePersistence(t *testing.T) {
 	pipeline, err := NewSecurityPipeline(filepath.Join(t.TempDir(), "salt"), nil)
 	if err != nil {
