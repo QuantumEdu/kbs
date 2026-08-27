@@ -169,7 +169,9 @@ func (c *Collector) ingest(ctx context.Context, raw []byte) string {
 	}
 
 	if c.security != nil {
-		c.security.Process(&e)
+		if err := c.security.Process(&e); err != nil {
+			return fmt.Sprintf(`{"status":"error","error":%q}`+"\n", err.Error())
+		}
 	}
 
 	if err := c.store.SaveEvent(ctx, e); err != nil {
