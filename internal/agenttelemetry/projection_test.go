@@ -328,6 +328,33 @@ func TestProjectEventsPersistsUnknownCumulativeRegressionAndInvalidReset(t *test
 	}
 }
 
+func TestProjectEventsKeepsValidCumulativeDimensionsWhenOneRegresses(t *testing.T) {
+	store, err := OpenStore(tempDBPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	payload := func(id string, input, output int) []byte {
+		return []byte(fmt.Sprintf(`{"schema_version":1,"sample_id":%q,"interaction_id":"i","mode":"cumulative","segment_id":"first","reset":false,"method":"measured","estimated_method":null,"tokens":{"input":%d,"output":%d,"cache_read":0,"cache_write":0,"reasoning":0}}`, id, input, output))
+	}
+	for _, e := range []Event{{EventID: "first", RunID: "r", EventType: "model.usage", Provider: "p", InteractionID: "i", ProjectID: "project", Payload: payload("first", 10, 7)}, {EventID: "regression", RunID: "r", EventType: "model.usage", Provider: "p", InteractionID: "i", ProjectID: "project", Payload: payload("regression", 5, 15)}} {
+		e.Timestamp, e.Source, e.Coverage, e.ConfidenceLevel = time.Now(), "test", "complete", "measured"
+		if err := store.SaveEvent(context.Background(), e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.ProjectEvents(context.Background(), "v2"); err != nil {
+		t.Fatal(err)
+	}
+	var input, inputKnown, output, outputKnown int
+	if err := store.db.QueryRow(`SELECT input, input_known, output, output_known FROM usage_scope_aggregates WHERE scope='run'`).Scan(&input, &inputKnown, &output, &outputKnown); err != nil {
+		t.Fatal(err)
+	}
+	if inputKnown != 0 || outputKnown != 1 || output != 15 {
+		t.Fatalf("dimension-scoped cumulative projection = input=%d/%d output=%d/%d", input, inputKnown, output, outputKnown)
+	}
+}
+
 func TestCaptureGitSnapshotHandlesDetachedAndCommandFailure(t *testing.T) {
 	root := t.TempDir()
 	initGitRepo(t, root)
@@ -341,5 +368,34 @@ func TestCaptureGitSnapshotHandlesDetachedAndCommandFailure(t *testing.T) {
 	t.Cleanup(func() { gitExecutable = previous })
 	if _, err := CaptureGitSnapshot(root); err == nil {
 		t.Fatal("git command failure must not produce a snapshot")
+	}
+}
+
+func TestProjectEventsPersistsScopedTokenEvidenceReplaySafe(t *testing.T) {
+	store, err := OpenStore(tempDBPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	payload := []byte(`{"schema_version":1,"sample_id":"sample","interaction_id":"interaction","mode":"delta","method":"measured","estimated_method":null,"tokens":{"input":12,"output":3,"cache_read":2,"cache_write":1,"reasoning":4}}`)
+	e := Event{EventID: "scoped", RunID: "run", EventType: "model.usage", Timestamp: time.Now(), Source: "plugin", Provider: "opencode", Model: "gpt-5", Effort: "high", ProjectID: "project", ChangeID: "change", SessionID: "session", InteractionID: "interaction", Coverage: "complete", ConfidenceLevel: "measured", Payload: payload}
+	if err := store.SaveEvent(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+	e.EventID, e.Payload = "scoped-second", []byte(`{"schema_version":1,"sample_id":"second","interaction_id":"interaction","mode":"delta","method":"measured","estimated_method":null,"tokens":{"input":4,"output":2,"cache_read":null,"cache_write":null,"reasoning":1}}`)
+	if err := store.SaveEvent(context.Background(), e); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := store.ProjectEvents(context.Background(), "v2"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var rows, input, output, cacheRead, cacheWrite, reasoning int
+	if err := store.db.QueryRow(`SELECT COUNT(*), SUM(input), SUM(output), SUM(cache_read), SUM(cache_write), SUM(reasoning) FROM usage_scope_aggregates`).Scan(&rows, &input, &output, &cacheRead, &cacheWrite, &reasoning); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 5 || input != 80 || output != 25 || cacheRead != 0 || cacheWrite != 0 || reasoning != 25 {
+		t.Fatalf("scoped evidence rows=%d dimensions=%d/%d/%d/%d/%d", rows, input, output, cacheRead, cacheWrite, reasoning)
 	}
 }
