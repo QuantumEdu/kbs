@@ -4,9 +4,23 @@ All notable changes to SkillVault Qu@ntum are documented here.
 
 ## Unreleased
 
+## v3.1.0 — Evidence-Grade Development Telemetry
+
+**2026-08-28**
+
+### Added
+
+- **Evidence-Grade Development Telemetry**:
+  - `telemetryctl report next-change`: CLI command to generate evidence-backed change impact reports.
+  - Replayable evidence projections and provenance tracking for agent telemetry events.
+  - Provider token semantics and delta aggregation for fine-grained token usage tracking.
+  - Analyzer evidence importing and scoped token evidence persistence.
+  - Integration and evidence test harness under `internal/agenttelemetry/`.
+
 ### Changed
 
-- Adopted Semantic Versioning (`MAJOR.MINOR.PATCH`) with `internal/version` as the single source of truth; binary, MCP initialize response, and export stamps now report `v3.0.0` instead of bare `v3`.
+- Version bump: `v3.0.0` → `v3.1.0` per semantic versioning policy for feature releases.
+- Adopted Semantic Versioning (`MAJOR.MINOR.PATCH`) with `internal/version` as the single source of truth; binary, MCP initialize response, and export stamps report `v3.1.0`.
 
 ## v3.0.0 — Workflow Pipelines
 
