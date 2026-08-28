@@ -3,6 +3,8 @@ package security
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/quantum-6/skillvault/internal/version"
 )
 
 // SARIFReport represents the root of a SARIF v2.1.0 document.
@@ -138,7 +140,7 @@ func ConvertAuditReportToSARIF(report AuditReport) SARIFReport {
 				Tool: SARIFTool{
 					Driver: SARIFDriver{
 						Name:           "SkillVault Security Audit",
-						Version:        "3.0.0",
+						Version:        version.Number,
 						InformationURI: "https://github.com/QuantumEdu/kbs",
 						Rules:          rules,
 					},
