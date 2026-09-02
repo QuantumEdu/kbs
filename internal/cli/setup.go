@@ -15,6 +15,10 @@ import (
 func RunDoctor(w io.Writer) bool {
 	vd := vaultDir()
 	db := dbPath()
+	symlink := filepath.Join(vd, "skillvault.db")
+	if fileExists(db) && !fileExists(symlink) {
+		_ = EnsureDBSymlink(vd)
+	}
 	checks := []struct {
 		name string
 		ok   bool
@@ -22,6 +26,7 @@ func RunDoctor(w io.Writer) bool {
 	}{
 		{name: "Vault home", ok: pathExists(vd), info: vd},
 		{name: "Database", ok: fileExists(db), info: db},
+		{name: "DB Symlink", ok: fileExists(filepath.Join(vd, "skillvault.db")), info: filepath.Join(vd, "skillvault.db")},
 		{name: "Objects dir", ok: dirExists(filepath.Join(vd, "objects")), info: filepath.Join(vd, "objects")},
 		{name: "Exports dir", ok: dirExists(filepath.Join(vd, "exports")), info: filepath.Join(vd, "exports")},
 		{name: "Cache dir", ok: dirExists(filepath.Join(vd, "cache")), info: filepath.Join(vd, "cache")},
@@ -68,6 +73,22 @@ func RunDoctor(w io.Writer) bool {
 	return false
 }
 
+// EnsureDBSymlink creates or updates ~/.skillvault/skillvault.db -> vault.db
+func EnsureDBSymlink(vd string) error {
+	link := filepath.Join(vd, "skillvault.db")
+	target := "vault.db"
+	if fi, err := os.Lstat(link); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			dest, err := os.Readlink(link)
+			if err == nil && (dest == target || dest == filepath.Join(vd, target)) {
+				return nil
+			}
+		}
+		_ = os.Remove(link)
+	}
+	return os.Symlink(target, link)
+}
+
 func pingVaultDB(path string) error {
 	dbConn, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -103,6 +124,10 @@ func RunInit() {
 	if err := db.RunMigrations(sqlDB); err != nil {
 		fmt.Fprintf(os.Stderr, "error running migrations: %v\n", err)
 		os.Exit(1)
+	}
+
+	if err := EnsureDBSymlink(vd); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: creating db symlink: %v\n", err)
 	}
 
 	fmt.Println("SkillVault initialized at", vd)

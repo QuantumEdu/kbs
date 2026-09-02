@@ -85,6 +85,7 @@ func main() {
 	log.Printf("telemetryd: listening on %s", cfg.SocketPath)
 
 	// Handle signals.
+	signal.Ignore(syscall.SIGHUP)
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
 	sig := <-sigCh

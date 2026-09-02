@@ -22,9 +22,9 @@ skillvault.db
 
 
 # telemetry binaries (built by make build-telemetry)
-telemetryd
-telemetryctl
-telemetrywrap
+/telemetryd
+/telemetryctl
+/telemetrywrap
 
 # TUI binary (built by make build-tui)
-skillvault-tui
+/skillvault-tui

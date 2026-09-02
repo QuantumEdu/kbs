@@ -224,6 +224,18 @@ func (r *ToolRegistry) registerV2Tools() {
 			"entry_id":       map[string]interface{}{"type": "string", "description": "Entry ID (required)"},
 			"version_number": map[string]interface{}{"type": "number", "description": "Version number to restore (required)"},
 		})},
+		{Name: "save_handoff", Description: "Save a structured agent-to-agent task handoff / checkpoint", InputSchema: schemaObj(map[string]interface{}{
+			"task_id":            map[string]interface{}{"type": "string", "description": "Unique task or subagent ID (required)"},
+			"step_summary":       map[string]interface{}{"type": "string", "description": "Summary of what was completed (required)"},
+			"project":            map[string]interface{}{"type": "string", "description": "Project name or ID"},
+			"artifacts_produced": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "Files, commits, or exports created"},
+			"next_steps":         map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "Pending actions for the receiving agent"},
+			"blocking_issues":    map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "Blockers or open questions"},
+		})},
+		{Name: "get_handoff", Description: "Retrieve the latest agent-to-agent task handoff for a project or task_id", InputSchema: schemaObj(map[string]interface{}{
+			"task_id": map[string]interface{}{"type": "string", "description": "Filter by task ID (optional)"},
+			"project": map[string]interface{}{"type": "string", "description": "Filter by project name or ID (optional)"},
+		})},
 	}
 }
 
@@ -293,6 +305,10 @@ func (r *ToolRegistry) dispatch(ctx context.Context, name string, args map[strin
 		return r.handleListEntryVersions(ctx, args)
 	case "restore_entry_version":
 		return r.handleRestoreEntryVersion(ctx, args)
+	case "save_handoff":
+		return r.handleSaveHandoff(ctx, args)
+	case "get_handoff":
+		return r.handleGetHandoff(ctx, args)
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -350,42 +366,35 @@ func (r *ToolRegistry) handleSearchEntries(ctx context.Context, args map[string]
 	}
 	useVector := boolArg(args, "vector")
 
-	// Vector search path — delegate to VectorService.
+	// Vector search path — delegate to VectorService with fallback to FTS5.
 	if useVector {
-		if r.compareSvc == nil {
-			return errResult("Error: vector search not available"), nil
-		}
-		if query == "" {
-			return errResult("Error: query is required for vector search"), nil
-		}
-		results, err := r.compareSvc.SearchVectors(ctx, query, limit)
-		if err != nil {
-			return errResult("Error: " + err.Error()), nil
-		}
-		if len(results) == 0 {
-			return textResult("No results found."), nil
-		}
-		var b strings.Builder
-		b.WriteString(fmt.Sprintf("Found %d result(s) (vector):\n", len(results)))
-		for _, r := range results {
-			proj := "global"
-			if r.Entry.ProjectID != nil {
-				proj = *r.Entry.ProjectID
-			}
-			b.WriteString(fmt.Sprintf("\n  [%s] %s\n", r.Entry.ID, r.Entry.Title))
-			b.WriteString(fmt.Sprintf("    Type:    %s\n", r.Entry.Type))
-			b.WriteString(fmt.Sprintf("    Summary: %s\n", r.Entry.Summary))
-			b.WriteString(fmt.Sprintf("    Project: %s\n", proj))
-			b.WriteString(fmt.Sprintf("    Status:  %s\n", r.Entry.Status))
-			if len(r.Tags) > 0 {
-				tagNames := make([]string, len(r.Tags))
-				for i, t := range r.Tags {
-					tagNames[i] = t.Name
+		if r.compareSvc != nil && query != "" {
+			results, err := r.compareSvc.SearchVectors(ctx, query, limit)
+			if err == nil && len(results) > 0 {
+				var b strings.Builder
+				b.WriteString(fmt.Sprintf("Found %d result(s) (vector):\n", len(results)))
+				for _, r := range results {
+					proj := "global"
+					if r.Entry.ProjectID != nil {
+						proj = *r.Entry.ProjectID
+					}
+					b.WriteString(fmt.Sprintf("\n  [%s] %s\n", r.Entry.ID, r.Entry.Title))
+					b.WriteString(fmt.Sprintf("    Type:    %s\n", r.Entry.Type))
+					b.WriteString(fmt.Sprintf("    Summary: %s\n", r.Entry.Summary))
+					b.WriteString(fmt.Sprintf("    Project: %s\n", proj))
+					b.WriteString(fmt.Sprintf("    Status:  %s\n", r.Entry.Status))
+					if len(r.Tags) > 0 {
+						tagNames := make([]string, len(r.Tags))
+						for i, t := range r.Tags {
+							tagNames[i] = t.Name
+						}
+						b.WriteString(fmt.Sprintf("    Tags:    %s\n", strings.Join(tagNames, ", ")))
+					}
 				}
-				b.WriteString(fmt.Sprintf("    Tags:    %s\n", strings.Join(tagNames, ", ")))
+				return textResult(b.String()), nil
 			}
 		}
-		return textResult(b.String()), nil
+		// Fall through to FTS5 search below if vector search is unavailable or unconfigured
 	}
 
 	// FTS5 search path (existing behavior).
@@ -522,6 +531,7 @@ func (r *ToolRegistry) handleGetContext(ctx context.Context, args map[string]int
 		Include:         parseStrings(args["include"]),
 		ExcludeArchived: boolArg(args, "exclude_archived"),
 		MaxChars:        intArg(args, "max_chars"),
+		Format:          strArg(args, "format"),
 	}
 
 	pack, err := r.contextSvc.GetContext(ctx, input)
@@ -1211,6 +1221,101 @@ func (r *ToolRegistry) handleRestoreEntryVersion(ctx context.Context, args map[s
 		"version_number": versionNumber,
 		"status":         "restored",
 	}), nil
+}
+
+func (r *ToolRegistry) handleSaveHandoff(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	taskID := strArg(args, "task_id")
+	if taskID == "" {
+		return errResult("Error: task_id is required for handoff"), nil
+	}
+	stepSummary := strArg(args, "step_summary")
+	if stepSummary == "" {
+		return errResult("Error: step_summary is required for handoff"), nil
+	}
+	project := strArg(args, "project")
+	artifacts := parseStrings(args["artifacts_produced"])
+	nextSteps := parseStrings(args["next_steps"])
+	blockers := parseStrings(args["blocking_issues"])
+
+	var body strings.Builder
+	body.WriteString(fmt.Sprintf("## Task: %s\n\n", taskID))
+	body.WriteString(fmt.Sprintf("### Summary\n%s\n\n", stepSummary))
+	if len(artifacts) > 0 {
+		body.WriteString("### Artifacts Produced\n")
+		for _, a := range artifacts {
+			body.WriteString(fmt.Sprintf("- %s\n", a))
+		}
+		body.WriteString("\n")
+	}
+	if len(nextSteps) > 0 {
+		body.WriteString("### Next Steps\n")
+		for _, n := range nextSteps {
+			body.WriteString(fmt.Sprintf("- %s\n", n))
+		}
+		body.WriteString("\n")
+	}
+	if len(blockers) > 0 {
+		body.WriteString("### Blocking Issues\n")
+		for _, b := range blockers {
+			body.WriteString(fmt.Sprintf("- %s\n", b))
+		}
+		body.WriteString("\n")
+	}
+
+	tags := []string{"handoff", "task:" + taskID}
+	input := app.SaveEntryInput{
+		Title:   fmt.Sprintf("Handoff: %s", taskID),
+		Type:    "handoff",
+		Summary: stepSummary,
+		Body:    body.String(),
+		Project: project,
+		Tags:    tags,
+		Status:  "active",
+		Purpose: "STATE",
+	}
+
+	res, err := r.entrySvc.SaveEntry(ctx, input)
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+	return textResult(fmt.Sprintf("Handoff checkpoint saved: %s (ID: %s)", input.Title, res.Entry.Entry.ID)), nil
+}
+
+func (r *ToolRegistry) handleGetHandoff(ctx context.Context, args map[string]interface{}) (*ToolCallResult, error) {
+	taskID := strArg(args, "task_id")
+	project := strArg(args, "project")
+
+	var projectID *string
+	if project != "" {
+		proj, err := r.projectSvc.GetProject(ctx, project)
+		if err == nil {
+			projectID = &proj.ID
+		} else {
+			projectID = &project
+		}
+	}
+	typ := "handoff"
+	var tags []string
+	if taskID != "" {
+		tags = []string{"task:" + taskID}
+	}
+
+	results, err := r.entrySvc.SearchEntries(ctx, "", domain.SearchQuery{
+		ProjectID:       projectID,
+		Type:            &typ,
+		Tags:            tags,
+		IncludeArchived: false,
+		Limit:           5,
+	})
+	if err != nil {
+		return errResult("Error: " + err.Error()), nil
+	}
+	if len(results) == 0 {
+		return textResult("No handoff checkpoints found."), nil
+	}
+
+	latest := results[0]
+	return textResult(fmt.Sprintf("[%s] %s\n\n%s", latest.Entry.ID, latest.Entry.Title, latest.Entry.BodyOptional)), nil
 }
 
 func errResult(text string) *ToolCallResult {

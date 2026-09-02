@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/quantum-6/skillvault/internal/db"
@@ -18,6 +20,7 @@ type ContextInput struct {
 	Include         []string
 	ExcludeArchived bool
 	MaxChars        int
+	Format          string
 }
 
 type ContextPack struct {
@@ -170,6 +173,41 @@ func (s *ContextService) GetContext(ctx context.Context, input ContextInput) (*C
 		}
 	}
 
+	if input.Mode == "planning" || includeSet["openspec"] || includeSet["planning"] {
+		openspecContent := s.collectOpenSpec(ctx)
+		if openspecContent != "" {
+			addSection("OpenSpec Planning", openspecContent)
+		}
+	}
+
+	if input.Format == "compact" {
+		var b strings.Builder
+		projName := input.Project
+		if projName == "" {
+			projName = "global"
+		} else if proj, err := s.projectStore.Get(ctx, input.Project); err == nil {
+			projName = proj.Name
+		}
+		b.WriteString(fmt.Sprintf("# CTX: %s (mode=%s)\n", projName, input.Mode))
+		for _, sec := range sections {
+			b.WriteString(fmt.Sprintf("\n[%s]\n", sec.Title))
+			lines := strings.Split(strings.TrimSpace(sec.Content), "\n")
+			for _, l := range lines {
+				l = strings.TrimSpace(l)
+				if l != "" {
+					b.WriteString(l)
+					b.WriteString("\n")
+				}
+			}
+		}
+		pack.Sections = sections
+		pack.Raw = b.String()
+		if len(pack.Raw) > maxChars {
+			pack.Raw = pack.Raw[:maxChars] + "\n[truncated]"
+		}
+		return pack, nil
+	}
+
 	var b strings.Builder
 	b.WriteString(pack.Header)
 	for _, sec := range sections {
@@ -188,6 +226,37 @@ func (s *ContextService) GetContext(ctx context.Context, input ContextInput) (*C
 	}
 
 	return pack, nil
+}
+
+func (s *ContextService) collectOpenSpec(ctx context.Context) string {
+	changesDir := "openspec/changes"
+	if fi, err := os.Stat(changesDir); err != nil || !fi.IsDir() {
+		return ""
+	}
+
+	entries, err := os.ReadDir(changesDir)
+	if err != nil {
+		return ""
+	}
+
+	var b strings.Builder
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "archive" {
+			continue
+		}
+		b.WriteString(fmt.Sprintf("- Change: %s\n", e.Name()))
+		tasksPath := filepath.Join(changesDir, e.Name(), "tasks.md")
+		if data, err := os.ReadFile(tasksPath); err == nil {
+			lines := strings.Split(string(data), "\n")
+			for _, l := range lines {
+				l = strings.TrimSpace(l)
+				if strings.HasPrefix(l, "- [ ]") {
+					b.WriteString(fmt.Sprintf("    %s\n", l))
+				}
+			}
+		}
+	}
+	return b.String()
 }
 
 func (s *ContextService) collectProfile(ctx context.Context) string {
