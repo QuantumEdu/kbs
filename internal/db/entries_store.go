@@ -204,11 +204,11 @@ func (s *sqliteEntryStore) Search(ctx context.Context, q domain.SearchQuery) ([]
 	if len(conditions) > 0 || !q.IncludeArchived || q.ProjectID != nil || q.Type != nil {
 		if len(conditions) > 0 {
 			query += " WHERE " + conditions[0]
+			for _, c := range conditions[1:] {
+				query += " AND " + c
+			}
 		} else {
 			query += " WHERE 1=1"
-		}
-		for _, c := range conditions[1:] {
-			query += " AND " + c
 		}
 
 		if !q.IncludeArchived {

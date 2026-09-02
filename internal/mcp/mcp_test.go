@@ -97,8 +97,8 @@ func TestToolsListReturns24Tools(t *testing.T) {
 	default:
 		t.Fatalf("tools is not an array: %T", toolsRaw)
 	}
-	if toolCount != 24 {
-		t.Errorf("expected 24 tools, got %d", toolCount)
+	if toolCount != 26 {
+		t.Errorf("expected 26 tools, got %d", toolCount)
 	}
 }
 
@@ -310,6 +310,8 @@ func TestToolNamesAreCorrect(t *testing.T) {
 		"get_run",
 		"list_entry_versions",
 		"restore_entry_version",
+		"save_handoff",
+		"get_handoff",
 	}
 
 	if len(names) != len(expected) {
@@ -1261,15 +1263,15 @@ func TestToolCountIncludesNewTools(t *testing.T) {
 	reg := NewToolRegistry(nil)
 	tools := reg.List()
 
-	// Should be 24 tools: 22 existing + list_entry_versions + restore_entry_version
-	if len(tools) != 24 {
-		t.Errorf("expected 24 tools, got %d", len(tools))
+	// Should be 26 tools: 24 existing + save_handoff + get_handoff
+	if len(tools) != 26 {
+		t.Errorf("expected 26 tools, got %d", len(tools))
 	}
 	names := make(map[string]bool)
 	for _, tool := range tools {
 		names[tool.Name] = true
 	}
-	for _, name := range []string{"run_workflow", "route_scenario", "get_stats", "list_workflow_runs", "get_run", "list_entry_versions", "restore_entry_version"} {
+	for _, name := range []string{"run_workflow", "route_scenario", "get_stats", "list_workflow_runs", "get_run", "list_entry_versions", "restore_entry_version", "save_handoff", "get_handoff"} {
 		if !names[name] {
 			t.Errorf("expected tool %q to be registered", name)
 		}
@@ -1656,3 +1658,77 @@ func TestListEntryVersionsEmptyForNewEntry(t *testing.T) {
 		t.Errorf("expected JSON array ([]): %s", raw)
 	}
 }
+
+func TestSaveAndGetHandoff(t *testing.T) {
+	reg, _, cleanup := setupMCPServices(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	saveRes, err := reg.Call(ctx, "save_handoff", map[string]interface{}{
+		"task_id":            "task-42",
+		"step_summary":       "Implemented Phase 1 & 2",
+		"artifacts_produced": []interface{}{"Makefile", "handlers_env.go"},
+		"next_steps":         []interface{}{"Implement Phase 3"},
+		"blocking_issues":    []interface{}{"None"},
+	})
+	if err != nil {
+		t.Fatalf("save_handoff failed: %v", err)
+	}
+	if saveRes.IsError {
+		t.Fatalf("save_handoff returned error: %s", saveRes.Content[0].Text)
+	}
+
+	getRes, err := reg.Call(ctx, "get_handoff", map[string]interface{}{
+		"task_id": "task-42",
+	})
+	if err != nil {
+		t.Fatalf("get_handoff failed: %v", err)
+	}
+	if getRes.IsError {
+		t.Fatalf("get_handoff returned error: %s", getRes.Content[0].Text)
+	}
+	content := getRes.Content[0].Text
+	if !strings.Contains(content, "task-42") || !strings.Contains(content, "Implemented Phase 1 & 2") {
+		t.Errorf("unexpected handoff content: %s", content)
+	}
+}
+
+func TestSearchEntries_VectorFallback(t *testing.T) {
+	reg, projectSvc, cleanup := setupMCPServices(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	projectSvc.SaveProject(ctx, app.SaveProjectInput{Name: "testproj"})
+
+	// Save a regular entry
+	saveRes, err := reg.Call(ctx, "save_entry", map[string]interface{}{
+		"title":   "Vector Fallback Test Entry",
+		"type":    "skill",
+		"summary": "Verifying fallback to FTS5 when vector search is unconfigured",
+		"body":    "Detailed text content for matching keywords.",
+		"project": "testproj",
+	})
+	if err != nil {
+		t.Fatalf("save_entry failed: %v", err)
+	}
+	if saveRes.IsError {
+		t.Fatalf("save_entry error: %s", saveRes.Content[0].Text)
+	}
+
+	// Call search with vector: true when vector model is unconfigured
+	res, err := reg.Call(ctx, "search_entries", map[string]interface{}{
+		"query":   "Fallback",
+		"project": "testproj",
+		"vector":  true,
+	})
+	if err != nil {
+		t.Fatalf("search_entries failed: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("search_entries returned error instead of falling back: %s", res.Content[0].Text)
+	}
+	if !strings.Contains(res.Content[0].Text, "Vector Fallback Test Entry") {
+		t.Errorf("expected FTS5 fallback to find entry, got: %s", res.Content[0].Text)
+	}
+}
+

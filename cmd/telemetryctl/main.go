@@ -86,6 +86,8 @@ func main() {
 		}
 	case "status":
 		runStatus(dbPath)
+	case "live":
+		runLive(dbPath, args[1:])
 	case "report":
 		if len(args) == 3 && args[1] == "next-change" && args[2] == "--help" {
 			fmt.Fprintln(os.Stdout, "Usage: telemetryctl report next-change\nPrint evidence-cited recommendations plus token, time, and Git provenance.")
@@ -110,7 +112,8 @@ func usage() {
   telemetryctl run show   <run-id>
   telemetryctl run recent
   telemetryctl status
-	telemetryctl report next-change
+  telemetryctl live       [--interval 2s] [--once]
+  telemetryctl report next-change
 
 Global flags:
   -db PATH   Override database path (default: ~/.telemetry/telemetry.db or $TELEMETRY_DB_PATH)

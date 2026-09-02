@@ -21,15 +21,20 @@ func ParseCommand(args []string) (string, error) {
 	sub := args[1]
 	switch sub {
 	case "mcp":
-		if len(args) > 2 && args[2] == "audit" {
-			return "mcp-audit", nil
+		if len(args) > 2 {
+			if args[2] == "audit" {
+				return "mcp-audit", nil
+			}
+			if args[2] == "register" || args[2] == "install" {
+				return "mcp-register", nil
+			}
 		}
 		return sub, nil
-	case "mcp-audit":
+	case "mcp-audit", "mcp-register":
 		return sub, nil
-	case "init", "version", "http", "list-projects", "export", "backup", "doctor", "tui", "stats", "mcp-config", "audit", "graph":
+	case "init", "version", "env", "telemetry", "http", "list-projects", "export", "backup", "doctor", "tui", "stats", "mcp-config", "audit", "graph":
 		return sub, nil
-	case "memory-index", "memory-reindex", "memory-list-external", "entry-ref", "sync-push", "sync-pull":
+	case "sync-engram", "memory-index", "memory-reindex", "memory-list-external", "entry-ref", "sync-push", "sync-pull":
 		return sub, nil
 	case "pending":
 		if len(args) < 3 {
@@ -491,11 +496,12 @@ type GetContextFlags struct {
 	Query    string
 	Include  string
 	MaxChars int
+	Format   string
 }
 
 // ParseGetContextFlags parses get-context-specific flags from args.
 func ParseGetContextFlags(args []string) (*GetContextFlags, error) {
-	flags := &GetContextFlags{Mode: "project", MaxChars: 12000}
+	flags := &GetContextFlags{Mode: "project", MaxChars: 12000, Format: "standard"}
 
 	fs := flag.NewFlagSet("get-context", flag.ContinueOnError)
 	fs.StringVar(&flags.Mode, "mode", "project", "Context mode (profile|planning|project)")
@@ -503,6 +509,7 @@ func ParseGetContextFlags(args []string) (*GetContextFlags, error) {
 	fs.StringVar(&flags.Query, "query", "", "Additional search query")
 	fs.StringVar(&flags.Include, "include", "", "Comma-separated sections to include")
 	fs.IntVar(&flags.MaxChars, "max-chars", 12000, "Max characters in context pack")
+	fs.StringVar(&flags.Format, "format", "standard", "Output format (standard|compact)")
 
 	fs.SetOutput(&nullWriter{})
 

@@ -1113,6 +1113,34 @@ func TestGetContextExcludesArchivedByDefault(t *testing.T) {
 	}
 }
 
+func TestGetContextCompactFormat(t *testing.T) {
+	_, entrySvc, _, _, _, projectSvc, svc, _, _, _, cleanup := setupAppServices(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	proj, _ := projectSvc.SaveProject(ctx, SaveProjectInput{Name: "compactproj", Description: "Compact test"})
+	entrySvc.SaveEntry(ctx, SaveEntryInput{
+		Title: "Decision 1", Type: "decision", Summary: "Compact Summary 1", Project: proj.ID,
+	})
+
+	pack, err := svc.GetContext(ctx, ContextInput{
+		Mode:     "planning",
+		Project:  proj.ID,
+		Format:   "compact",
+		Include:  []string{"decisions"},
+		MaxChars: 5000,
+	})
+	if err != nil {
+		t.Fatalf("GetContext failed: %v", err)
+	}
+	if !strings.Contains(pack.Raw, "# CTX: compactproj (mode=planning)") {
+		t.Errorf("expected compact header, got: %s", pack.Raw)
+	}
+	if !strings.Contains(pack.Raw, "[Active Decisions]") {
+		t.Errorf("expected [Active Decisions] bracket section, got: %s", pack.Raw)
+	}
+}
+
 func TestWorkflowServiceNewAPI(t *testing.T) {
 	_, _, _, svc, _, _, _, _, _, _, cleanup := setupAppServices(t)
 	defer cleanup()

@@ -81,5 +81,7 @@ func Run(cmd string, args []string) {
 		runAudit(ctx, svc, args)
 	case "mcp-audit":
 		runMCPAudit(ctx, svc, args)
+	case "sync-engram":
+		runSyncEngram(ctx, svc, args)
 	}
 }

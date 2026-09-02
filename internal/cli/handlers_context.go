@@ -23,6 +23,7 @@ func runGetContext(ctx context.Context, svc *Services, args []string) {
 		Query:    flags.Query,
 		Include:  SplitLines(flags.Include),
 		MaxChars: flags.MaxChars,
+		Format:   flags.Format,
 	})
 	if err != nil {
 		PrintError(err)

@@ -16,14 +16,15 @@ import (
 )
 
 type SaveEntryInput struct {
-	Title   string
-	Type    string
-	Summary string
-	Body    string
-	Project string
-	Tags    []string
-	Status  string
-	Purpose string
+	Title       string
+	Type        string
+	Summary     string
+	Body        string
+	Project     string
+	Tags        []string
+	Status      string
+	Purpose     string
+	ExternalRef string
 }
 
 type SavePendingInput struct {
@@ -169,6 +170,7 @@ func (s *EntryService) SaveEntry(ctx context.Context, input SaveEntryInput) (*Ge
 		BodyOptional: input.Body,
 		Status:       status,
 		ProjectID:    projectID,
+		ExternalRef:  input.ExternalRef,
 	}
 
 	if err := s.store.Save(ctx, entry, tags); err != nil {

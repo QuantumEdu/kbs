@@ -32,7 +32,7 @@ clean:
 
 install: build
 	mkdir -p $(INSTALL_DIR)
-	cp $(BINARY) $(INSTALL_DIR)/$(BINARY)
+	install -m 755 $(BINARY) $(INSTALL_DIR)/$(BINARY)
 	@echo "Installed to $(INSTALL_DIR)/$(BINARY)"
 
 build-q-secrets:
@@ -40,7 +40,7 @@ build-q-secrets:
 
 install-q-secrets: build-q-secrets
 	mkdir -p $(INSTALL_DIR)
-	cp $(Q_SECRETS_DIR)/$(Q_SECRETS_BIN) $(INSTALL_DIR)/$(Q_SECRETS_BIN)
+	install -m 755 $(Q_SECRETS_DIR)/$(Q_SECRETS_BIN) $(INSTALL_DIR)/$(Q_SECRETS_BIN)
 	@echo "Installed q-secrets to $(INSTALL_DIR)/$(Q_SECRETS_BIN)"
 	@echo ""
 	@echo "Alternative: run 'skillvault init --with-secrets' or 'skillvault secrets install' to install from within kbs."
@@ -54,9 +54,9 @@ build-telemetry:
 
 install-telemetry: build-telemetry
 	mkdir -p $(INSTALL_DIR)
-	cp telemetryd $(INSTALL_DIR)/telemetryd
-	cp telemetryctl $(INSTALL_DIR)/telemetryctl
-	cp telemetrywrap $(INSTALL_DIR)/telemetrywrap
+	install -m 755 telemetryd $(INSTALL_DIR)/telemetryd
+	install -m 755 telemetryctl $(INSTALL_DIR)/telemetryctl
+	install -m 755 telemetrywrap $(INSTALL_DIR)/telemetrywrap
 	@echo "Installed telemetry binaries to $(INSTALL_DIR)/"
 	@echo ""
 	@echo "Alternative: run 'skillvault install-telemetry' or 'skillvault init --with-telemetry' to install from within kbs."
