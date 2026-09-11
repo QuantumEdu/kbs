@@ -1,6 +1,7 @@
 .PHONY: build test clean install install-all \
         build-tui build-q-secrets install-q-secrets \
         build-telemetry install-telemetry \
+        build-line install-line \
         test-integration
 
 BINARY=skillvault
@@ -27,7 +28,7 @@ test-integration:
 	go test -tags integration -count=1 ./internal/agenttelemetry/...
 
 clean:
-	rm -f $(BINARY) $(BINARY)-tui telemetryd telemetryctl telemetrywrap
+	rm -f $(BINARY) $(BINARY)-tui telemetryd telemetryctl telemetrywrap line
 	go clean -cache
 
 install: build
@@ -61,5 +62,14 @@ install-telemetry: build-telemetry
 	@echo ""
 	@echo "Alternative: run 'skillvault install-telemetry' or 'skillvault init --with-telemetry' to install from within kbs."
 
-install-all: install install-q-secrets install-telemetry
+# line is the issue-to-PR factory sibling. ntfy and UI are deferred; see docs/line.md.
+build-line:
+	go build -o line ./cmd/line
+
+install-line: build-line
+	mkdir -p $(INSTALL_DIR)
+	install -m 755 line $(INSTALL_DIR)/line
+	@echo "Installed line to $(INSTALL_DIR)/line"
+
+install-all: install install-q-secrets install-telemetry install-line
 	@echo "All binaries installed to $(INSTALL_DIR)/"

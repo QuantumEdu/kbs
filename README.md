@@ -32,6 +32,7 @@ Store, search, and retrieve prompts, skills, workflows, decisions, project memor
 | [`docs/mcp.md`](docs/mcp.md) | MCP server setup for Claude Code / OpenCode |
 | [`docs/tutorial.md`](docs/tutorial.md) | Real-world workflow: project → skills → context → session |
 | [`docs/architecture.md`](docs/architecture.md) | Clean Architecture deep-dive, data flows, design decisions |
+| [`docs/line.md`](docs/line.md) | `line` factory sibling (plan/build/review, ntfy, loopback UI) |
 
 ---
 
@@ -45,6 +46,7 @@ SkillVault is a local knowledge and workflow layer for humans and AI agents:
 - Route natural scenarios to the right workflow or skill with `skillvault route <scenario>`.
 - Run workflows from the CLI or via MCP with structured JSON-RPC-compatible output.
 - Serve agent tools over MCP (`run_workflow`, `route_scenario`, search, context, graph, artifacts, and more).
+- Run the sibling **`line`** factory for one GitHub issue (`plan` → `build` → `review` → `wait_ci` → `ready`, with `repair` on CI failure). See [`docs/line.md`](docs/line.md).
 
 ---
 

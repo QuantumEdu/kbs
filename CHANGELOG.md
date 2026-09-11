@@ -4,6 +4,14 @@ All notable changes to SkillVault Qu@ntum are documented here.
 
 ## Unreleased
 
+### Added
+
+- **`line` factory sibling** (`cmd/line`, `internal/line`): deterministic issue jobs with SQLite (`~/.line/line.db`).
+  - Phases: plan → build → review → wait_ci → ready, with repair on CI failure (budget 3).
+  - `wait_ci` polls `gh pr checks` once per `line next` (pending stays parked).
+  - Optional ntfy on `needs_human` / `blocked` / `ready` (`--ntfy-topic` or `LINE_NTFY_TOPIC`).
+  - Loopback UI: `line serve` on `127.0.0.1:7340` (`docs/line.md`).
+
 ## v3.1.0 — Evidence-Grade Development Telemetry
 
 **2026-08-28**

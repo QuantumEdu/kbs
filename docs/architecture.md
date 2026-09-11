@@ -57,6 +57,8 @@ Tres formas de hablar con SkillVault:
 2. **MCP** (`internal/mcp/`) — Servidor JSON-RPC 2.0 sobre stdio. 24 herramientas. Expone `run_workflow` (ejecución estructurada con inputs por step), `route_scenario` (resolución de escenarios), `get_stats` (estadísticas del vault), `list_workflow_runs` (historial de ejecuciones), `get_run` (detalle de ejecución), `list_entry_versions` (historial de versiones de una entrada), y `restore_entry_version` (restaurar entrada a una versión previa). El CLI `run` se mantiene stdin/stdout para pipelines.
 3. **HTTP API** (`internal/api/`) — Esqueleto vacío. Futuro.
 
+Sibling CLIs in this repo (`cmd/telemetryd`, `cmd/line`) are **not** SkillVault adapters. `line` is a separate factory process: it may read prompt files and later SkillVault entries, but it must not fold agent spawn, CI waits, or human gates into `WorkflowRunService`. `wait_ci` talks to `gh` through a `Checker`; the LLM never polls CI. `line serve` is loopback-only; ntfy is optional and must not be required for the job to complete.
+
 Todos los adapters llaman a los mismos `internal/app/` services.
 
 ### Persistence

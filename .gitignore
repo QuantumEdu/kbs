@@ -12,6 +12,7 @@ vendor/
 # Binary (root only)
 /skillvault
 /skillvault.exe
+/line
 
 # Vault data
 skillvault.db
