@@ -1,0 +1,1310 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>#88 · La Forma Simple: Arquitectura de Fábricas Issue-to-PR | Quantum</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #080c14;
+      --surface: #0e1420;
+      --card: #111827;
+      --card-alt: #1a2236;
+      --border: #1e2d45;
+      --border-subtle: #162032;
+      --text: #e8edf5;
+      --muted: #7d8fa8;
+      --faint: #3d4f68;
+      --primary: #38bdf8;
+      --primary-dim: rgba(56,189,248,0.12);
+      --accent: #818cf8;
+      --accent-dim: rgba(129,140,248,0.12);
+      --success: #34d399;
+      --success-dim: rgba(52,211,153,0.10);
+      --warning: #fbbf24;
+      --warning-dim: rgba(251,191,36,0.10);
+      --danger: #f87171;
+      --danger-dim: rgba(248,113,113,0.10);
+      --info: #60a5fa;
+      --info-dim: rgba(96,165,250,0.10);
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --radius-xl: 16px;
+      --shadow-card: 0 1px 3px rgba(0,0,0,0.4), 0 0 0 1px var(--border);
+      --shadow-glow: 0 0 24px rgba(56,189,248,0.12);
+      --gradient-primary: linear-gradient(135deg, var(--primary), var(--accent));
+      --gradient-hero: linear-gradient(160deg, #0e1a2e 0%, var(--bg) 70%);
+      --sidebar-w: 240px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      font-size: 15px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .layout {
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* Sidebar Navigation */
+    .sidebar {
+      width: var(--sidebar-w);
+      flex-shrink: 0;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 1.5rem 0;
+      border-right: 1px solid var(--border-subtle);
+      background: var(--surface);
+      display: flex;
+      flex-direction: column;
+    }
+    .sidebar-brand {
+      padding: 0 1.25rem 1.25rem;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 1rem;
+    }
+    .sidebar-brand a {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--primary);
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+    }
+    .sidebar-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--faint);
+      letter-spacing: 0.08em;
+      padding: 0 1.25rem 0.5rem;
+      text-transform: uppercase;
+    }
+    .module-map { list-style: none; }
+    .module-map li a {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0.5rem 1.25rem;
+      font-size: 12.5px;
+      color: var(--muted);
+      text-decoration: none;
+      border-left: 2px solid transparent;
+      transition: all 0.15s ease;
+    }
+    .module-map li a:hover {
+      color: var(--text);
+      background: var(--primary-dim);
+      border-left-color: var(--primary);
+    }
+    .module-map li a .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--faint);
+      flex-shrink: 0;
+    }
+    .module-map li a:hover .dot { background: var(--primary); }
+
+    /* Main Content */
+    .main {
+      flex: 1;
+      min-width: 0;
+      padding: 2.5rem 3rem 6rem;
+      max-width: 1060px;
+    }
+
+    /* Typography */
+    h1, h2, h3, h4 {
+      font-family: 'Outfit', system-ui, sans-serif;
+      color: #fff;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+    h1 { font-size: 2.6rem; margin-bottom: 0.8rem; letter-spacing: -0.02em; }
+    h2 { font-size: 1.75rem; margin: 3rem 0 1.2rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.6rem; }
+    h3 { font-size: 1.25rem; margin: 1.8rem 0 0.8rem; color: var(--primary); }
+    p { margin-bottom: 1.2rem; color: #d1d9e6; }
+    strong { color: #fff; font-weight: 600; }
+    a { color: var(--primary); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Hero */
+    .hero {
+      background: var(--gradient-hero);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      padding: 2.5rem;
+      margin-bottom: 3rem;
+      box-shadow: var(--shadow-glow);
+      position: relative;
+      overflow: hidden;
+    }
+    .version-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--card-alt);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 4px 12px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--primary);
+      margin-bottom: 1rem;
+      font-weight: 600;
+    }
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      margin-top: 1.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border-subtle);
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .hero-meta div { display: flex; align-items: center; gap: 6px; }
+    .hero-meta strong { color: var(--text); }
+
+    /* Cards & Grids */
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin: 1.5rem 0; }
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.2rem; margin: 1.5rem 0; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      box-shadow: var(--shadow-card);
+    }
+    .card-accent {
+      border-left: 4px solid var(--primary);
+      background: linear-gradient(135deg, var(--card) 0%, rgba(56,189,248,0.03) 100%);
+    }
+
+    /* Pedagogy Banners */
+    .competencia {
+      background: rgba(56,189,248,0.08);
+      border-left: 4px solid var(--primary);
+      border-radius: 0 var(--radius-md) var(--radius-md) 0;
+      padding: 1.2rem 1.4rem;
+      margin: 1.8rem 0;
+      font-size: 14.5px;
+    }
+    .competencia strong { color: var(--primary); display: block; margin-bottom: 4px; font-family: 'Outfit', sans-serif; font-size: 15px; }
+
+    .nota {
+      background: rgba(129,140,248,0.08);
+      border-left: 4px solid var(--accent);
+      border-radius: 0 var(--radius-md) var(--radius-md) 0;
+      padding: 1.2rem 1.4rem;
+      margin: 1.8rem 0;
+      font-size: 14.5px;
+    }
+    .nota strong { color: var(--accent); display: block; margin-bottom: 4px; }
+
+    .misconception {
+      background: rgba(248,113,113,0.08);
+      border-left: 4px solid var(--danger);
+      border-radius: 0 var(--radius-md) var(--radius-md) 0;
+      padding: 1.2rem 1.4rem;
+      margin: 1.8rem 0;
+      font-size: 14.5px;
+    }
+    .misconception strong { color: var(--danger); display: block; margin-bottom: 4px; }
+
+    /* Badges */
+    .badge {
+      display: inline-block;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 500;
+      vertical-align: middle;
+    }
+    .badge-terminal { background: #16263b; color: #38bdf8; border: 1px solid #1e40af; }
+    .badge-ide { background: #1e1b4b; color: #a5b4fc; border: 1px solid #4338ca; }
+    .badge-prompt { background: #064e3b; color: #6ee7b7; border: 1px solid #047857; }
+    .badge-sdd { background: #3b0764; color: #d8b4fe; border: 1px solid #7e22ce; }
+    .badge-runner { background: #451a03; color: #fdba74; border: 1px solid #b45309; }
+    .badge-browser { background: #1f2937; color: #93c5fd; border: 1px solid #374151; }
+
+    /* Code Blocks */
+    pre {
+      background: #090d16;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 1.2rem 1.4rem;
+      overflow-x: auto;
+      margin: 1.2rem 0 1.6rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #cbd5e1;
+    }
+    code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.9em;
+      background: rgba(255,255,255,0.06);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: #93c5fd;
+    }
+    pre code {
+      background: transparent;
+      padding: 0;
+      color: inherit;
+    }
+
+    .code-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #0d1424;
+      border: 1px solid var(--border);
+      border-bottom: none;
+      border-radius: var(--radius-md) var(--radius-md) 0 0;
+      padding: 8px 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 1.2rem;
+    }
+    .code-header + pre {
+      margin-top: 0;
+      border-top-left-radius: 0;
+      border-top-right-radius: 0;
+    }
+
+    /* Diagrams & States */
+    .flow-diagram {
+      background: #0c121e;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1.8rem;
+      margin: 2rem 0;
+      text-align: center;
+    }
+    .flow-diagram img {
+      max-width: 100%;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    }
+
+    /* UI Mockup */
+    .ui-mockup {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: var(--radius-lg);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+      margin: 2rem 0;
+      overflow: hidden;
+    }
+    .ui-mockup-header {
+      background: #1e293b;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid #334155;
+    }
+    .window-dot {
+      width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+    }
+    .dot-red { background: #ef4444; }
+    .dot-yellow { background: #eab308; }
+    .dot-green { background: #22c55e; }
+    .ui-mockup-address {
+      margin-left: 10px;
+      background: #0f172a;
+      padding: 4px 16px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: #94a3b8;
+      flex: 1;
+    }
+    .ui-mockup-body {
+      padding: 1.5rem;
+      font-family: system-ui, sans-serif;
+      color: #f8fafc;
+    }
+
+    /* TUI Terminal Mockup */
+    .tui-mockup {
+      background: #090d16;
+      border: 1px solid #1e293b;
+      border-radius: var(--radius-lg);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.7);
+      margin: 2rem 0;
+      overflow: hidden;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+    }
+    .tui-header {
+      background: #1e293b;
+      color: #38bdf8;
+      padding: 8px 16px;
+      font-weight: 700;
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid #334155;
+    }
+    .tui-body {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 12px;
+      padding: 16px;
+      background: #090d16;
+      color: #cbd5e1;
+    }
+    .tui-pane {
+      border: 1px solid #1e293b;
+      border-radius: 6px;
+      padding: 12px;
+      background: #0c121e;
+    }
+    .tui-pane-title {
+      color: #94a3b8;
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: 11px;
+      margin-bottom: 8px;
+      border-bottom: 1px solid #1e293b;
+      padding-bottom: 4px;
+    }
+    .tui-row-selected {
+      background: #2563eb;
+      color: #ffffff;
+      font-weight: 700;
+      border-radius: 3px;
+      padding: 4px 6px;
+    }
+    .tui-footer {
+      background: #0f172a;
+      color: #94a3b8;
+      padding: 8px 16px;
+      border-top: 1px solid #1e293b;
+      font-size: 11px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .tui-key {
+      color: #38bdf8;
+      font-weight: 700;
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.5rem 0;
+      font-size: 14px;
+      background: var(--card);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      box-shadow: var(--shadow-card);
+    }
+    th, td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--card-alt);
+      color: #fff;
+      font-weight: 600;
+      font-family: 'Outfit', sans-serif;
+    }
+    tr:last-child td { border-bottom: none; }
+
+    /* Scaffolded details */
+    details {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 0.8rem 1.2rem;
+      margin: 1rem 0;
+    }
+    summary {
+      font-weight: 600;
+      color: var(--primary);
+      cursor: pointer;
+      user-select: none;
+    }
+    details[open] {
+      border-color: var(--primary);
+    }
+    details > :not(summary) {
+      margin-top: 1rem;
+    }
+
+    /* Steps */
+    .step-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      margin: 2rem 0;
+    }
+    .step-item {
+      display: flex;
+      gap: 1.2rem;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+    }
+    .step-number {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: var(--primary-dim);
+      color: var(--primary);
+      border: 1px solid var(--primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Outfit', sans-serif;
+      font-weight: 700;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+
+    @media (max-width: 1024px) {
+      .layout { flex-direction: column; }
+      .sidebar { width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid var(--border-subtle); }
+      .main { padding: 1.5rem; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <a href="/">
+        <span>⚡</span> QUANTUM · KBS
+      </a>
+    </div>
+    <div class="sidebar-label">Mapeo del Tutorial</div>
+    <ul class="module-map">
+      <li><a href="#hero"><span class="dot"></span>Inicio & Ficha</a></li>
+      <li><a href="#diagnostico"><span class="dot"></span>0. Diagnóstico</a></li>
+      <li><a href="#filosofia"><span class="dot"></span>1. La Forma Simple</a></li>
+      <li><a href="#anatomia-loop"><span class="dot"></span>2. Anatomía del Loop</a></li>
+      <li><a href="#caso-pos"><span class="dot"></span>3. Caso: Sistema POS</a></li>
+      <li><a href="#caso-kbs"><span class="dot"></span>4. Caso: Fábrica KBS</a></li>
+      <li><a href="#comandos-line"><span class="dot"></span>5. Comandos de Line</a></li>
+      <li><a href="#proyectos-line"><span class="dot"></span>6. Proyectos Multi-Repo (#89)</a></li>
+      <li><a href="#tui-bubbletea"><span class="dot"></span>7. Dashboard TUI Bubble Tea (#90)</a></li>
+      <li><a href="#ui-mobile"><span class="dot"></span>8. UI Loopback & ntfy</a></li>
+      <li><a href="#ejercicios"><span class="dot"></span>9. Andamiaje ZDP</a></li>
+      <li><a href="#antipatrones"><span class="dot"></span>10. Antipatrones</a></li>
+      <li><a href="#rubrica"><span class="dot"></span>11. Rúbrica & Cierre</a></li>
+    </ul>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="main">
+    
+    <!-- HERO -->
+    <section id="hero" class="hero">
+      <div class="version-badge">#88 · v2.0 · Production Ready</div>
+      <h1>La Forma Simple: Fábricas Issue-to-PR</h1>
+      <p style="font-size: 1.15rem; color: #94a3b8; max-width: 760px;">
+        Cómo operar y construir fábricas de software autónomas mediante un loop determinista FSM, aislamiento de procesos, Git Worktrees y control loopback con GitHub como control plane.
+      </p>
+      <div class="hero-meta">
+        <div><strong>Nivel:</strong> Intermedio — Avanzado</div>
+        <div><strong>Tiempo estimado:</strong> 40 minutos</div>
+        <div><strong>Paradigma:</strong> Deterministic State Machine (FSM)</div>
+        <div><strong>Stack:</strong> Go, SQLite, GitHub CLI, Git Worktrees, ntfy</div>
+      </div>
+    </section>
+
+    <!-- COMPETENCIA INICIAL -->
+    <div class="competencia">
+      <strong>🎯 Competencia Principal a Adquirir</strong>
+      Al finalizar este tutorial serás capaz de diseñar, implementar y operar un pipeline agentico determinista (Issue → Plan → Build → Review → Wait CI / Repair → Ready) desacoplando la inteligencia del LLM del control de flujo, garantizando cero alucinaciones de contexto y eliminando colisiones en el árbol de trabajo.
+    </div>
+
+    <!-- DIAGNOSTICO -->
+    <section id="diagnostico">
+      <h2>0. Diagnóstico Inicial & Prerrequisitos</h2>
+      <p>Antes de arrancar, validemos que el terreno esté firme. Responde mentalmente este autochequeo:</p>
+      
+      <div class="grid-3">
+        <div class="card">
+          <strong>1. Git Worktrees</strong>
+          <p style="font-size:13px; margin-top:6px; color:var(--muted)">¿Sabes por qué ejecutar un agente que escribe código en tu checkout activo de git es un riesgo operacional grave?</p>
+          <details>
+            <summary>Ver explicación</summary>
+            <p style="font-size:12.5px; margin-top:8px;">Un agente descontrolado puede pisar archivos sin commitear, desatar conflictos con tu trabajo en progreso o dejar ramas rotas. Un worktree aislado le da un directorio separado que comparte el almacén de objetos <code>.git</code> sin tocar tu working tree.</p>
+          </details>
+        </div>
+
+        <div class="card">
+          <strong>2. Sesgo de Confirmación</strong>
+          <p style="font-size:13px; margin-top:6px; color:var(--muted)">¿Por qué un agente que escribió el código NUNCA debe ser el mismo que lo revisa en la misma conversación?</p>
+          <details>
+            <summary>Ver explicación</summary>
+            <p style="font-size:12.5px; margin-top:8px;">En la misma sesión de chat, el modelo retiene sus propios supuestos y justificaciones previas ("yo hice esto por X"). Un evaluador independiente requiere un proceso limpio con banderas y modelo dedicados sin historial previo.</p>
+          </details>
+        </div>
+
+        <div class="card">
+          <strong>3. Estado en el Loop</strong>
+          <p style="font-size:13px; margin-top:6px; color:var(--muted)">¿Dónde debe residir la máquina de estados: en el prompt del LLM o en código estricto compilado?</p>
+          <details>
+            <summary>Ver explicación</summary>
+            <p style="font-size:12.5px; margin-top:8px;">En código estricto compilado (Go/Python). El LLM sólo recibe el prompt de la fase actual y devuelve un JSON unificado. El código decide si avanza, repara o pide ayuda.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- FILOSOFIA -->
+    <section id="filosofia">
+      <h2>1. La Filosofía de "La Forma Simple"</h2>
+      
+      <p>La industria del software agentico se saturó de arquitecturas hipertrofiadas: grafos gigantes con 50 herramientas simultáneas, agentes charlando en bucles infinitos y árboles de decisión impredecibles. <strong>La forma simple destruye esa complejidad.</strong></p>
+
+      <div class="flow-diagram">
+        <h4 style="margin-bottom: 1rem; color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em;">La Arquitectura Original (Captura Canónica)</h4>
+        <img src="data:image/png;base64,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srL4+PiYmJidO3e6ejjML3fddVdaWlpPT092dvb27dtnz549e/Zso9E4c+bMbdu2rV27lmEYmUxGUVRZWVlzc/OaNWtaW1tnz5792muvRURErF27trS0NDMzU61W22w2nU7H83xCQoIgCDzP+/r66vX6/Pz8999/v6GhYcGCBWq1+syZM/n5+a+99prRaMzKyvL39y8vL7dYLKtWrZo3b57BYJg7d+6WLVuGh4ddjetwOJYvX7506dLKysqkpKTGxsbY2Njf/va33d3dM2fODAoK2rNnDxgAvq0f+vj4zJgxQ6FQlJaW8jx/7733RkdH19fXMwxTUlJyyy235OXlVVZWSpJUUlKybNmy1tbW2traO++88+OPP1YqlQ899FBbW9usWbOOHDnyxRdfyOVyi8ViMBgCAwPb29u/Y8KBply+fLnZbK6oqCgvL7+kVu0ayKtWrVKpVARB8Dzf09Ozb9++DRs2GAyGxYsXv/XWWwaDYcOGDfX19RERET09PRqNZt26dWBZSUxMfPnllxUKhavn8Dy/Zs2azMxMs9k8c+bMrVu32u12lzRiGGbJkiXp6ekdHR1xcXH//d//LQjC448/Dgb57du3nzx50tWvWJaNjIy86aabHnzwwalTp65evXrTpk133303aAtpaWkvvfSSa7zAYFm1alVKSkp/f/+MGTO2b98OqjwsMsbgcDgWLFiwZs2aCxcurFmzpqioqLCwcO3ata2trcPDwxkZGY8++qhWq9Xr9bNnz37//fdHR0eXLFni5+e3du3a9vb2/fv3r1q1Kj093Wq15ubmbt26lWGY8frlNcoEnTSwzAHAqlNZWfn000/X1dXFxsaOj/jAcRymA6fTGRcXFxQUtHHjxl27dqWkpKSkpCQmJj711FNbtmyJjo4OCwvjOO6TTz7ZuHFje3t7Tk4ORCIAoijOmTOHIIjh4WGVShUTE0MQRF1d3ebNm8+ePavX692TxnGcJEmbzQbJ/fGPf0xPTw8LC3vssce2b9+elJQUEBDgmj3BBDRr1qx//OMfGzdulMvlKSkpY+ZWjuMyMzPvuuuu++6779SpU/v27YuPj/f394+NjT137tyBAwfKy8tPnz79xBNPHDlyBCasHTt2vP322yEhIVFRUYmJiX/5y1/+9re/6fX60NBQp9O5d+/eLVu2qFQqHx8fqJ9LzuYwidtstv7+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" alt="La Forma Simple: Diagrama de Loop Go/Python" />
+        <p style="font-size: 12.5px; color: var(--muted); margin-top: 12px; font-family: 'JetBrains Mono', monospace;">
+          "Un loop en Go o Python. Estado en un JSON (o en un comentario del issue). El modelo no ve el grafo entero."
+        </p>
+      </div>
+
+      <div class="grid-2">
+        <div class="card" style="border-left: 4px solid var(--danger);">
+          <strong style="color: var(--danger);">❌ El Mega-Grafo Monolítico</strong>
+          <ul style="margin: 10px 0 0 18px; font-size: 13.5px; color: #cbd5e1;">
+            <li>El modelo carga con 50 turnos de chat en su ventana de contexto.</li>
+            <li>Alucinación de herramientas y confusión de roles ("ahora soy coder, ahora reviewer").</li>
+            <li>Si un test falla, el agente entra en pánico y edita archivos irrelevantes.</li>
+            <li>Costo de tokens desbocado sin presupuesto de reparación.</li>
+          </ul>
+        </div>
+
+        <div class="card" style="border-left: 4px solid var(--success);">
+          <strong style="color: var(--success);">✅ La Forma Simple (FSM Line)</strong>
+          <ul style="margin: 10px 0 0 18px; font-size: 13.5px; color: #cbd5e1;">
+            <li><strong>Procesos limpios:</strong> Cada fase es una ejecución nueva e independiente.</li>
+            <li><strong>El modelo no ve el grafo entero:</strong> Sólo ve las variables necesarias (<code>PromptVars</code>) de la fase actual.</li>
+            <li><strong>Contrato JSON unificado:</strong> Termina en <code>ok</code>, <code>needs_human</code> o <code>blocked</code>.</li>
+            <li><strong>Presupuesto estricto:</strong> Máximo 3 reparaciones de CI antes de detenerse.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- DIAGRAMA SVG FSM -->
+      <div style="background: #090e1a; border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 2rem; margin: 2rem 0; overflow-x: auto;">
+        <h4 style="color: #fff; margin-bottom: 1.5rem; text-align: center;">Máquina de Estados Finitos (FSM) de Line</h4>
+        <svg viewBox="0 0 860 220" style="width: 100%; min-width: 700px; height: auto; display: block; margin: auto;">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 1 L 8 5 L 0 9 z" fill="#38bdf8" />
+            </marker>
+            <marker id="arrow-warn" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 1 L 8 5 L 0 9 z" fill="#fbbf24" />
+            </marker>
+            <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 1 L 8 5 L 0 9 z" fill="#34d399" />
+            </marker>
+          </defs>
+
+          <!-- Nodos -->
+          <g transform="translate(20, 40)">
+            <rect width="110" height="50" rx="8" fill="#111827" stroke="#38bdf8" stroke-width="2"/>
+            <text x="55" y="30" fill="#fff" font-family="Outfit" font-size="14" font-weight="700" text-anchor="middle">1. PLAN</text>
+          </g>
+
+          <g transform="translate(180, 40)">
+            <rect width="110" height="50" rx="8" fill="#111827" stroke="#38bdf8" stroke-width="2"/>
+            <text x="55" y="30" fill="#fff" font-family="Outfit" font-size="14" font-weight="700" text-anchor="middle">2. BUILD</text>
+          </g>
+
+          <g transform="translate(340, 40)">
+            <rect width="110" height="50" rx="8" fill="#111827" stroke="#818cf8" stroke-width="2"/>
+            <text x="55" y="30" fill="#fff" font-family="Outfit" font-size="14" font-weight="700" text-anchor="middle">3. REVIEW</text>
+          </g>
+
+          <g transform="translate(500, 40)">
+            <rect width="120" height="50" rx="8" fill="#111827" stroke="#38bdf8" stroke-width="2"/>
+            <text x="60" y="30" fill="#fff" font-family="Outfit" font-size="14" font-weight="700" text-anchor="middle">4. WAIT_CI</text>
+          </g>
+
+          <g transform="translate(680, 40)">
+            <rect width="120" height="50" rx="8" fill="#064e3b" stroke="#34d399" stroke-width="2"/>
+            <text x="60" y="30" fill="#fff" font-family="Outfit" font-size="14" font-weight="700" text-anchor="middle">5. READY</text>
+          </g>
+
+          <!-- REPAIR abajo -->
+          <g transform="translate(420, 140)">
+            <rect width="120" height="50" rx="8" fill="#451a03" stroke="#fbbf24" stroke-width="2"/>
+            <text x="60" y="30" fill="#fff" font-family="Outfit" font-size="14" font-weight="700" text-anchor="middle">REPAIR (max 3)</text>
+          </g>
+
+          <!-- Flechas flujo principal -->
+          <line x1="130" y1="65" x2="172" y2="65" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)" />
+          <line x1="290" y1="65" x2="332" y2="65" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)" />
+          <line x1="450" y1="65" x2="492" y2="65" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrow)" />
+          <line x1="620" y1="65" x2="672" y2="65" stroke="#34d399" stroke-width="2" marker-end="url(#arrow-green)" />
+
+          <!-- Flechas Repair loop -->
+          <path d="M 560 90 L 560 115 L 480 140" fill="none" stroke="#fbbf24" stroke-width="2" marker-end="url(#arrow-warn)" />
+          <text x="545" y="125" fill="#fbbf24" font-family="JetBrains Mono" font-size="11">fail</text>
+
+          <path d="M 420 165 L 395 165 L 395 98" fill="none" stroke="#fbbf24" stroke-width="2" marker-end="url(#arrow-warn)" />
+          <text x="340" y="145" fill="#fbbf24" font-family="JetBrains Mono" font-size="11">parcheado</text>
+        </svg>
+      </div>
+    </section>
+
+    <!-- ANATOMIA DEL LOOP -->
+    <section id="anatomia-loop">
+      <h2>2. Anatomía del Loop Fase a Fase</h2>
+      <p>A continuación desglosamos qué entra, qué se ejecuta y qué sale en cada estación de la fábrica:</p>
+
+      <div class="step-list">
+        <!-- PASO 0 -->
+        <div class="step-item">
+          <div class="step-number">0</div>
+          <div>
+            <h3>Fase 0: El Issue de GitHub (El Gatillo)</h3>
+            <span class="badge badge-ide">GitHub Control Plane</span>
+            <p style="margin-top:8px;">Todo comienza en un Issue. No en una orden verbal ni en un chat efímero. El issue es auditable, permite adjuntar capturas, requisitos y referencias de tickets anteriores.</p>
+            <div class="code-header"><span>GitHub Issue #101</span><span>markdown</span></div>
+            <pre><code># feat(pos): soporte para escaneo offline y tickets térmicos
+
+## Contexto
+El sistema POS actual requiere conexión constante a la API central.
+Necesitamos operar localmente ante caídas de red y emitir tickets ESC/POS.
+
+## Criterios de Aceptación
+1. Lector de código de barras procesa EAN-13 en memoria local (SQLite).
+2. Cálculo de subtotal con desglose de IVA (16%) incluido.
+3. Generación de payload de impresión térmica ESC/POS.
+4. Cobertura de tests unitarios mínima del 90%.</code></pre>
+          </div>
+        </div>
+
+        <!-- PASO 1 -->
+        <div class="step-item">
+          <div class="step-number">1</div>
+          <div>
+            <h3>Fase 1: PLAN (Diseño y Clasificación)</h3>
+            <span class="badge badge-prompt">agent: plan</span> <span class="badge badge-terminal">read-only</span>
+            <p style="margin-top:8px;">El factory inyecta el issue y el repo en <code>prompts/plan.md</code>. El agente inspecciona el repositorio en modo lectura (sin modificar ningún archivo). Diseña la arquitectura y enumera las tareas.</p>
+
+            <div class="code-header"><span>Contrato de Salida (Plan Aprobado)</span><span>json</span></div>
+            <pre><code>{
+  "status": "ok",
+  "summary": "Diseño completado: tabla sqlite local_inventory, motor TaxCalculator y formatter ESC/POS con 4 tareas unitarias."
+}</code></pre>
+
+            <div class="code-header"><span>Bifurcación: Intervención Humana (Needs Human)</span><span>json</span></div>
+            <pre><code>{
+  "status": "needs_human",
+  "question": "¿Los precios de los productos en la base local ya incluyen IVA o el 16% se adiciona al subtotal en caja?"
+}</code></pre>
+
+            <div class="nota">
+              <strong>🛑 El Freno de Emergencia: needs_human</strong>
+              Si el modelo detecta ambigüedad comercial o técnica, emite <code>needs_human</code> y el factory <strong>se detiene de inmediato</strong>. Envía una notificación push a tu teléfono y espera tu respuesta con <code>line continue --answer "..."</code>.
+            </div>
+          </div>
+        </div>
+
+        <!-- PASO 2 -->
+        <div class="step-item">
+          <div class="step-number">2</div>
+          <div>
+            <h3>Fase 2: BUILD (Implementación en Worktree Aislado)</h3>
+            <span class="badge badge-runner">isolated git worktree</span> <span class="badge badge-terminal">code & test</span>
+            <p style="margin-top:8px;">Line crea un Git Worktree independiente en <code>../kbs-worktrees/job-&lt;id&gt;</code>. El agente trabaja exclusivamente en ese directorio, escribe el código, crea las pruebas, corre <code>go test</code>, commitea en una rama limpia y crea el Pull Request con <code>gh pr create</code>.</p>
+
+            <div class="code-header"><span>Contrato de Salida (Build)</span><span>json</span></div>
+            <pre><code>{
+  "status": "ok",
+  "summary": "Implementados BarcodeReader, TaxEngine y ESCPOSFormatter con 12 tests unitarios pasando.",
+  "pull_request": "https://github.com/QuantumEdu/pos-app/pull/102",
+  "head_sha": "d4e8c1a9f023"
+}</code></pre>
+            <p style="font-size:13px; color:var(--muted); margin-top:8px;">El factory extrae <code>pull_request</code> y <code>head_sha</code> y los guarda de forma persistente en SQLite.</p>
+          </div>
+        </div>
+
+        <!-- PASO 3 -->
+        <div class="step-item">
+          <div class="step-number">3</div>
+          <div>
+            <h3>Fase 3: REVIEW (Evaluación Independiente)</h3>
+            <span class="badge badge-ide">independent reviewer</span> <span class="badge badge-sdd">audit gate</span>
+            <p style="margin-top:8px;">Aquí se rompe el sesgo del autor: se despacha un proceso nuevo con el flag <code>--review-exec</code> (por ejemplo, Claude con temperatura 0.1 o un modelo auditador). El revisor recibe el diff del PR y verifica contratos de seguridad, tipado y cobertura.</p>
+
+            <div class="code-header"><span>Contrato de Salida (Review)</span><span>json</span></div>
+            <pre><code>{
+  "status": "ok",
+  "summary": "Revisión aprobada: no hay llamadas bloqueantes a red en el flujo offline, cobertura 94%, tipos estrictos."
+}</code></pre>
+          </div>
+        </div>
+
+        <!-- PASO 4 -->
+        <div class="step-item">
+          <div class="step-number">4</div>
+          <div>
+            <h3>Fase 4: WAIT_CI & El Loop de REPAIR</h3>
+            <span class="badge badge-terminal">continuous polling</span> <span class="badge badge-runner">github actions</span>
+            <p style="margin-top:8px;">Line sondea continuamente <code>gh pr checks</code> (cada 10s hasta 20m):</p>
+            <ul style="margin: 8px 0 12px 20px; font-size: 13.5px; color: #cbd5e1;">
+              <li><strong>Todos los checks pasan (PASS):</strong> El job transiciona directamente a <code>READY</code>.</li>
+              <li><strong>Algún check falla (FAIL):</strong> Se incrementa <code>repair_count</code>. Si no supera el presupuesto (3), transiciona a <code>REPAIR</code>.</li>
+            </ul>
+
+            <div class="code-header"><span>Fase REPAIR (Corrección Quirúrgica)</span><span>agentic loop</span></div>
+            <p style="font-size:13.5px; margin-top:8px;">El agente de reparación recibe el detalle exacto del log de CI que falló (ej: <code>"FAIL: TestTaxRounding - expected 116.00 got 115.99"</code>), corrige el cálculo en el worktree, commitea, pushea y el factory vuelve automáticamente a <strong>REVIEW</strong> y <strong>WAIT_CI</strong>.</p>
+          </div>
+        </div>
+
+        <!-- PASO 5 -->
+        <div class="step-item">
+          <div class="step-number">5</div>
+          <div>
+            <h3>Fase 5: READY (Entrega Limpia)</h3>
+            <span class="badge badge-browser">ready for human merge</span>
+            <p style="margin-top:8px;">Al confirmarse el éxito de CI:</p>
+            <ol style="margin: 8px 0 12px 20px; font-size: 13.5px; color: #cbd5e1;">
+              <li>El factory destruye automáticamente el worktree temporal para liberar disco.</li>
+              <li>Envía notificación push final: <em>"Job listo para merge con PR #102 aprobado y CI verde"</em>.</li>
+              <li>El humano hace el merge en GitHub. <strong>Cero esfuerzo de micro-management.</strong></li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CASO POS -->
+    <section id="caso-pos">
+      <h2>3. Caso Práctico Extendido: El Sistema POS</h2>
+      <p>Veamos una corrida completa simulada sobre un sistema de punto de venta (POS) para observar cómo interactúan la terminal, los prompts y el humano:</p>
+
+      <div class="code-header"><span>1. Lanzamiento del Factory</span><span>bash</span></div>
+      <pre><code><span class="badge badge-terminal">terminal</span>
+line run   --repo /home/ubuntu/dev/pos-app   --auto   --review-exec claude   --review-exec-arg --temperature=0.1   --ntfy-topic line-pos-alerts   https://github.com/QuantumEdu/pos-app/issues/101</code></pre>
+
+      <div class="card card-accent" style="margin: 1.5rem 0;">
+        <h4 style="color:#fff; margin-bottom: 0.5rem;">Salida en tiempo real del CLI:</h4>
+        <pre style="margin:0; background:transparent; border:none; padding:0;"><code>job 4a8f9021c7e2
+issue https://github.com/QuantumEdu/pos-app/issues/101
+phase plan
+status needs_human
+question ¿Los precios leídos por el escáner ya tienen IVA (16%) incluido o debe sumarse al total?</code></pre>
+      </div>
+
+      <p>El factory se pausó de forma segura. El desarrollador recibe la alerta en el celular o la ve en su terminal y responde:</p>
+
+      <div class="code-header"><span>2. Continuación con la respuesta humana</span><span>bash</span></div>
+      <pre><code><span class="badge badge-terminal">terminal</span>
+line continue --answer "Vienen con IVA incluido, calcular el desglose: base = precio / 1.16"</code></pre>
+
+      <div class="card" style="margin: 1.5rem 0; border-left: 4px solid var(--success);">
+        <h4 style="color:var(--success); margin-bottom: 0.5rem;">Evolución Automática (Auto-Advance Loop):</h4>
+        <ol style="margin-left: 20px; font-size: 13.5px; color:#cbd5e1; line-height: 1.8;">
+          <li><code>plan</code> finaliza con <code>ok</code>: diseña <code>TaxCalculator.Split(grossPrice)</code>.</li>
+          <li><code>build</code> arranca en <code>/home/ubuntu/dev/pos-app-worktrees/job-4a8f9021c7e2</code>. Escribe <code>pkg/tax/tax.go</code> y <code>pkg/tax/tax_test.go</code>. Abre <strong>PR #102</strong>.</li>
+          <li><code>review</code> ejecuta el evaluador independiente con <code>--temperature=0.1</code>. Emite <code>ok: tests cubren casos borde de redondeo bancario</code>.</li>
+          <li><code>wait_ci</code> sondea GitHub Actions. A los 45s: <strong>Pass (14 checks verdes)</strong>.</li>
+          <li>Worktree eliminado automáticamente. Status final: <strong>READY</strong>.</li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- CASO KBS -->
+    <section id="caso-kbs">
+      <h2>4. Caso Real: La Implementación del Propio Line en KBS</h2>
+      <p>Este tutorial no es teórico: acabamos de aplicar exactamente este flujo para resolver el backlog completo de 11 issues (#77 a #87) en el repositorio <code>kbs</code> con SDD:</p>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Issue</th>
+            <th>Módulo</th>
+            <th>Problema Detectado</th>
+            <th>Solución Aplicada en el Factory</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>#86</strong></td>
+            <td><code>internal/cli</code></td>
+            <td><code>SysProcAttr.Setsid</code> rompía compilación en Windows.</td>
+            <td>Aislamiento mediante build tags <code>_unix.go</code> y <code>_windows.go</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>#80</strong></td>
+            <td><code>internal/line</code></td>
+            <td>Agentes escribían sobre el checkout sucio del operador.</td>
+            <td>Implementación de <code>GitWorktreeManager</code> en <code>worktree.go</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>#79</strong></td>
+            <td><code>internal/line</code></td>
+            <td>Build y Review compartían el mismo contexto de agente.</td>
+            <td>Flags <code>--review-exec</code> y despacho desacoplado en fase <code>review</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>#77</strong></td>
+            <td><code>internal/line</code></td>
+            <td>Requería ejecutar <code>line next</code> manualmente en cada fase.</td>
+            <td>Bucle <code>AutoAdvance</code> con detención estricta en <code>needs_human</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>#78</strong></td>
+            <td><code>internal/line</code></td>
+            <td><code>wait_ci</code> sólo hacía un intento y salía.</td>
+            <td>Bucle continuo de polling (10s/20m) con transición a <code>repair</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>#83</strong></td>
+            <td><code>internal/line</code></td>
+            <td>La UI web no permitía originar jobs nuevos.</td>
+            <td>Formulario <code>POST /jobs/new</code> con binding loopback (127.0.0.1).</td>
+          </tr>
+          <tr>
+            <td><strong>#84</strong></td>
+            <td><code>internal/line</code></td>
+            <td>ntfy sólo era de salida, sin poder continuar desde móvil.</td>
+            <td>Cabecera <code>Actions</code> con botones interactivos para continuar.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- COMANDOS LINE -->
+    <section id="comandos-line">
+      <h2>5. Manual de Comandos de Line</h2>
+      <p>Referencia canónica de la CLI de <code>line</code>:</p>
+
+      <div class="grid-2">
+        <div class="card">
+          <h4 style="color:var(--primary);">line run</h4>
+          <p style="font-size:13px; color:var(--muted);">Inicia un nuevo job a partir de un issue de GitHub.</p>
+          <pre><code>line run --repo &lt;path&gt; [flags] &lt;issue-url&gt;
+
+Flags principales:
+  --auto           Auto-avanza fases (def: true)
+  --exec &lt;cmd&gt;     Ejecutor autor (def: claude)
+  --review-exec    Ejecutor revisor independiente
+  --worktree       Aísla en git worktree (def: true)
+  --ntfy-topic     Tópico de ntfy para alertas</code></pre>
+        </div>
+
+        <div class="card">
+          <h4 style="color:var(--primary);">line status</h4>
+          <p style="font-size:13px; color:var(--muted);">Muestra el estado del último job o de un job específico.</p>
+          <pre><code>line status [job-id]
+
+Salida:
+  job &lt;id&gt;
+  issue &lt;url&gt;
+  phase &lt;plan|build|review|wait_ci|ready&gt;
+  status &lt;running|awaiting_next|needs_human|ready&gt;
+  events timeline...</code></pre>
+        </div>
+
+        <div class="card">
+          <h4 style="color:var(--primary);">line continue</h4>
+          <p style="font-size:13px; color:var(--muted);">Desbloquea una fase en estado <code>needs_human</code>.</p>
+          <pre><code>line continue --answer "&lt;texto&gt;" [job-id]
+
+Ejemplo:
+  line continue     --answer "Usar PostgreSQL en vez de MySQL"</code></pre>
+        </div>
+
+        <div class="card">
+          <h4 style="color:var(--primary);">line serve</h4>
+          <p style="font-size:13px; color:var(--muted);">Levanta el panel de control web loopback.</p>
+          <pre><code>line serve [--listen 127.0.0.1:7340]
+
+Características:
+  - Enlace exclusivo a 127.0.0.1 (seguridad)
+  - Creación de jobs desde el navegador
+  - Respuesta a needs_human con formulario</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- PROYECTOS MULTI-REPO -->
+    <section id="proyectos-line">
+      <h2>6. Gestión de Proyectos Multi-Repo (#89)</h2>
+      <p>
+        Cuando operas en organizaciones reales con monorepos, múltiples microservicios o repositorios satélite (ej. frontend web, backend API, librerías compartidas), una herramienta que te obligue a tipear <code>--repo /ruta/completa/al/checkout</code> en cada invocación añade fricción operativa y propicia errores humanos.
+      </p>
+
+      <p>
+        Para resolver esto de raíz, <code>line</code> incorpora un subsistema de <strong>gestión de proyectos</strong> persistido directamente en SQLite.
+        Puedes registrar múltiples proyectos, asociarles ejecutores y tópicos de notificación específicos, y conmutar el foco activo con un solo comando:
+      </p>
+
+      <div class="grid-2">
+        <div class="card card-accent">
+          <h4 style="color:var(--primary);">Registro y Conmutación de Proyectos</h4>
+          <pre><code><span class="badge badge-terminal">terminal</span>
+# 1. Registrar tu proyecto principal (se activa automáticamente)
+line project add pos-core \
+  --name "POS Core Engine" \
+  --repo /home/ubuntu/dev/pos-app \
+  --exec claude \
+  --ntfy-topic pos-alerts
+
+# 2. Registrar un segundo repositorio (frontend web)
+line project add web \
+  --name "Web Dashboard" \
+  --repo /home/ubuntu/dev/web-dashboard
+
+# 3. Listar proyectos registrados (* marca el activo)
+line project list
+
+# 4. Cambiar el proyecto activo
+line project use web
+
+# 5. Ver el proyecto activo actual
+line project current</code></pre>
+        </div>
+
+        <div class="card">
+          <h4 style="color:var(--success);">⚡ Resolución Automática en line run</h4>
+          <p style="font-size:13.5px; margin-top:8px;">
+            Gracias a la tabla <code>projects</code> en SQLite, cuando ejecutas <code>line run</code> omitiendo el flag <code>--repo</code>:
+          </p>
+          <ol style="margin-left: 18px; font-size: 13px; color:#cbd5e1; line-height: 1.8;">
+            <li><code>line</code> consulta el proyecto con <code>is_active = 1</code>.</li>
+            <li>Hereda automáticamente <code>repo_path</code> para montar los worktrees.</li>
+            <li>Hereda el ejecutor autor (<code>--exec</code>) y de revisión (<code>--review-exec</code>) predeterminados.</li>
+            <li>Hereda el tópico de notificaciones ntfy (<code>--ntfy-topic</code>).</li>
+          </ol>
+          <div class="code-header" style="margin-top:12px;"><span>Ejecución directa sin fricción</span><span>bash</span></div>
+          <pre><code><span class="badge badge-terminal">terminal</span>
+# ¡Basta con pasar la URL del issue!
+line run https://github.com/QuantumEdu/pos-app/issues/105</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- TUI BUBBLE TEA -->
+    <section id="tui-bubbletea">
+      <h2>7. Dashboard Interactivo TUI con Charm Bubble Tea (#90)</h2>
+      <p>
+        Para desarrolladores que operan desde la terminal, servidores remotos vía SSH o multiplexores como tmux/zellij, <code>line</code> proporciona una interfaz interactiva de terminal en tiempo real impulsada por <strong>Charm Bubble Tea</strong>, <strong>Lip Gloss</strong> y <strong>Bubbles</strong>:
+      </p>
+
+      <div class="code-header"><span>Lanzamiento del Dashboard TUI</span><span>bash</span></div>
+      <pre><code><span class="badge badge-terminal">terminal</span>
+line tui</code></pre>
+
+      <!-- TUI MOCKUP -->
+      <div class="tui-mockup">
+        <div class="tui-header">
+          <span>⚡ LINE FACTORY  │  Active Project: [ pos-core - POS Core Engine ]  │  Total Jobs: 3</span>
+          <span style="color:#94a3b8; font-weight:normal;">v2.1 · Charm Bubble Tea</span>
+        </div>
+        <div class="tui-body">
+          <div class="tui-pane">
+            <div class="tui-pane-title">Factory Jobs (Tablero Principal)</div>
+            <div style="line-height: 2;">
+              <div class="tui-row-selected">▶ 4a8f9021   plan       needs_human    https://github.com/QuantumEdu/pos-app/issues/101</div>
+              <div style="padding: 2px 4px; color:#94a3b8;">  7b1c348e   wait_ci    running        https://github.com/QuantumEdu/pos-app/issues/98</div>
+              <div style="padding: 2px 4px; color:#94a3b8;">  90d2e11a   ready      ok             https://github.com/QuantumEdu/pos-app/issues/94</div>
+            </div>
+          </div>
+          <div class="tui-pane">
+            <div class="tui-pane-title">Inspector de Job Seleccionado</div>
+            <div style="font-size: 11.5px; line-height: 1.6;">
+              <p><strong style="color:#38bdf8;">Job ID:</strong> 4a8f9021c7e2</p>
+              <p><strong style="color:#38bdf8;">Phase:</strong> <span style="color:#38bdf8;">plan</span> │ <strong style="color:#38bdf8;">Status:</strong> <span style="color:#fbbf24; font-weight:bold;">needs_human</span></p>
+              <p><strong style="color:#38bdf8;">Issue:</strong> https://github.com/QuantumEdu/pos-app/issues/101</p>
+              
+              <div style="background:#1e293b; border-left:3px solid #fbbf24; padding:8px; margin:8px 0; border-radius:3px;">
+                <span style="color:#fbbf24; font-weight:bold;">⚠️ Pregunta del Agente:</span><br>
+                ¿Los precios leídos por el escáner ya tienen IVA (16%) incluido o debe sumarse al total?
+              </div>
+
+              <div style="color:#94a3b8; font-size:11px;">
+                <strong>Recent Events:</strong><br>
+                • [plan] started plan<br>
+                • [plan] needs_human ¿Los precios leídos...
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="tui-footer">
+          <span><span class="tui-key">[↑/↓]</span> Seleccionar</span>
+          <span><span class="tui-key">[space]</span> Next Step</span>
+          <span><span class="tui-key">[a]</span> Auto-Advance</span>
+          <span><span class="tui-key">[c]</span> Responder (Modal)</span>
+          <span><span class="tui-key">[n]</span> Nuevo Job</span>
+          <span><span class="tui-key">[p]</span> Conmutar Proyecto</span>
+          <span><span class="tui-key">[r]</span> Refrescar</span>
+          <span><span class="tui-key">[q]</span> Salir</span>
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <div class="card">
+          <h4 style="color:var(--primary);">Atajo [c]: Respuesta Interactiva</h4>
+          <p style="font-size:13px; color:var(--muted); margin-top:6px;">
+            Al seleccionar un job pausado en <code>needs_human</code> y pulsar <code>c</code>, se abre una ventana modal con un <strong>textarea de Bubble Tea</strong>. Escribes tu decisión comercial o técnica, presionas Enter y el factory se reanuda de inmediato.
+          </p>
+        </div>
+
+        <div class="card">
+          <h4 style="color:var(--primary);">Atajo [n]: Lanzar Nuevo Job</h4>
+          <p style="font-size:13px; color:var(--muted); margin-top:6px;">
+            Pulsa <code>n</code> en cualquier momento: ingresas la URL del issue de GitHub y el factory lanza el job automáticamente vinculado al proyecto activo actual.
+          </p>
+        </div>
+
+        <div class="card">
+          <h4 style="color:var(--primary);">Atajo [p]: Conmutador de Proyectos</h4>
+          <p style="font-size:13px; color:var(--muted); margin-top:6px;">
+            Pulsa <code>p</code> para desplegar la lista interactiva de proyectos registrados en SQLite. Elige con flechas y cambia de contexto de trabajo instantáneamente sin salir del TUI.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- UI & MOBILE -->
+    <section id="ui-mobile">
+      <h2>8. Interfaz Web UI Loopback & Control Móvil con ntfy</h2>
+
+      <p>La fábrica incluye un panel web ultraligero y seguro que puedes abrir en <code>http://127.0.0.1:7340</code>:</p>
+
+      <!-- UI MOCKUP -->
+      <div class="ui-mockup">
+        <div class="ui-mockup-header">
+          <span class="window-dot dot-red"></span>
+          <span class="window-dot dot-yellow"></span>
+          <span class="window-dot dot-green"></span>
+          <span class="ui-mockup-address">http://127.0.0.1:7340/jobs/4a8f9021</span>
+        </div>
+        <div class="ui-mockup-body">
+          <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #334155; padding-bottom:10px; margin-bottom:15px;">
+            <div>
+              <span style="font-size:1.4rem; font-weight:700;">Job 4a8f9021</span>
+              <span class="badge" style="background:#0284c7; color:#fff; margin-left:8px;">phase: plan</span>
+              <span class="badge" style="background:#eab308; color:#000; margin-left:4px;">status: needs_human</span>
+            </div>
+            <span style="font-size:12px; color:#94a3b8;">kbs local factory</span>
+          </div>
+
+          <p style="color:#94a3b8; font-size:13px;"><strong>Issue:</strong> <a href="#">https://github.com/QuantumEdu/pos-app/issues/101</a></p>
+
+          <div style="background:#1e293b; border:1px solid #475569; border-radius:8px; padding:15px; margin:15px 0;">
+            <p style="color:#fde047; font-weight:600; margin-bottom:6px;">⚠️ Pregunta del Agente (needs_human):</p>
+            <p style="font-size:14px; margin-bottom:10px;">¿Los precios leídos por el escáner ya tienen IVA (16%) incluido o debe sumarse al total?</p>
+            <textarea style="width:100%; height:60px; background:#0f172a; border:1px solid #475569; border-radius:4px; color:#fff; padding:8px; font-family:inherit; font-size:13px;" placeholder="Escribe tu respuesta aquí..."></textarea>
+            <button style="margin-top:10px; background:#0284c7; color:#fff; border:none; padding:8px 16px; border-radius:4px; font-weight:600; cursor:pointer;">Enviar Respuesta y Continuar</button>
+          </div>
+
+          <h4 style="font-size:13px; color:#94a3b8; text-transform:uppercase; margin-top:20px;">Timeline de Eventos</h4>
+          <ul style="list-style:none; font-family:'JetBrains Mono', monospace; font-size:12px; color:#cbd5e1; margin-top:8px;">
+            <li style="margin-bottom:6px;">• [plan] started — plan</li>
+            <li style="margin-bottom:6px;">• [plan] needs_human — ¿Los precios leídos por el escáner ya tienen IVA...</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="grid-2" style="margin-top:2rem;">
+        <div class="card">
+          <strong style="color:var(--primary);">📱 Notificaciones ntfy en tu Celular</strong>
+          <p style="font-size:13.5px; margin-top:8px;">Al configurar <code>export LINE_NTFY_TOPIC=mi-topico-secreto</code>, tu teléfono recibe una alerta sonora cuando el factory requiere decisión humana.</p>
+          <p style="font-size:13px; color:var(--muted);">Gracias a la cabecera <code>Actions</code>, la notificación incluye botones rápidos:</p>
+          <div style="display:flex; gap:8px; margin-top:10px;">
+            <span class="badge" style="background:#1e293b; border:1px solid #475569; color:#fff; padding:6px 10px;">[Ver Issue]</span>
+            <span class="badge" style="background:#1e293b; border:1px solid #475569; color:#fff; padding:6px 10px;">[Abrir UI]</span>
+            <span class="badge" style="background:#0284c7; color:#fff; padding:6px 10px;">[Continuar]</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <strong style="color:var(--warning);">🔒 Por qué strictly loopback (127.0.0.1)</strong>
+          <p style="font-size:13.5px; margin-top:8px;"><code>line serve</code> jamás debe exponerse a <code>0.0.0.0</code> ni a internet. El factory ejecuta código shell y compila binarios locales. Si se abriera a la red local sin autenticación, cualquier host podría inyectar comandos remotos.</p>
+          <p style="font-size:12.5px; color:var(--muted); margin-top:6px;">Line incluye validación estricta en <code>ListenAndServe</code> que rechaza cualquier binding que no sea <code>127.0.0.1</code> o <code>localhost</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- EJERCICIOS ZDP -->
+    <section id="ejercicios">
+      <h2>9. Andamiaje Pedagógico (Práctica ZDP)</h2>
+
+      <div class="step-list">
+        <!-- EJERCICIO 1 -->
+        <div class="step-item">
+          <div class="step-number" style="background:var(--success-dim); color:var(--success); border-color:var(--success);">G</div>
+          <div>
+            <h3>Ejercicio 1 (Guiado): Verificación del Binario y Ayuda</h3>
+            <p>Comprueba que la instalación de <code>line</code> esté activa en tu entorno y examina los comandos disponibles.</p>
+            <div class="code-header"><span>Comando de Verificación</span><span>bash</span></div>
+            <pre><code><span class="badge badge-terminal">terminal</span>
+which line && line help</code></pre>
+            <details>
+              <summary>Ver resultado esperado</summary>
+              <pre><code>/home/ubuntu/.local/bin/line
+line is a deterministic issue-to-PR factory for the kbs suite.
+Phases: plan -> build -> review -> wait_ci -> ready.
+...</code></pre>
+            </details>
+          </div>
+        </div>
+
+        <!-- EJERCICIO 2 -->
+        <div class="step-item">
+          <div class="step-number" style="background:var(--warning-dim); color:var(--warning); border-color:var(--warning);">S</div>
+          <div>
+            <h3>Ejercicio 2 (Semi-guiado): Ejecutar en Modo Manual (Single-Step)</h3>
+            <p>Lanza un job pero desactivando el auto-advance para que se pause en la primera fase y puedas inspeccionar el estado con <code>line status</code>.</p>
+            <details>
+              <summary>Pista 1: Bandera necesaria</summary>
+              <p style="font-size:13px;">Usa el flag <code>--auto=false</code> en el comando <code>line run</code>.</p>
+            </details>
+            <details>
+              <summary>Solución</summary>
+              <pre><code>line run --auto=false --repo /home/ubuntu/dev/kbs https://github.com/QuantumEdu/kbs/issues/1
+line status
+# Para avanzar manualmente un solo paso:
+line next</code></pre>
+            </details>
+          </div>
+        </div>
+
+        <!-- EJERCICIO 3 -->
+        <div class="step-item">
+          <div class="step-number" style="background:var(--accent-dim); color:var(--accent); border-color:var(--accent);">A</div>
+          <div>
+            <h3>Ejercicio 3 (Autónomo): Iniciar el Servidor Web Loopback y Probar Creación</h3>
+            <p>Inicia <code>line serve</code> en background y envía una petición POST al endpoint <code>/jobs/new</code> para validar la creación del job desde loopback.</p>
+            <details>
+              <summary>Verificación con One-Liner</summary>
+              <pre><code>curl -s -X POST -d "issue_url=https://github.com/o/r/issues/99&repo_path=/tmp" -i http://127.0.0.1:7340/jobs/new | grep "303 See Other"</code></pre>
+            </details>
+          </div>
+        </div>
+
+        <!-- EJERCICIO 4 -->
+        <div class="step-item">
+          <div class="step-number" style="background:var(--primary-dim); color:var(--primary); border-color:var(--primary);">P</div>
+          <div>
+            <h3>Ejercicio 4 (Reto): Registrar Proyecto y Operar con el TUI Bubble Tea</h3>
+            <p>Registra un proyecto para tu repositorio local con <code>line project add</code> y lanza el dashboard interactivo en terminal con <code>line tui</code>. Experimenta con las teclas <code>[n]</code>, <code>[p]</code> y <code>[space]</code>.</p>
+            <details>
+              <summary>Verificación de Comandos</summary>
+              <pre><code>line project add myapp --name "Mi Aplicación" --repo $(pwd)
+line project list
+line tui</code></pre>
+            </details>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ANTIPATRONES -->
+    <section id="antipatrones">
+      <h2>10. Antipatrones Fatales en Fábricas de Agentes</h2>
+
+      <div class="grid-2">
+        <div class="misconception">
+          <strong>Antipatrón 1: Permitir que el LLM decida si avanza o no de fase</strong>
+          <p><em>Por qué falla:</em> Los modelos sufren de fatiga o complacencia. Pueden decidir que "el código ya está bien" sin correr los tests.</p>
+          <p><em>La solución de Line:</em> La FSM en Go obliga a ejecutar la fase <code>wait_ci</code>. No hay estado <code>ready</code> sin un exit code 0 de GitHub Actions.</p>
+        </div>
+
+        <div class="misconception">
+          <strong>Antipatrón 2: Un solo modelo haciendo de autor y revisor en la misma sesión</strong>
+          <p><em>Por qué falla:</em> Si el modelo introdujo un bug de lógica, en el review dirá que la lógica es sólida porque recuerda su razonamiento previo.</p>
+          <p><em>La solución de Line:</em> Subproceso fresco con <code>--review-exec</code> y temperatura distinta. El revisor sólo ve el diff, no el chat anterior.</p>
+        </div>
+
+        <div class="misconception">
+          <strong>Antipatrón 3: Reparación sin presupuesto (Infinite Repair Loops)</strong>
+          <p><em>Por qué falla:</em> Si un test de CI falla por un problema de infraestructura externa (ej. base de datos caída), el agente intentará parchar el código 50 veces quemando cientos de dólares.</p>
+          <p><em>La solución de Line:</em> Presupuesto inquebrantable de <code>maxRepairs = 3</code>. Al 4to intento pasa a <code>BLOCKED</code> y avisa al humano.</p>
+        </div>
+
+        <div class="misconception">
+          <strong>Antipatrón 4: Trabajar en el árbol principal de git</strong>
+          <p><em>Por qué falla:</em> El agente genera cambios sin commitear mientras tú estás editando otro archivo, provocando conflictos de merge y pérdida de trabajo.</p>
+          <p><em>La solución de Line:</em> Git Worktrees aislados en directorios hermanos que se limpian al terminar.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- RUBRICA -->
+    <section id="rubrica">
+      <h2>11. Rúbrica Metacognitiva & Cierre</h2>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Criterio</th>
+            <th>Novato</th>
+            <th>Competente</th>
+            <th>Experto</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Arquitectura de Flujo</strong></td>
+            <td>Lanza un mega-prompt esperando que el agente resuelva todo de golpe.</td>
+            <td>Utiliza un pipeline por fases pero con el mismo agente y en el mismo checkout.</td>
+            <td>Implementa FSM en código compilado, con subprocesos limpios, worktrees y review independiente.</td>
+          </tr>
+          <tr>
+            <td><strong>Gestión de CI & Errores</strong></td>
+            <td>Ignora el CI local y pushea directo a main sin verificar.</td>
+            <td>Revisa manualmente el CI y le pide al agente que intente otra vez.</td>
+            <td>Loop de sondeo continuo con auto-reparación presupuestada y fallback a <code>BLOCKED</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>Intervención Humana</strong></td>
+            <td>Permite que el agente invente requisitos comerciales cuando tiene dudas.</td>
+            <td>Interrumpe al agente deteniendo el proceso completo en la terminal.</td>
+            <td>Utiliza <code>needs_human</code> con notificaciones push interactivas en móvil sin perder el estado.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="nota" style="margin-top:2.5rem;">
+        <strong>🔭 Lo Que No Estás Viendo Todavía (Próximos Pasos)</strong>
+        <p style="margin-bottom:0;">La fábrica `line` está diseñada para automatizar la carpintería pesada (código, tests, PRs, CI). Sin embargo, <strong>el merge final siempre lo hace un humano</strong>. En sistemas complejos de misión crítica, nunca automatices el clic de `merge to main`: mantén el juicio humano como el último filtro de entrega.</p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+</body>
+</html>

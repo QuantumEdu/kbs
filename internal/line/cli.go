@@ -16,11 +16,13 @@ Phases: plan -> build -> review -> wait_ci -> ready.
 CI failure parks at repair (max 3), then review again.
 
 Usage:
-  line run --repo <path> [--exec claude] [--exec-arg --print] [--ntfy-topic T] <issue-url>
+  line run [--repo <path>] [--exec claude] [--exec-arg --print] [--ntfy-topic T] <issue-url>
   line status [job-id]
   line continue --answer <text> [job-id]
   line next [job-id]
   line serve [--listen 127.0.0.1:7340] [--ntfy-topic T]
+  line project [add|list|use|current|remove]
+  line tui [--db <path>]
   line help
 
 ntfy: optional. Empty --ntfy-topic means no push. Click opens the GitHub issue.
@@ -33,6 +35,7 @@ type CLI struct {
 	OpenStore  func(string) (*Store, error)
 	NewExec    func(name string, args []string) Executor
 	Serve      func(ctx context.Context, addr string, engine *Engine) error
+	RunTUI     func(ctx context.Context, engine *Engine) error
 	DefaultDB  string
 	PromptsDir string
 	NtfyTopic  string
@@ -78,6 +81,10 @@ func (c CLI) Run(ctx context.Context, args []string) int {
 		return c.cmdNext(ctx, args[1:])
 	case "serve":
 		return c.cmdServe(ctx, args[1:])
+	case "project":
+		return c.cmdProject(ctx, args[1:])
+	case "tui":
+		return c.cmdTUI(ctx, args[1:])
 	default:
 		fmt.Fprintf(c.Stderr, "line: unknown command %q\n", args[0])
 		fmt.Fprint(c.Stderr, usageText)
@@ -107,8 +114,38 @@ func (c CLI) cmdRun(ctx context.Context, args []string) int {
 		fmt.Fprintln(c.Stderr, "line run: requires one GitHub issue URL")
 		return 2
 	}
+	execPassed := false
+	reviewExecPassed := false
+	topicPassed := false
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "exec":
+			execPassed = true
+		case "review-exec":
+			reviewExecPassed = true
+		case "ntfy-topic":
+			topicPassed = true
+		}
+	})
 	if strings.TrimSpace(*repo) == "" {
-		fmt.Fprintln(c.Stderr, "line run: --repo is required")
+		if store, err := c.OpenStore(*dbPath); err == nil {
+			if active, err := store.GetActiveProject(ctx); err == nil && active.RepoPath != "" {
+				*repo = active.RepoPath
+				if !execPassed && active.DefaultExec != "" {
+					*execName = active.DefaultExec
+				}
+				if !reviewExecPassed && active.ReviewExec != "" {
+					*reviewExecName = active.ReviewExec
+				}
+				if !topicPassed && active.NtfyTopic != "" {
+					*topic = active.NtfyTopic
+				}
+			}
+			_ = store.Close()
+		}
+	}
+	if strings.TrimSpace(*repo) == "" {
+		fmt.Fprintln(c.Stderr, "line run: --repo is required or an active project must be set")
 		return 2
 	}
 	if len(execArgs) == 0 {
@@ -335,4 +372,222 @@ func (r *repeatable) String() string { return strings.Join(*r, ",") }
 func (r *repeatable) Set(value string) error {
 	*r = append(*r, value)
 	return nil
+}
+
+func (c CLI) store(dbPath string) (*Store, func(), error) {
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
+		return nil, nil, fmt.Errorf("create db dir: %w", err)
+	}
+	store, err := c.OpenStore(dbPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	return store, func() { _ = store.Close() }, nil
+}
+
+func reorderFlags(args []string) []string {
+	var flags []string
+	var pos []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "-") {
+			flags = append(flags, arg)
+			if !strings.Contains(arg, "=") && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				flags = append(flags, args[i+1])
+				i++
+			}
+		} else {
+			pos = append(pos, arg)
+		}
+	}
+	return append(flags, pos...)
+}
+
+func (c CLI) cmdProject(ctx context.Context, args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(c.Stderr, "Usage: line project [add|list|use|current|remove]")
+		return 2
+	}
+	subArgs := reorderFlags(args[1:])
+	switch args[0] {
+	case "add":
+		fs := flag.NewFlagSet("project add", flag.ContinueOnError)
+		fs.SetOutput(c.Stderr)
+		name := fs.String("name", "", "project display name")
+		repo := fs.String("repo", "", "absolute git repository path (required)")
+		exec := fs.String("exec", "", "default agent executable")
+		reviewExec := fs.String("review-exec", "", "independent review executable")
+		ntfyTopic := fs.String("ntfy-topic", "", "ntfy notification topic")
+		dbPath := fs.String("db", c.DefaultDB, "sqlite path")
+		if err := fs.Parse(subArgs); err != nil {
+			return 2
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*repo) == "" {
+			fmt.Fprintln(c.Stderr, "line project add: requires project id and --repo path")
+			return 2
+		}
+		id := fs.Arg(0)
+		projName := *name
+		if strings.TrimSpace(projName) == "" {
+			projName = id
+		}
+		store, closer, err := c.store(*dbPath)
+		if err != nil {
+			fmt.Fprintln(c.Stderr, err)
+			return 1
+		}
+		defer closer()
+		p := Project{
+			ID:          id,
+			Name:        projName,
+			RepoPath:    *repo,
+			DefaultExec: *exec,
+			ReviewExec:  *reviewExec,
+			NtfyTopic:   *ntfyTopic,
+		}
+		if err := store.CreateProject(ctx, p); err != nil {
+			fmt.Fprintf(c.Stderr, "line: %v\n", err)
+			return 1
+		}
+		active, _ := store.GetActiveProject(ctx)
+		if active.ID == id {
+			fmt.Fprintf(c.Stdout, "project %s added (active)\n", id)
+		} else {
+			fmt.Fprintf(c.Stdout, "project %s added\n", id)
+		}
+		return 0
+
+	case "list":
+		fs := flag.NewFlagSet("project list", flag.ContinueOnError)
+		fs.SetOutput(c.Stderr)
+		dbPath := fs.String("db", c.DefaultDB, "sqlite path")
+		if err := fs.Parse(subArgs); err != nil {
+			return 2
+		}
+		store, closer, err := c.store(*dbPath)
+		if err != nil {
+			fmt.Fprintln(c.Stderr, err)
+			return 1
+		}
+		defer closer()
+		projects, err := store.ListProjects(ctx)
+		if err != nil {
+			fmt.Fprintf(c.Stderr, "line: %v\n", err)
+			return 1
+		}
+		if len(projects) == 0 {
+			fmt.Fprintln(c.Stdout, "no projects registered")
+			return 0
+		}
+		for _, p := range projects {
+			mark := " "
+			if p.IsActive {
+				mark = "*"
+			}
+			fmt.Fprintf(c.Stdout, "%s %s (%s) - %s\n", mark, p.ID, p.Name, p.RepoPath)
+		}
+		return 0
+
+	case "use":
+		fs := flag.NewFlagSet("project use", flag.ContinueOnError)
+		fs.SetOutput(c.Stderr)
+		dbPath := fs.String("db", c.DefaultDB, "sqlite path")
+		if err := fs.Parse(subArgs); err != nil {
+			return 2
+		}
+		if fs.NArg() != 1 {
+			fmt.Fprintln(c.Stderr, "line project use: requires project id")
+			return 2
+		}
+		id := fs.Arg(0)
+		store, closer, err := c.store(*dbPath)
+		if err != nil {
+			fmt.Fprintln(c.Stderr, err)
+			return 1
+		}
+		defer closer()
+		if err := store.SetActiveProject(ctx, id); err != nil {
+			fmt.Fprintf(c.Stderr, "line: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(c.Stdout, "switched to project %s\n", id)
+		return 0
+
+	case "current":
+		fs := flag.NewFlagSet("project current", flag.ContinueOnError)
+		fs.SetOutput(c.Stderr)
+		dbPath := fs.String("db", c.DefaultDB, "sqlite path")
+		if err := fs.Parse(subArgs); err != nil {
+			return 2
+		}
+		store, closer, err := c.store(*dbPath)
+		if err != nil {
+			fmt.Fprintln(c.Stderr, err)
+			return 1
+		}
+		defer closer()
+		p, err := store.GetActiveProject(ctx)
+		if err != nil || p.ID == "" {
+			fmt.Fprintln(c.Stdout, "no active project")
+			return 0
+		}
+		fmt.Fprintf(c.Stdout, "active project: %s (%s) - %s\n", p.ID, p.Name, p.RepoPath)
+		return 0
+
+	case "remove":
+		fs := flag.NewFlagSet("project remove", flag.ContinueOnError)
+		fs.SetOutput(c.Stderr)
+		dbPath := fs.String("db", c.DefaultDB, "sqlite path")
+		if err := fs.Parse(subArgs); err != nil {
+			return 2
+		}
+		if fs.NArg() != 1 {
+			fmt.Fprintln(c.Stderr, "line project remove: requires project id")
+			return 2
+		}
+		id := fs.Arg(0)
+		store, closer, err := c.store(*dbPath)
+		if err != nil {
+			fmt.Fprintln(c.Stderr, err)
+			return 1
+		}
+		defer closer()
+		if err := store.DeleteProject(ctx, id); err != nil {
+			fmt.Fprintf(c.Stderr, "line: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(c.Stdout, "removed project %s\n", id)
+		return 0
+
+	default:
+		fmt.Fprintf(c.Stderr, "line project: unknown subcommand %q\n", args[0])
+		fmt.Fprintln(c.Stderr, "Usage: line project [add|list|use|current|remove]")
+		return 2
+	}
+}
+
+func (c CLI) cmdTUI(ctx context.Context, args []string) int {
+	fs := flag.NewFlagSet("tui", flag.ContinueOnError)
+	fs.SetOutput(c.Stderr)
+	dbPath := fs.String("db", c.DefaultDB, "sqlite path")
+	prompts := fs.String("prompts", c.PromptsDir, "optional directory of phase markdown prompts")
+	execName := fs.String("exec", "claude", "agent executable")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if c.RunTUI == nil {
+		fmt.Fprintln(c.Stderr, "line tui: interactive terminal interface not available")
+		return 1
+	}
+	engine, closer, err := c.engine(*dbPath, *prompts, *execName, []string{"--print"}, "", "")
+	if err != nil {
+		fmt.Fprintln(c.Stderr, err)
+		return 1
+	}
+	defer closer()
+	if err := c.RunTUI(ctx, engine); err != nil {
+		fmt.Fprintf(c.Stderr, "line tui: %v\n", err)
+		return 1
+	}
+	return 0
 }

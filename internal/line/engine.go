@@ -49,6 +49,10 @@ func NewEngine(store *Store, executor Executor, promptsDir string) *Engine {
 	}
 }
 
+func (e *Engine) Store() *Store {
+	return e.store
+}
+
 func (e *Engine) WithNotifier(n Notifier) *Engine {
 	if n == nil {
 		e.notifier = NopNotifier{}
