@@ -62,7 +62,7 @@ install-telemetry: build-telemetry
 	@echo ""
 	@echo "Alternative: run 'skillvault install-telemetry' or 'skillvault init --with-telemetry' to install from within kbs."
 
-# line is the issue-to-PR factory sibling. See docs/line.md (backlog: auto-advance, CI poll).
+# line is the issue-to-PR factory sibling. See docs/line.md.
 build-line:
 	go build -o line ./cmd/line
 

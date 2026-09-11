@@ -16,6 +16,11 @@ func TestParseOutcome(t *testing.T) {
 			want:   Outcome{Status: OutcomeOK, Summary: "refined the issue"},
 		},
 		{
+			name:   "ok with pull request and head sha",
+			stdout: `{"status":"ok","summary":"built","pull_request":"https://github.com/o/r/pull/42","head_sha":"c0ffee1"}`,
+			want:   Outcome{Status: OutcomeOK, Summary: "built", PullRequest: "https://github.com/o/r/pull/42", HeadSHA: "c0ffee1"},
+		},
+		{
 			name:   "needs human with question",
 			stdout: "noise\n{\"status\":\"needs_human\",\"question\":\"Is the API public?\"}\n",
 			want:   Outcome{Status: OutcomeNeedsHuman, Question: "Is the API public?"},

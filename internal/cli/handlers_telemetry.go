@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/quantum-6/skillvault/internal/agenttelemetry"
@@ -92,7 +91,7 @@ func startTelemetryDaemon(w io.Writer, cfg agenttelemetry.Config) error {
 	cmd := exec.Command(binPath)
 	cmd.Stdout = outFile
 	cmd.Stderr = outFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	configureDaemonSysProcAttr(cmd)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start telemetryd: %w", err)
 	}

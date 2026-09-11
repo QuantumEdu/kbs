@@ -19,26 +19,33 @@ type Executor interface {
 const defaultMaxRepairs = 3
 
 type Engine struct {
-	store      *Store
-	executor   Executor
-	promptsDir string
-	notifier   Notifier
-	checker    Checker
-	maxRepairs int
-	now        func() time.Time
-	id         func() string
+	store          *Store
+	executor       Executor
+	reviewExecutor Executor
+	worktrees      WorktreeManager
+	promptsDir     string
+	notifier       Notifier
+	checker        Checker
+	maxRepairs     int
+	pollInterval   time.Duration
+	pollTimeout    time.Duration
+	now            func() time.Time
+	id             func() string
 }
 
 func NewEngine(store *Store, executor Executor, promptsDir string) *Engine {
 	return &Engine{
-		store:      store,
-		executor:   executor,
-		promptsDir: promptsDir,
-		notifier:   NopNotifier{},
-		checker:    NewGHChecker(),
-		maxRepairs: defaultMaxRepairs,
-		now:        func() time.Time { return time.Now().UTC() },
-		id:         newID,
+		store:        store,
+		executor:     executor,
+		promptsDir:   promptsDir,
+		notifier:     NopNotifier{},
+		checker:      NewGHChecker(),
+		worktrees:    NopWorktreeManager{},
+		maxRepairs:   defaultMaxRepairs,
+		pollInterval: 0,
+		pollTimeout:  20 * time.Minute,
+		now:          func() time.Time { return time.Now().UTC() },
+		id:           newID,
 	}
 }
 
@@ -54,6 +61,41 @@ func (e *Engine) WithNotifier(n Notifier) *Engine {
 func (e *Engine) WithChecker(c Checker) *Engine {
 	e.checker = c
 	return e
+}
+
+func (e *Engine) WithReviewExecutor(exec Executor) *Engine {
+	e.reviewExecutor = exec
+	return e
+}
+
+func (e *Engine) WithWorktreeManager(wm WorktreeManager) *Engine {
+	e.worktrees = wm
+	return e
+}
+
+func (e *Engine) WithPollConfig(interval, timeout time.Duration) *Engine {
+	e.pollInterval = interval
+	e.pollTimeout = timeout
+	return e
+}
+
+func (e *Engine) AutoAdvance(ctx context.Context, jobID string) (Job, error) {
+	for {
+		job, err := e.store.GetJob(ctx, jobID)
+		if err != nil {
+			return Job{}, err
+		}
+		if job.Status != StatusAwaitingNext {
+			return job, nil
+		}
+		job, err = e.Advance(ctx, jobID)
+		if err != nil {
+			return job, err
+		}
+		if job.Status != StatusAwaitingNext {
+			return job, nil
+		}
+	}
 }
 
 func (e *Engine) RunPlan(ctx context.Context, issueURL, repoPath string) (Job, error) {
@@ -159,9 +201,20 @@ func (e *Engine) executePhase(ctx context.Context, job Job) (Job, error) {
 	if job.Phase == PhaseWaitCI {
 		return e.executeWaitCI(ctx, job)
 	}
-	prompt, err := RenderPhasePrompt(e.promptsDir, job.Phase, PromptVars{
+
+	execCwd := job.RepoPath
+	if (job.Phase == PhaseBuild || job.Phase == PhaseRepair) && e.worktrees != nil {
+		wt, err := e.worktrees.EnsureWorktree(ctx, job.RepoPath, job.ID)
+		if err == nil && wt != "" {
+			job.WorktreePath = wt
+			execCwd = wt
+			_ = e.note(ctx, job, "worktree", wt)
+		}
+	}
+
+	prompt, err := RenderPhasePromptWithContext(ctx, e.promptsDir, job.Phase, PromptVars{
 		IssueURL:    job.IssueURL,
-		RepoPath:    job.RepoPath,
+		RepoPath:    execCwd,
 		HumanAnswer: job.HumanAnswer,
 		Summary:     job.Summary,
 		CIDetail:    job.Summary,
@@ -170,7 +223,13 @@ func (e *Engine) executePhase(ctx context.Context, job Job) (Job, error) {
 	if err != nil {
 		return e.fail(ctx, job, err)
 	}
-	stdout, execErr := e.executor.Run(ctx, job.RepoPath, prompt)
+
+	activeExec := e.executor
+	if job.Phase == PhaseReview && e.reviewExecutor != nil {
+		activeExec = e.reviewExecutor
+	}
+
+	stdout, execErr := activeExec.Run(ctx, execCwd, prompt)
 	if execErr != nil {
 		return e.fail(ctx, job, execErr)
 	}
@@ -179,6 +238,12 @@ func (e *Engine) executePhase(ctx context.Context, job Job) (Job, error) {
 		return e.fail(ctx, job, err)
 	}
 	job.Summary = outcome.Summary
+	if outcome.PullRequest != "" {
+		job.PullRequest = outcome.PullRequest
+	}
+	if outcome.HeadSHA != "" {
+		job.HeadSHA = outcome.HeadSHA
+	}
 	job.UpdatedAt = e.now()
 	switch outcome.Status {
 	case OutcomeNeedsHuman:
@@ -206,45 +271,69 @@ func (e *Engine) executeWaitCI(ctx context.Context, job Job) (Job, error) {
 	if e.checker == nil {
 		return e.block(ctx, job, "no CI checker configured")
 	}
-	result, err := e.checker.Check(ctx, job)
-	if err != nil {
-		return e.block(ctx, job, err.Error())
+
+	var timeoutCh <-chan time.Time
+	if e.pollTimeout > 0 && e.pollInterval > 0 {
+		timer := time.NewTimer(e.pollTimeout)
+		defer timer.Stop()
+		timeoutCh = timer.C
 	}
-	if result.HeadSHA != "" {
-		job.HeadSHA = result.HeadSHA
-	}
-	if result.PullRequest != "" {
-		job.PullRequest = result.PullRequest
-	}
-	job.Summary = result.Detail
-	job.UpdatedAt = e.now()
-	switch result.State {
-	case CIPass:
-		job.Phase = PhaseReady
-		job.Status = StatusReady
-	case CIPending:
-		job.Phase = PhaseWaitCI
-		job.Status = StatusAwaitingNext
-	case CIFail:
-		job.RepairCount++
-		if job.RepairCount > e.maxRepairs {
-			job.Status = StatusBlocked
-			job.Summary = fmt.Sprintf("repair budget exhausted (%d): %s", e.maxRepairs, result.Detail)
-			break
+
+	for {
+		result, err := e.checker.Check(ctx, job)
+		if err != nil {
+			return e.block(ctx, job, err.Error())
 		}
-		job.Phase = PhaseRepair
-		job.Status = StatusAwaitingNext
-	default:
-		return e.block(ctx, job, "unknown CI state "+string(result.State))
+		if result.HeadSHA != "" {
+			job.HeadSHA = result.HeadSHA
+		}
+		if result.PullRequest != "" {
+			job.PullRequest = result.PullRequest
+		}
+		job.Summary = result.Detail
+		job.UpdatedAt = e.now()
+		switch result.State {
+		case CIPass:
+			job.Phase = PhaseReady
+			job.Status = StatusReady
+			if e.worktrees != nil && job.WorktreePath != "" {
+				_ = e.worktrees.CleanupWorktree(ctx, job.RepoPath, job.WorktreePath)
+			}
+		case CIPending:
+			if e.pollInterval <= 0 {
+				job.Phase = PhaseWaitCI
+				job.Status = StatusAwaitingNext
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return job, ctx.Err()
+			case <-timeoutCh:
+				return e.block(ctx, job, fmt.Sprintf("CI checks timed out after %s", e.pollTimeout))
+			case <-time.After(e.pollInterval):
+				continue
+			}
+		case CIFail:
+			job.RepairCount++
+			if job.RepairCount > e.maxRepairs {
+				job.Status = StatusBlocked
+				job.Summary = fmt.Sprintf("repair budget exhausted (%d): %s", e.maxRepairs, result.Detail)
+				break
+			}
+			job.Phase = PhaseRepair
+			job.Status = StatusAwaitingNext
+		default:
+			return e.block(ctx, job, "unknown CI state "+string(result.State))
+		}
+		if err := e.store.UpdateJob(ctx, job); err != nil {
+			return job, err
+		}
+		if err := e.note(ctx, job, "ci_"+string(result.State), job.Summary); err != nil {
+			return job, err
+		}
+		e.notifyPark(ctx, job)
+		return job, nil
 	}
-	if err := e.store.UpdateJob(ctx, job); err != nil {
-		return job, err
-	}
-	if err := e.note(ctx, job, "ci_"+string(result.State), job.Summary); err != nil {
-		return job, err
-	}
-	e.notifyPark(ctx, job)
-	return job, nil
 }
 
 func (e *Engine) block(ctx context.Context, job Job, summary string) (Job, error) {

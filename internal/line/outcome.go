@@ -15,15 +15,19 @@ const (
 )
 
 type Outcome struct {
-	Status   OutcomeStatus
-	Question string
-	Summary  string
+	Status      OutcomeStatus
+	Question    string
+	Summary     string
+	PullRequest string
+	HeadSHA     string
 }
 
 type outcomeJSON struct {
-	Status   string `json:"status"`
-	Question string `json:"question"`
-	Summary  string `json:"summary"`
+	Status      string `json:"status"`
+	Question    string `json:"question"`
+	Summary     string `json:"summary"`
+	PullRequest string `json:"pull_request"`
+	HeadSHA     string `json:"head_sha"`
 }
 
 // ParseOutcome extracts the last JSON object in stdout as a classified phase result.
@@ -46,9 +50,11 @@ func ParseOutcome(stdout string) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("needs_human outcome requires a question")
 	}
 	return Outcome{
-		Status:   status,
-		Question: strings.TrimSpace(parsed.Question),
-		Summary:  strings.TrimSpace(parsed.Summary),
+		Status:      status,
+		Question:    strings.TrimSpace(parsed.Question),
+		Summary:     strings.TrimSpace(parsed.Summary),
+		PullRequest: strings.TrimSpace(parsed.PullRequest),
+		HeadSHA:     strings.TrimSpace(parsed.HeadSHA),
 	}, nil
 }
 

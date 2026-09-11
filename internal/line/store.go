@@ -22,6 +22,9 @@ CREATE TABLE IF NOT EXISTS jobs (
 	head_sha      TEXT NOT NULL DEFAULT '',
 	pull_request  TEXT NOT NULL DEFAULT '',
 	repair_count  INTEGER NOT NULL DEFAULT 0,
+	worktree_path TEXT NOT NULL DEFAULT '',
+	review_exec   TEXT NOT NULL DEFAULT '',
+	review_args   TEXT NOT NULL DEFAULT '',
 	created_at    DATETIME NOT NULL,
 	updated_at    DATETIME NOT NULL
 );
@@ -53,6 +56,9 @@ func OpenStore(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	_, _ = db.Exec(`ALTER TABLE jobs ADD COLUMN worktree_path TEXT NOT NULL DEFAULT '';`)
+	_, _ = db.Exec(`ALTER TABLE jobs ADD COLUMN review_exec TEXT NOT NULL DEFAULT '';`)
+	_, _ = db.Exec(`ALTER TABLE jobs ADD COLUMN review_args TEXT NOT NULL DEFAULT '';`)
 	return &Store{db: db}, nil
 }
 
@@ -67,10 +73,12 @@ func (s *Store) CreateJob(ctx context.Context, job Job) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO jobs (
 			id, issue_url, repo_path, phase, status, question, summary, human_answer,
-			head_sha, pull_request, repair_count, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			head_sha, pull_request, repair_count, worktree_path, review_exec, review_args,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.IssueURL, job.RepoPath, job.Phase, job.Status, job.Question, job.Summary, job.HumanAnswer,
-		job.HeadSHA, job.PullRequest, job.RepairCount, job.CreatedAt.UTC(), job.UpdatedAt.UTC(),
+		job.HeadSHA, job.PullRequest, job.RepairCount, job.WorktreePath, job.ReviewExec, job.ReviewArgs,
+		job.CreatedAt.UTC(), job.UpdatedAt.UTC(),
 	)
 	if err != nil {
 		return fmt.Errorf("create job: %w", err)
@@ -82,10 +90,12 @@ func (s *Store) UpdateJob(ctx context.Context, job Job) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE jobs SET
 			issue_url=?, repo_path=?, phase=?, status=?, question=?, summary=?, human_answer=?,
-			head_sha=?, pull_request=?, repair_count=?, updated_at=?
+			head_sha=?, pull_request=?, repair_count=?, worktree_path=?, review_exec=?, review_args=?,
+			updated_at=?
 		WHERE id=?`,
 		job.IssueURL, job.RepoPath, job.Phase, job.Status, job.Question, job.Summary, job.HumanAnswer,
-		job.HeadSHA, job.PullRequest, job.RepairCount, job.UpdatedAt.UTC(), job.ID,
+		job.HeadSHA, job.PullRequest, job.RepairCount, job.WorktreePath, job.ReviewExec, job.ReviewArgs,
+		job.UpdatedAt.UTC(), job.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update job: %w", err)
@@ -155,7 +165,7 @@ func (s *Store) ListEvents(ctx context.Context, jobID string) ([]Event, error) {
 	return events, rows.Err()
 }
 
-const jobColumns = `id, issue_url, repo_path, phase, status, question, summary, human_answer, head_sha, pull_request, repair_count, created_at, updated_at`
+const jobColumns = `id, issue_url, repo_path, phase, status, question, summary, human_answer, head_sha, pull_request, repair_count, worktree_path, review_exec, review_args, created_at, updated_at`
 
 func scanJob(row *sql.Row) (Job, error) {
 	return scanJobRow(row)
@@ -170,7 +180,8 @@ func scanJobRow(row scanner) (Job, error) {
 	var created, updated time.Time
 	err := row.Scan(
 		&job.ID, &job.IssueURL, &job.RepoPath, &job.Phase, &job.Status, &job.Question, &job.Summary, &job.HumanAnswer,
-		&job.HeadSHA, &job.PullRequest, &job.RepairCount, &created, &updated,
+		&job.HeadSHA, &job.PullRequest, &job.RepairCount, &job.WorktreePath, &job.ReviewExec, &job.ReviewArgs,
+		&created, &updated,
 	)
 	if err != nil {
 		return Job{}, fmt.Errorf("get job: %w", err)

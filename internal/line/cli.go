@@ -92,9 +92,14 @@ func (c CLI) cmdRun(ctx context.Context, args []string) int {
 	dbPath := fs.String("db", c.DefaultDB, "sqlite path")
 	prompts := fs.String("prompts", c.PromptsDir, "optional directory of phase markdown prompts")
 	execName := fs.String("exec", "claude", "agent executable")
+	auto := fs.Bool("auto", true, "auto-advance through phases without manual next")
+	worktree := fs.Bool("worktree", true, "isolate mutating phases in git worktree")
+	reviewExecName := fs.String("review-exec", "", "independent review executable")
 	topic, server := c.ntfyFlags(fs)
 	var execArgs repeatable
 	fs.Var(&execArgs, "exec-arg", "argument passed to --exec (repeatable)")
+	var reviewExecArgs repeatable
+	fs.Var(&reviewExecArgs, "review-exec-arg", "argument passed to --review-exec (repeatable)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -115,10 +120,23 @@ func (c CLI) cmdRun(ctx context.Context, args []string) int {
 		return 1
 	}
 	defer closer()
+	if *worktree {
+		engine.WithWorktreeManager(GitWorktreeManager{})
+	}
+	if *reviewExecName != "" {
+		engine.WithReviewExecutor(c.NewExec(*reviewExecName, reviewExecArgs))
+	}
 	job, err := engine.RunPlan(ctx, fs.Arg(0), *repo)
 	if err != nil {
 		fmt.Fprintf(c.Stderr, "line: %v\n", err)
 		return 1
+	}
+	if *auto && job.Status == StatusAwaitingNext {
+		job, err = engine.AutoAdvance(ctx, job.ID)
+		if err != nil {
+			fmt.Fprintf(c.Stderr, "line: %v\n", err)
+			return 1
+		}
 	}
 	printJob(c.Stdout, job)
 	return exitFor(job)
@@ -158,6 +176,7 @@ func (c CLI) cmdContinue(ctx context.Context, args []string) int {
 	fs.SetOutput(c.Stderr)
 	dbPath := fs.String("db", c.DefaultDB, "sqlite path")
 	answer := fs.String("answer", "", "human answer for needs_human")
+	auto := fs.Bool("auto", false, "auto-advance after continue")
 	topic, server := c.ntfyFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -177,6 +196,13 @@ func (c CLI) cmdContinue(ctx context.Context, args []string) int {
 	if err != nil {
 		fmt.Fprintf(c.Stderr, "line: %v\n", err)
 		return 1
+	}
+	if *auto && job.Status == StatusAwaitingNext {
+		job, err = engine.AutoAdvance(ctx, job.ID)
+		if err != nil {
+			fmt.Fprintf(c.Stderr, "line: %v\n", err)
+			return 1
+		}
 	}
 	printJob(c.Stdout, job)
 	return exitFor(job)

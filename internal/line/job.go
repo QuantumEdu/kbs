@@ -37,11 +37,14 @@ type Job struct {
 	Question    string
 	Summary     string
 	HumanAnswer string
-	HeadSHA     string
-	PullRequest string
-	RepairCount int
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	HeadSHA      string
+	PullRequest  string
+	RepairCount  int
+	WorktreePath string
+	ReviewExec   string
+	ReviewArgs   string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 type Event struct {

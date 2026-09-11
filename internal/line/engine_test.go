@@ -412,3 +412,150 @@ func TestEngineAdvanceRefusesNeedsHuman(t *testing.T) {
 		t.Fatal("expected refuse")
 	}
 }
+
+func TestEngineAutoAdvance(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := openTestStore(t)
+	exec := &scriptedExecutor{replies: []string{
+		`{"status":"ok","summary":"plan done"}`,
+		`{"status":"ok","summary":"built","pull_request":"https://github.com/o/r/pull/88","head_sha":"fedcba9"}`,
+		`{"status":"ok","summary":"reviewed and approved"}`,
+	}}
+	checker := &fakeChecker{result: CIResult{State: CIPass, Detail: "checks passed"}}
+	engine := NewEngine(store, exec, "").WithChecker(checker)
+
+	job, err := engine.RunPlan(ctx, "https://github.com/o/r/issues/88", "/repo")
+	if err != nil {
+		t.Fatalf("RunPlan: %v", err)
+	}
+	finalJob, err := engine.AutoAdvance(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("AutoAdvance: %v", err)
+	}
+	if finalJob.Phase != PhaseReady || finalJob.Status != StatusReady {
+		t.Fatalf("expected ready, got phase=%s status=%s", finalJob.Phase, finalJob.Status)
+	}
+	if finalJob.PullRequest != "https://github.com/o/r/pull/88" || finalJob.HeadSHA != "fedcba9" {
+		t.Fatalf("expected PR and SHA persisted, got %+v", finalJob)
+	}
+}
+
+func TestEngineAutoAdvanceHaltsOnNeedsHuman(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := openTestStore(t)
+	exec := &scriptedExecutor{replies: []string{
+		`{"status":"ok","summary":"plan done"}`,
+		`{"status":"needs_human","question":"Which database?"}`,
+	}}
+	engine := NewEngine(store, exec, "")
+
+	job, err := engine.RunPlan(ctx, "https://github.com/o/r/issues/89", "/repo")
+	if err != nil {
+		t.Fatalf("RunPlan: %v", err)
+	}
+	finalJob, err := engine.AutoAdvance(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("AutoAdvance: %v", err)
+	}
+	if finalJob.Phase != PhaseBuild || finalJob.Status != StatusNeedsHuman || finalJob.Question != "Which database?" {
+		t.Fatalf("expected halt at needs_human, got %+v", finalJob)
+	}
+}
+
+func TestEngineReviewExecutor(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := openTestStore(t)
+	mainExec := &scriptedExecutor{replies: []string{
+		`{"status":"ok","summary":"plan done"}`,
+		`{"status":"ok","summary":"build done"}`,
+	}}
+	reviewExec := &fakeExecutor{stdout: `{"status":"ok","summary":"review approved"}`}
+	checker := &fakeChecker{result: CIResult{State: CIPass, Detail: "checks pass"}}
+
+	engine := NewEngine(store, mainExec, "").
+		WithReviewExecutor(reviewExec).
+		WithChecker(checker)
+
+	job, err := engine.RunPlan(ctx, "https://github.com/o/r/issues/90", "/repo")
+	if err != nil {
+		t.Fatalf("RunPlan: %v", err)
+	}
+	job, err = engine.Advance(ctx, job.ID) // build
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	job, err = engine.Advance(ctx, job.ID) // review
+	if err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if reviewExec.cwd != "/repo" || !strings.Contains(reviewExec.prompt, "issues/90") {
+		t.Fatalf("review executor was not used: %+v", reviewExec)
+	}
+}
+
+type mockWorktreeManager struct {
+	created []string
+	cleaned []string
+}
+
+func (m *mockWorktreeManager) EnsureWorktree(_ context.Context, repoPath, jobID string) (string, error) {
+	wt := repoPath + "-worktree-" + jobID
+	m.created = append(m.created, wt)
+	return wt, nil
+}
+
+func (m *mockWorktreeManager) CleanupWorktree(_ context.Context, repoPath, worktreePath string) error {
+	m.cleaned = append(m.cleaned, worktreePath)
+	return nil
+}
+
+func TestEngineWorktreeManager(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := openTestStore(t)
+	wtMgr := &mockWorktreeManager{}
+	exec := &scriptedExecutor{replies: []string{
+		`{"status":"ok","summary":"plan done"}`,
+		`{"status":"ok","summary":"build done"}`,
+		`{"status":"ok","summary":"review done"}`,
+	}}
+	checker := &fakeChecker{result: CIResult{State: CIPass, Detail: "checks pass"}}
+	engine := NewEngine(store, exec, "").
+		WithWorktreeManager(wtMgr).
+		WithChecker(checker)
+
+	job, err := engine.RunPlan(ctx, "https://github.com/o/r/issues/91", "/repo")
+	if err != nil {
+		t.Fatalf("RunPlan: %v", err)
+	}
+	if len(wtMgr.created) != 0 {
+		t.Fatalf("worktree created during plan: %v", wtMgr.created)
+	}
+	job, err = engine.Advance(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(wtMgr.created) != 1 {
+		t.Fatalf("expected 1 worktree, got: %v", wtMgr.created)
+	}
+	if job.WorktreePath != wtMgr.created[0] {
+		t.Fatalf("worktree not recorded on job: %s vs %s", job.WorktreePath, wtMgr.created[0])
+	}
+	job, err = engine.Advance(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	job, err = engine.Advance(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("wait_ci: %v", err)
+	}
+	if job.Status != StatusReady {
+		t.Fatalf("expected ready, got %s", job.Status)
+	}
+	if len(wtMgr.cleaned) != 1 || wtMgr.cleaned[0] != wtMgr.created[0] {
+		t.Fatalf("expected worktree cleanup, got: %v", wtMgr.cleaned)
+	}
+}

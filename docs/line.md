@@ -9,6 +9,8 @@ SkillVault still owns prompts, skills, and retrieval. `line` owns the job state 
 ```sh
 cd /path/to/kbs
 make build-line
+# or install directly to ~/tools (on PATH):
+make install-line
 
 line run --repo /absolute/path/to/repo https://github.com/owner/repo/issues/123
 line status
@@ -94,5 +96,5 @@ Do not treat these as in-progress work in this file until someone picks them up.
 
 ### Small debt
 
-- Makefile still said ntfy/UI were deferred (comment should match this doc).
-- Windows `build-cross` fails on pre-existing `syscall.SysProcAttr.Setsid` in `internal/cli/handlers_telemetry.go` (since PR #72), not caused by `line`.
+- Makefile comment aligned with current factory capabilities.
+- Windows `build-cross` SysProcAttr.Setsid in `internal/cli/` resolved with build tags (Issue #86).
