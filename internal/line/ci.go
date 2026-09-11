@@ -59,7 +59,13 @@ func (c GHChecker) Check(ctx context.Context, job Job) (CIResult, error) {
 	if run == nil {
 		run = runCommand
 	}
-	prJSON, err := run(ctx, job.RepoPath, "gh", "pr", "view", "--json", "url,headRefOid,state")
+	prViewArgs := []string{"pr", "view"}
+	if job.PullRequest != "" {
+		prViewArgs = append(prViewArgs, job.PullRequest)
+	}
+	prViewArgs = append(prViewArgs, "--json", "url,headRefOid,state")
+
+	prJSON, err := run(ctx, job.RepoPath, "gh", prViewArgs...)
 	if err != nil {
 		return CIResult{}, fmt.Errorf("no open pull request: %w", err)
 	}
@@ -74,7 +80,13 @@ func (c GHChecker) Check(ctx context.Context, job Job) (CIResult, error) {
 	if !strings.EqualFold(pr.State, "OPEN") {
 		return CIResult{}, fmt.Errorf("pull request is %s", pr.State)
 	}
-	checksJSON, err := run(ctx, job.RepoPath, "gh", "pr", "checks", "--json", "name,state,bucket")
+
+	prChecksArgs := []string{"pr", "checks"}
+	if job.PullRequest != "" {
+		prChecksArgs = append(prChecksArgs, job.PullRequest)
+	}
+	prChecksArgs = append(prChecksArgs, "--json", "name,state,bucket")
+	checksJSON, err := run(ctx, job.RepoPath, "gh", prChecksArgs...)
 	if err != nil {
 		return CIResult{}, fmt.Errorf("pr checks: %w", err)
 	}

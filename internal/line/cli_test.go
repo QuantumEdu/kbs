@@ -79,7 +79,7 @@ func TestCLINext(t *testing.T) {
 	cli := testCLI(t, stdout, stderr, exec)
 	db := filepath.Join(t.TempDir(), "line.db")
 	if code := cli.Run(context.Background(), []string{
-		"run", "--db", db, "--repo", t.TempDir(), "https://github.com/o/r/issues/13",
+		"run", "--auto=false", "--db", db, "--repo", t.TempDir(), "https://github.com/o/r/issues/13",
 	}); code != 0 {
 		t.Fatalf("run: %s", stderr)
 	}

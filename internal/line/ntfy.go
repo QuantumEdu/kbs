@@ -14,6 +14,7 @@ type Notification struct {
 	Message  string
 	Click    string
 	Priority string
+	Actions  string
 }
 
 type Notifier interface {
@@ -59,6 +60,9 @@ func (n HTTPNotifier) Notify(ctx context.Context, note Notification) error {
 	if note.Priority != "" {
 		req.Header.Set("Priority", note.Priority)
 	}
+	if note.Actions != "" {
+		req.Header.Set("Actions", note.Actions)
+	}
 	client := n.Client
 	if client == nil {
 		client = http.DefaultClient
@@ -78,11 +82,13 @@ func (n HTTPNotifier) Notify(ctx context.Context, note Notification) error {
 func notificationFor(job Job) (Notification, bool) {
 	switch job.Status {
 	case StatusNeedsHuman:
+		actions := fmt.Sprintf("view, Open Issue, %s; view, Open UI, http://127.0.0.1:7340/jobs/%s", job.IssueURL, job.ID)
 		return Notification{
 			Title:    "line needs_human",
 			Message:  job.Question,
 			Click:    job.IssueURL,
 			Priority: "high",
+			Actions:  actions,
 		}, true
 	case StatusBlocked:
 		return Notification{

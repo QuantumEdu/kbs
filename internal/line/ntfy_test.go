@@ -65,3 +65,35 @@ func TestHTTPNotifierHTTPError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestNotificationActions(t *testing.T) {
+	t.Parallel()
+	job := Job{
+		ID:       "job-123",
+		IssueURL: "https://github.com/o/r/issues/77",
+		Status:   StatusNeedsHuman,
+		Question: "Confirm scope?",
+	}
+	note, ok := notificationFor(job)
+	if !ok {
+		t.Fatal("expected notification for needs_human")
+	}
+	if note.Actions == "" {
+		t.Fatal("expected non-empty Actions for needs_human")
+	}
+
+	var gotActions string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotActions = r.Header.Get("Actions")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	n := HTTPNotifier{Server: server.URL, Topic: "actions-test", Client: server.Client()}
+	if err := n.Notify(context.Background(), note); err != nil {
+		t.Fatalf("Notify: %v", err)
+	}
+	if gotActions != note.Actions {
+		t.Fatalf("got Actions header %q, want %q", gotActions, note.Actions)
+	}
+}
