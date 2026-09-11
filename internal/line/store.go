@@ -37,6 +37,18 @@ CREATE TABLE IF NOT EXISTS events (
 	detail     TEXT NOT NULL DEFAULT '',
 	created_at DATETIME NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS projects (
+	id           TEXT PRIMARY KEY,
+	name         TEXT NOT NULL,
+	repo_path    TEXT NOT NULL UNIQUE,
+	default_exec TEXT NOT NULL DEFAULT 'claude',
+	review_exec  TEXT NOT NULL DEFAULT '',
+	ntfy_topic   TEXT NOT NULL DEFAULT '',
+	is_active    INTEGER NOT NULL DEFAULT 0,
+	created_at   DATETIME NOT NULL,
+	updated_at   DATETIME NOT NULL
+);
 `
 
 type Store struct {
@@ -189,4 +201,123 @@ func scanJobRow(row scanner) (Job, error) {
 	job.CreatedAt = created.UTC()
 	job.UpdatedAt = updated.UTC()
 	return job, nil
+}
+
+func (s *Store) CreateProject(ctx context.Context, p Project) error {
+	var count int
+	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM projects`).Scan(&count)
+	if count == 0 {
+		p.IsActive = true
+	}
+	if p.IsActive {
+		_, _ = s.db.ExecContext(ctx, `UPDATE projects SET is_active = 0`)
+	}
+	activeInt := 0
+	if p.IsActive {
+		activeInt = 1
+	}
+	if p.CreatedAt.IsZero() {
+		p.CreatedAt = time.Now().UTC()
+	}
+	if p.UpdatedAt.IsZero() {
+		p.UpdatedAt = p.CreatedAt
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO projects (id, name, repo_path, default_exec, review_exec, ntfy_topic, is_active, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, p.RepoPath, p.DefaultExec, p.ReviewExec, p.NtfyTopic, activeInt, p.CreatedAt.UTC(), p.UpdatedAt.UTC(),
+	)
+	if err != nil {
+		return fmt.Errorf("create project: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) ListProjects(ctx context.Context) ([]Project, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, name, repo_path, default_exec, review_exec, ntfy_topic, is_active, created_at, updated_at
+		FROM projects ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list projects: %w", err)
+	}
+	defer rows.Close()
+	var projects []Project
+	for rows.Next() {
+		var p Project
+		var activeInt int
+		if err := rows.Scan(&p.ID, &p.Name, &p.RepoPath, &p.DefaultExec, &p.ReviewExec, &p.NtfyTopic, &activeInt, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan project: %w", err)
+		}
+		p.IsActive = (activeInt == 1)
+		projects = append(projects, p)
+	}
+	return projects, rows.Err()
+}
+
+func (s *Store) GetProject(ctx context.Context, id string) (Project, error) {
+	var p Project
+	var activeInt int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, name, repo_path, default_exec, review_exec, ntfy_topic, is_active, created_at, updated_at
+		FROM projects WHERE id = ?`, id).Scan(
+		&p.ID, &p.Name, &p.RepoPath, &p.DefaultExec, &p.ReviewExec, &p.NtfyTopic, &activeInt, &p.CreatedAt, &p.UpdatedAt,
+	)
+	if err != nil {
+		return Project{}, fmt.Errorf("get project %s: %w", id, err)
+	}
+	p.IsActive = (activeInt == 1)
+	return p, nil
+}
+
+func (s *Store) GetActiveProject(ctx context.Context) (Project, error) {
+	var p Project
+	var activeInt int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, name, repo_path, default_exec, review_exec, ntfy_topic, is_active, created_at, updated_at
+		FROM projects WHERE is_active = 1 LIMIT 1`).Scan(
+		&p.ID, &p.Name, &p.RepoPath, &p.DefaultExec, &p.ReviewExec, &p.NtfyTopic, &activeInt, &p.CreatedAt, &p.UpdatedAt,
+	)
+	if err != nil {
+		return Project{}, fmt.Errorf("get active project: %w", err)
+	}
+	p.IsActive = (activeInt == 1)
+	return p, nil
+}
+
+func (s *Store) SetActiveProject(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE projects SET is_active = 0`); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE projects SET is_active = 1, updated_at = ? WHERE id = ?`, time.Now().UTC(), id)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("project %q not found", id)
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteProject(ctx context.Context, id string) error {
+	res, err := s.db.ExecContext(ctx, `DELETE FROM projects WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete project: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("project %q not found", id)
+	}
+	return nil
 }
