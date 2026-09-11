@@ -65,3 +65,34 @@ Do not put secrets in the topic name if you use the public `ntfy.sh` server.
 Embedded in `internal/line/prompts/{plan,build,review,repair}.md`. Override with `--prompts <dir>`.
 
 Default executor: `claude --print`.
+
+## Next session (backlog)
+
+Do not treat these as in-progress work in this file until someone picks them up. Current `main` already has plan → build → review → wait_ci → ready, repair budget 3, optional ntfy, and loopback `line serve`.
+
+### Product (highest leverage)
+
+1. **Auto-advance.** Run plan→build→review→wait_ci without a human `line next` at every park. Keep `needs_human` as a hard stop.
+2. **`wait_ci` poll loop.** Sleep/retry (e.g. 30s, ~20 min cap) instead of one `gh pr checks` shot per `next`.
+3. **Independent reviewer session.** Build and review must not share one agent conversation; fresh executor invocation is not enough if the CLI reuses context — use a new process per phase (already true) and a distinct review model/flags if configured.
+4. **Isolated worktree.** Agent writes must not use a dirty operator checkout.
+5. **Persist PR/SHA from build.** Today `wait_ci` discovers them via `gh pr view`. Have build/repair return them in the JSON outcome and store `job.PullRequest` / `job.HeadSHA`.
+
+### Usability
+
+6. Install path: `make install-line` onto `~/tools` and document it in the quickstart.
+7. UI: start a job from `line serve` (today list / continue / advance only).
+8. ntfy reply path: action button or poll so `continue` can happen from the phone; today ntfy is outbound only.
+9. Load phase prompts from SkillVault entries (`skillvault get`), not only embed/`--prompts`.
+
+### Out of scope (intentional)
+
+- Auto-merge
+- Creating GitHub repositories
+- Gentle AI SDD inside `line`
+- Binding `line serve` to a public interface
+
+### Small debt
+
+- Makefile still said ntfy/UI were deferred (comment should match this doc).
+- Windows `build-cross` fails on pre-existing `syscall.SysProcAttr.Setsid` in `internal/cli/handlers_telemetry.go` (since PR #72), not caused by `line`.
